@@ -1,6 +1,6 @@
 // use std::io::prelude::*;
 use std::io;
-use std::net::{TcpListener, TcpStream};
+use std::net::{TcpListener, TcpStream, Shutdown};
 
 const LISTEN_IP: &str = "127.0.0.1";
 
@@ -36,5 +36,13 @@ impl Cephalo {
         }
 
         Ok(())
+    }
+}
+
+impl Drop for Cephalo {
+    fn drop(&mut self) {
+        while let Some(stream) = self.pods.pop() {
+            stream.shutdown(Shutdown::Both).unwrap();
+        }
     }
 }
