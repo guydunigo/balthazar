@@ -17,7 +17,7 @@ impl Pode {
         })
     }
 
-    pub fn swin(&mut self) -> io::Result<()> {
+    pub fn swim(&mut self) -> io::Result<()> {
         if let Some(mut socket) = self.cephalo.take() {
             let mut msg = String::new();
             socket.read_to_string(&mut msg)?;

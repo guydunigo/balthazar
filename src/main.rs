@@ -1,38 +1,26 @@
 extern crate balthazar;
 
 use std::env;
-use std::net::ToSocketAddrs;
 
-use balthazar::{Cephalo, Pode, CephalopodeType, CephalopodeError};
+use balthazar::{Cephalo, Pode, CephalopodeError};
+use balthazar::config_parser;
+use balthazar::config_parser::CephalopodeType;
 
 fn main() -> Result<(), CephalopodeError> {
-    let args = env::args();
-    args.next();
+    let config = config_parser::parse_config(env::args())?;
 
-    let command = match args.next() {
-        Some("c") | Some("cephalo") => CephalopodeType::Cephalo,
-        Some("p") | Some("pode") => CephalopodeType::Pode,
-        Some(cmd) => return Err(format!("Unknown command : `{}`", cmd)),
-        None => return Err("No command provided !"),
-    };
-
-    let addr = match args.next() {
-        Some(addr) => addr.to_socket_addrs()?,
-        None => return Err("No addr to connect to or listen on"),
-    };
-
-    match command {
+    match config.command {
         CephalopodeType::Cephalo => {
-            let mut c = Cephalo::new(addr)?;
+            let mut c = Cephalo::new(config.addr)?;
             
             c.swim()
         },
         CephalopodeType::Pode => {
-            let mut p = Pode::new(addr)?;
+            let mut p = Pode::new(config.addr)?;
 
             p.swim()
         },
-    };
+    }?;
 
     Ok(())
 }

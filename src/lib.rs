@@ -1,5 +1,6 @@
 mod cephalo;
 mod pode;
+pub mod config_parser;
 
 use std::io;
 use std::convert::From;
@@ -7,14 +8,10 @@ use std::convert::From;
 pub use cephalo::Cephalo;
 pub use pode::Pode;
 
-pub enum CephalopodeType {
-    Cephalo,
-    Pode,
-}
-
+#[derive(Debug)]
 pub enum CephalopodeError {
     IoError(io::Error),
-    ArgError(&'static str),
+    ArgError(config_parser::ArgError),
 }
 
 impl From<io::Error> for CephalopodeError {
@@ -23,8 +20,8 @@ impl From<io::Error> for CephalopodeError {
     }
 }
 
-impl From<&'static str> for CephalopodeError {
-    fn from(err: &'static str) -> CephalopodeError {
+impl From<config_parser::ArgError> for CephalopodeError {
+    fn from(err: config_parser::ArgError) -> CephalopodeError {
         CephalopodeError::ArgError(err)
     }
 }
