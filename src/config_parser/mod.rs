@@ -5,7 +5,8 @@ use std::env;
 use std::io;
 use std::net::ToSocketAddrs;
 
-pub use self::config::{CephalopodeType, Config};
+pub use self::config::Config;
+use super::CephalopodeType;
 
 #[derive(Debug)]
 pub enum ArgError {
@@ -13,7 +14,7 @@ pub enum ArgError {
     NoAddress,
     UnknownCommand(String),
     InvalidAddress(io::Error),
-    CouldNotResolveAddress(&'static str),
+    CouldNotResolveAddress(&'static str), // TODO: Figure out when this error actually happens
 }
 
 impl From<io::Error> for ArgError {

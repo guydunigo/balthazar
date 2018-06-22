@@ -1,28 +1,32 @@
-mod cephalo;
 pub mod config_parser;
-mod pode;
+pub mod mollusque;
 
+use mollusque::{Cephalo, CephalopodeType, Mollusque, Pode};
 use std::convert::From;
 use std::io;
 
-pub use cephalo::Cephalo;
-pub use pode::Pode;
-
 #[derive(Debug)]
-pub enum CephalopodeError {
+pub enum BalthazarError {
     IoError(io::Error),
     ArgError(config_parser::ArgError),
 }
 
-impl From<io::Error> for CephalopodeError {
-    fn from(err: io::Error) -> CephalopodeError {
-        CephalopodeError::IoError(err)
+impl From<io::Error> for BalthazarError {
+    fn from(err: io::Error) -> BalthazarError {
+        BalthazarError::IoError(err)
     }
 }
 
-impl From<config_parser::ArgError> for CephalopodeError {
-    fn from(err: config_parser::ArgError) -> CephalopodeError {
-        CephalopodeError::ArgError(err)
+impl From<config_parser::ArgError> for BalthazarError {
+    fn from(err: config_parser::ArgError) -> BalthazarError {
+        BalthazarError::ArgError(err)
+    }
+}
+
+pub fn choose_mollusque(config: config_parser::Config) -> Result<Box<Mollusque>, BalthazarError> {
+    match config.command {
+        CephalopodeType::Cephalo => Ok(Box::new(Cephalo::new(config.addr)?)),
+        CephalopodeType::Pode => Ok(Box::new(Pode::new(config.addr)?)),
     }
 }
 

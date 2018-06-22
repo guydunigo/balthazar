@@ -2,25 +2,15 @@ extern crate balthazar;
 
 use std::env;
 
-use balthazar::config_parser;
-use balthazar::config_parser::CephalopodeType;
-use balthazar::{Cephalo, CephalopodeError, Pode};
+use balthazar::BalthazarError;
+use balthazar::{choose_mollusque, config_parser};
 
-fn main() -> Result<(), CephalopodeError> {
+fn main() -> Result<(), BalthazarError> {
     let config = config_parser::parse_config(env::args())?;
 
-    match config.command {
-        CephalopodeType::Cephalo => {
-            let mut c = Cephalo::new(config.addr)?;
+    let mut mollusque = choose_mollusque(config)?;
 
-            c.swim()
-        }
-        CephalopodeType::Pode => {
-            let mut p = Pode::new(config.addr)?;
-
-            p.swim()
-        }
-    }?;
+    mollusque.swim()?;
 
     Ok(())
 }

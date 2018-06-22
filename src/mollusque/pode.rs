@@ -1,3 +1,4 @@
+use super::Mollusque;
 use std::fmt::Display;
 use std::io;
 use std::io::prelude::*;
@@ -16,8 +17,10 @@ impl Pode {
             cephalo: Some(socket),
         })
     }
+}
 
-    pub fn swim(&mut self) -> io::Result<()> {
+impl Mollusque for Pode {
+    fn swim(&mut self) -> io::Result<()> {
         if let Some(mut socket) = self.cephalo.take() {
             let mut msg = String::new();
             socket.read_to_string(&mut msg)?;
