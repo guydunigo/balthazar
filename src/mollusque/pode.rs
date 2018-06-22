@@ -22,10 +22,11 @@ impl Pode {
 impl Mollusque for Pode {
     fn swim(&mut self) -> io::Result<()> {
         if let Some(mut socket) = self.cephalo.take() {
-            let mut msg = String::new();
-            socket.read_to_string(&mut msg)?;
+            let mut msg: [u8; 512] = [0; 512];
+            let n = socket.read(&mut msg)?;
 
-            println!("Received : `{}`", msg);
+            let str_msg = String::from_utf8_lossy(&msg[..n]);
+            println!("Received : `{}`", str_msg);
         }
 
         Ok(())

@@ -3,6 +3,8 @@ use std::fmt::Display;
 use std::io;
 use std::io::prelude::*;
 use std::net::{Shutdown, TcpListener, TcpStream, ToSocketAddrs};
+use std::thread;
+use std::time::Duration;
 
 pub struct Cephalo {
     pods: Vec<TcpStream>,
@@ -43,21 +45,24 @@ impl Mollusque for Cephalo {
                 let peer_addr = stream.peer_addr()?;
                 println!("New peer at address : `{}`", peer_addr);
 
+                thread::sleep(Duration::from_secs(5));
                 let buffer = b"test";
                 stream.write_all(buffer)?;
 
-                let mut msg = String::new();
-                stream.read_to_string(&mut msg)?;
+                // let mut msg = String::new();
+                // stream.read_to_string(&mut msg)?;
 
-                println!("Received : `{}`", msg);
+                // println!("Received : `{}`", msg);
 
                 // let mut buffer: [u8; 512] = [0; 512];
                 // stream.read(&mut buffer);
 
                 Ok(())
             })
-            .take_while(|result| if let Ok(_) = result { true } else { false })
-            .last().unwrap()?;
+            .skip_while(|result| if let Ok(_) = result { true } else { false })
+            .next()
+            .unwrap()?;
+            //.for_each(|res| eprintln!("{:?}", res));
 
         Ok(())
     }
