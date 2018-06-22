@@ -1,11 +1,11 @@
 mod config;
 
+use std::convert::From;
 use std::env;
 use std::io;
-use std::convert::From;
 use std::net::ToSocketAddrs;
 
-pub use self::config::{Config, CephalopodeType};
+pub use self::config::{CephalopodeType, Config};
 
 #[derive(Debug)]
 pub enum ArgError {
@@ -46,8 +46,5 @@ pub fn parse_config(mut args: env::Args) -> Result<Config, ArgError> {
         None => return Err(ArgError::CouldNotResolveAddress("Invalid given address.")),
     };
 
-    Ok(Config {
-        command,
-        addr,
-    })
+    Ok(Config { command, addr })
 }

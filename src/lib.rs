@@ -1,9 +1,9 @@
 mod cephalo;
-mod pode;
 pub mod config_parser;
+mod pode;
 
-use std::io;
 use std::convert::From;
+use std::io;
 
 pub use cephalo::Cephalo;
 pub use pode::Pode;
