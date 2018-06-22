@@ -59,10 +59,10 @@ impl Mollusque for Cephalo {
 
                 Ok(())
             })
-            .skip_while(|result| if let Ok(_) = result { true } else { false })
+            .skip_while(|result| result.is_ok())
             .next()
             .unwrap()?;
-            //.for_each(|res| eprintln!("{:?}", res));
+        //.for_each(|res| eprintln!("{:?}", res));
 
         Ok(())
     }
