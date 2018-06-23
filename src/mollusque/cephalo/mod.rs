@@ -48,6 +48,7 @@ impl Mollusque for Cephalo {
                 thread::sleep(Duration::from_secs(5));
                 let buffer = b"test";
                 stream.write_all(buffer)?;
+                stream.flush()?;
 
                 // let mut msg = String::new();
                 // stream.read_to_string(&mut msg)?;
