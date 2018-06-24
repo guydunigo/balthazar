@@ -39,7 +39,7 @@ impl Pode {
             let str_msg = String::from_utf8_lossy(&msg[..n]);
             println!("Received : `{}`", str_msg);
 
-            socket.write_all(String::from("Bye !").as_bytes());
+            socket.write_all(String::from("Bye !").as_bytes())?;
         }
 
         Ok(())

@@ -4,7 +4,6 @@ use std::net::{Shutdown, TcpStream};
 use std::sync::mpsc;
 use std::sync::Arc;
 use std::thread;
-use std::time::Duration;
 
 const BUF_SIZE: usize = 1024;
 
@@ -76,15 +75,14 @@ pub fn manage(
     let mut n = stream.read(&mut buffer)?;
     while n > 0 {
         println!(
-            "Pode {} : received `{}`.",
+            "Manager {} : received `{}`.",
             id,
             String::from_utf8_lossy(&buffer[..n])
         );
         n = stream.read(&mut buffer)?;
     }
-    // thread::sleep(Duration::from_secs(5));
 
-    println!("Pode {} : Disconnected, notifying orchestrator...", id);
+    // println!("Manager {} : Disconnected, notifying orchestrator...", id);
     orch_tx.send(Message::Disconnected(id))?;
 
     Ok(())
@@ -92,13 +90,13 @@ pub fn manage(
 
 impl Drop for Manager {
     fn drop(&mut self) {
-        println!("Pode {} : Dropping...", self.id);
+        // println!("Manager {} : Dropping...", self.id);
 
         if let Some(handle) = self.handle.take() {
-            println!("Pode {} : Joining the thread...", self.id);
+            // println!("Manager {} : Joining the thread...", self.id);
             handle.join().unwrap().unwrap();
         } else {
-            println!("Pode {} : Closing the stream...", self.id);
+            // println!("Manager {} : Closing the stream...", self.id);
             self.stream
                 .take()
                 .unwrap()
@@ -106,10 +104,11 @@ impl Drop for Manager {
                 .unwrap();
         }
 
-        println!("Pode {} : Deleted", self.id);
+        // println!("Manager {} : Deleted", self.id);
     }
 }
 
 pub enum Message {
     Disconnected(usize),
+    Idle,
 }
