@@ -1,4 +1,5 @@
-mod pode_listener;
+mod listener;
+mod orchestrator;
 
 use std::convert::From;
 use std::fmt::Display;
@@ -9,12 +10,19 @@ use std::thread;
 #[derive(Debug)]
 pub enum Error {
     ThreadPanicked,
-    ListenerError(pode_listener::Error),
+    ListenerError(listener::Error),
+    OrchestratorError(orchestrator::Error),
 }
 
-impl From<pode_listener::Error> for Error {
-    fn from(err: pode_listener::Error) -> Error {
+impl From<listener::Error> for Error {
+    fn from(err: listener::Error) -> Error {
         Error::ListenerError(err)
+    }
+}
+
+impl From<orchestrator::Error> for Error {
+    fn from(err: orchestrator::Error) -> Error {
+        Error::OrchestratorError(err)
     }
 }
 
@@ -31,16 +39,26 @@ impl<A: 'static + ToSocketAddrs + Display + Send> Cephalo<A> {
         }
     }
 
+    // TODO: name threads
     pub fn swim(&mut self) -> Result<(), Error> {
         let (tx, rx) = mpsc::channel();
 
         let listen_addr = self.listen_addr.take().unwrap(); // safe to unwrap, normally...
-                                                            // TODO: name threads
-        let listen_handle = thread::spawn(move || -> Result<(), pode_listener::Error> {
-            pode_listener::listen(listen_addr, tx)
+        let listen_handle = thread::spawn(move || -> Result<(), listener::Error> {
+            listener::listen(listen_addr, tx)
+        });
+
+        let orchestrator_handle = thread::spawn(move || -> Result<(), orchestrator::Error> {
+            orchestrator::orchestrate(rx)
         });
 
         match listen_handle.join() {
+            Err(_) => return Err(Error::ThreadPanicked),
+            Ok(Err(err)) => return Err(Error::from(err)),
+            _ => (),
+        };
+
+        match orchestrator_handle.join() {
             Err(_) => return Err(Error::ThreadPanicked),
             Ok(Err(err)) => return Err(Error::from(err)),
             _ => (),

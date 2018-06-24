@@ -1,21 +1,18 @@
 use std::convert::From;
 use std::fmt::Display;
 use std::io;
-use std::io::prelude::*;
 use std::net::{TcpListener, TcpStream, ToSocketAddrs};
 use std::sync::mpsc::{SendError, Sender};
-use std::thread;
-use std::time::Duration;
 
 #[derive(Debug)]
 pub enum Error {
-    MpscSendError(SendError<TcpStream>),
+    OrchestratorSendError(SendError<TcpStream>),
     IoError(io::Error),
 }
 
 impl From<SendError<TcpStream>> for Error {
     fn from(err: SendError<TcpStream>) -> Error {
-        Error::MpscSendError(err)
+        Error::OrchestratorSendError(err)
     }
 }
 
@@ -47,19 +44,8 @@ pub fn listen<A: ToSocketAddrs + Display>(
     listener
         .incoming()
         .map(|stream| -> Result<(), Error> {
-            // TODO: Look at different errors
-            let mut stream = stream?;
-            let peer_addr = stream.peer_addr()?;
-            println!("New peer at address : `{}`", peer_addr);
-
-            thread::sleep(Duration::from_secs(5));
-            let buffer = b"test";
-            stream.write_all(buffer)?;
-            stream.flush()?;
-
-            tx.send(stream)?;
-
-            Ok(())
+            let stream = stream?;
+            Ok(tx.send(stream)?)
         })
         .skip_while(|result| result.is_ok())
         .next()
