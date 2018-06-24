@@ -4,6 +4,8 @@ use std::io;
 use std::io::prelude::*;
 use std::net::{Shutdown, TcpStream, ToSocketAddrs};
 
+const BUF_SIZE: usize = 1024;
+
 #[derive(Debug)]
 pub enum Error {
     IoError(io::Error),
@@ -31,11 +33,13 @@ impl Pode {
 
     pub fn swim(&mut self) -> Result<(), Error> {
         if let Some(mut socket) = self.cephalo.take() {
-            let mut msg: [u8; 512] = [0; 512];
+            let mut msg = [0; BUF_SIZE];
             let n = socket.read(&mut msg)?;
 
             let str_msg = String::from_utf8_lossy(&msg[..n]);
             println!("Received : `{}`", str_msg);
+
+            socket.write_all(String::from("Bye !").as_bytes());
         }
 
         Ok(())
