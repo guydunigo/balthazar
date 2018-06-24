@@ -51,5 +51,6 @@ pub fn listen<A: ToSocketAddrs + Display>(
         .next()
         .unwrap()?;
     //.for_each(|res| eprintln!("{:?}", res));
+
     Ok(())
 }

@@ -44,7 +44,7 @@ impl<A: 'static + ToSocketAddrs + Display + Send> Cephalo<A> {
         let (tx, rx) = mpsc::channel();
 
         let listen_addr = self.listen_addr.take().unwrap(); // safe to unwrap, normally...
-        let listen_handle = thread::spawn(move || -> Result<(), listener::Error> {
+        /*let listen_handle = */thread::spawn(move || -> Result<(), listener::Error> {
             listener::listen(listen_addr, tx)
         });
 
@@ -52,11 +52,11 @@ impl<A: 'static + ToSocketAddrs + Display + Send> Cephalo<A> {
             orchestrator::orchestrate(rx)
         });
 
-        match listen_handle.join() {
-            Err(_) => return Err(Error::ThreadPanicked),
-            Ok(Err(err)) => return Err(Error::from(err)),
-            _ => (),
-        };
+        // match listen_handle.join() {
+        //     Err(_) => return Err(Error::ThreadPanicked),
+        //     Ok(Err(err)) => return Err(Error::from(err)),
+        //     _ => (),
+        // };
 
         match orchestrator_handle.join() {
             Err(_) => return Err(Error::ThreadPanicked),

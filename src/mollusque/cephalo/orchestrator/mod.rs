@@ -31,23 +31,25 @@ pub fn orchestrate(listener_rx: mpsc::Receiver<TcpStream>) -> Result<(), Error> 
 
     let (man_tx, man_rx) = mpsc::channel();
 
-    let podes_rc_2 = podes_rc.clone();
-    let manager_creator_handle = thread::spawn(move || -> Result<(), Error> {
-        for stream in listener_rx.iter() {
-            let mut podes = podes_rc_2.lock().unwrap();
+    let manager_creator_handle = {
+        let podes_rc_2 = podes_rc.clone();
+        thread::spawn(move || -> Result<(), Error> {
+            for stream in listener_rx.iter() {
+                let mut podes = podes_rc_2.lock().unwrap();
 
-            let id = get_new_id(&mut podes);
+                let id = get_new_id(&mut podes);
 
-            let mut manager = manager::Manager::new(id, stream, man_tx.clone());
-            manager.manage()?;
+                let mut manager = manager::Manager::new(id, stream, man_tx.clone());
+                manager.manage()?;
 
-            podes[id] = Some(manager);
-        }
+                podes[id] = Some(manager);
+            }
 
-        println!("Channel from listener closed. Exiting...");
+            println!("Channel from listener closed. Exiting...");
 
-        Ok(())
-    });
+            Ok(())
+        })
+    };
 
     for msg in man_rx.iter() {
         if let manager::Message::Disconnected(id) = msg {
