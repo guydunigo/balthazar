@@ -1,0 +1,8 @@
+[package]
+name = "balthamar"
+version = "0.1.0"
+authors = ["GONI Guillaume <gdn3@live.fr>"]
+
+[dependencies]
+# wasm-core = "0.2.15"
+# tokio = "0.1.7"

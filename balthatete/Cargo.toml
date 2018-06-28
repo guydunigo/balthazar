@@ -1,0 +1,6 @@
+[package]
+name = "balthatete"
+version = "0.1.0"
+authors = ["GONI Guillaume <gdn3@live.fr>"]
+
+[dependencies]
