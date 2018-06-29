@@ -5,6 +5,8 @@ use std::net::TcpStream;
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 
+use message::Message;
+
 #[derive(Debug)]
 pub enum Error {
     // ListenerRecvError(mpsc::RecvError), // Should only happen when the other end is disconnected
@@ -35,7 +37,7 @@ pub fn orchestrate(listener_rx: mpsc::Receiver<TcpStream>) -> Result<(), Error> 
     new_manager_creator(podes_rc.clone(), listener_rx, man_tx);
 
     for msg in man_rx.iter() {
-        if let manager::Message::Disconnected(id) = msg {
+        if let Message::Disconnected(id) = msg {
             println!("Manager {} announced disconnected : Cleaning...", id);
             podes_rc.lock().unwrap()[id] = None;
         }
@@ -65,7 +67,7 @@ fn get_new_id<T>(vec: &mut Vec<Option<T>>) -> usize {
 fn new_manager_creator(
     podes_rc: Arc<Mutex<Vec<Option<manager::Manager>>>>,
     listener_rx: mpsc::Receiver<TcpStream>,
-    man_tx: mpsc::Sender<manager::Message>,
+    man_tx: mpsc::Sender<Message>,
 ) -> thread::JoinHandle<Result<(), Error>> {
     thread::spawn(move || -> Result<(), Error> {
         for stream in listener_rx.iter() {

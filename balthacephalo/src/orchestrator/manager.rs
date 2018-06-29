@@ -5,12 +5,17 @@ use std::sync::mpsc;
 use std::sync::Arc;
 use std::thread;
 
+use ron::{ser, de};
+use message::Message;
+
 const BUF_SIZE: usize = 1024;
 
 #[derive(Debug)]
 pub enum Error {
     IoError(io::Error),
     OrchestratorTxError(mpsc::SendError<Message>),
+    SerError(ser::Error),
+    DeError(de::Error),
     AlreadyManagedError,
 }
 
@@ -23,6 +28,18 @@ impl From<io::Error> for Error {
 impl From<mpsc::SendError<Message>> for Error {
     fn from(err: mpsc::SendError<Message>) -> Error {
         Error::OrchestratorTxError(err)
+    }
+}
+
+impl From<ser::Error> for Error {
+    fn from(err: ser::Error) -> Error {
+        Error::SerError(err)
+    }
+}
+
+impl From<de::Error> for Error {
+    fn from(err: de::Error) -> Error {
+        Error::DeError(err)
     }
 }
 
@@ -67,8 +84,10 @@ pub fn manage(
     let peer_addr = stream.peer_addr()?;
     println!("New Pode {} at address : `{}`", id, peer_addr);
 
-    let buffer = b"test";
-    stream.write_all(buffer)?;
+    let msg = Message::Hello("salut".to_string());
+    let msg_str = ser::to_string(&msg)?;
+
+    stream.write_all(msg_str.as_bytes())?;
     stream.flush()?;
 
     let mut buffer = [0; BUF_SIZE];
@@ -106,9 +125,4 @@ impl Drop for Manager {
 
         // println!("Manager {} : Deleted", self.id);
     }
-}
-
-pub enum Message {
-    Disconnected(usize),
-    Idle,
 }

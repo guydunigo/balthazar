@@ -1,3 +1,7 @@
+extern crate serde;
+extern crate ron;
+extern crate balthmessage as message;
+
 mod listener;
 mod orchestrator;
 
@@ -35,7 +39,7 @@ impl<A: 'static + ToSocketAddrs + Display + Send> Cephalo<A> {
     pub fn new(listen_addr: A) -> Cephalo<A> {
         Cephalo {
             pods: Vec::new(),
-            listen_addr: Some(listen_addr),
+        listen_addr: Some(listen_addr),
         }
     }
 
