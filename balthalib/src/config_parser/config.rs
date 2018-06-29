@@ -1,4 +1,4 @@
-use mollusque::CephalopodeType;
+use super::CephalopodeType;
 use std::net::SocketAddr;
 
 pub struct Config {

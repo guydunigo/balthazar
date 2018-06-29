@@ -1,8 +1,14 @@
 [workspace]
+name = "balthamar"
+version = "0.1.0"
+authors = ["GONI Guillaume <gdn3@live.fr>"]
 
 members = [
     "balthacli",
-    "balthatete",
-    "balthentacule",
     "balthalib",
+    "balthacephalo",
+    "balthapode",
+    "balthmessage",
 ]
+
+default-members = ["balthacli"]

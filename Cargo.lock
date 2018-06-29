@@ -1,16 +1,27 @@
 [[package]]
+name = "balthacephalo"
+version = "0.1.0"
+
+[[package]]
 name = "balthacli"
 version = "0.1.0"
+dependencies = [
+ "balthalib 0.1.0",
+]
 
 [[package]]
 name = "balthalib"
 version = "0.1.0"
+dependencies = [
+ "balthacephalo 0.1.0",
+ "balthapode 0.1.0",
+]
 
 [[package]]
-name = "balthatete"
+name = "balthapode"
 version = "0.1.0"
 
 [[package]]
-name = "balthentacule"
+name = "balthmessage"
 version = "0.1.0"
 

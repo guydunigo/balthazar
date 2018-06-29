@@ -76,3 +76,11 @@ impl<A: 'static + ToSocketAddrs + Display + Send> Drop for Cephalo<A> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn it_works() {
+        assert_eq!(2 + 2, 4);
+    }
+}
