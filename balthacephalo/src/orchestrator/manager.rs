@@ -86,15 +86,15 @@ pub fn manage(
     let id_msg = Message::Connected(id);
     let msg_str = ser::to_string(&id_msg)?;
     stream.write_all(msg_str.as_bytes())?;
-    // stream.flush()?;
 
-    // let mut buffer = [0; BUF_SIZE];
-    // let mut n = stream.read(&mut buffer)?;
     let reader = MessageReader::new(id, stream.try_clone()?);
     reader
         .map(|msg_res| -> Result<(), Error> {
-            if let Err(err) = msg_res {
-                return Err(Error::from(err));
+            match msg_res {
+                Ok(msg) => {
+                    println!("Received : `{:?}`", msg);
+                }
+                Err(err) => return Err(Error::from(err)),
             }
 
             let msg = Message::Hello("salut".to_string());

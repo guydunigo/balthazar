@@ -8,6 +8,8 @@ pub use ron::{de, ser};
 use std::io::prelude::*;
 use std::iter::FusedIterator;
 
+pub const BUFFER_SIZE: usize = 1024;
+
 #[derive(Serialize, Deserialize, Debug)]
 pub enum Message {
     Hello(String),
@@ -20,6 +22,7 @@ pub enum Message {
 pub struct MessageReader<R: Read> {
     id: usize,
     reader: Option<R>,
+    buffer: Vec<u8>,
 }
 
 impl<R: Read> MessageReader<R> {
@@ -27,6 +30,7 @@ impl<R: Read> MessageReader<R> {
         MessageReader {
             id,
             reader: Some(reader),
+            buffer: Vec::with_capacity(BUFFER_SIZE),
         }
     }
 }
@@ -36,11 +40,21 @@ impl<R: Read> FusedIterator for MessageReader<R> {}
 impl<R: Read> Iterator for MessageReader<R> {
     type Item = de::Result<Message>;
 
-    // TODO: clean this mess...
+    // TODO: clean this mess... (multiple returns ...)
     fn next(&mut self) -> Option<de::Result<Message>> {
         if let Some(mut reader) = self.reader.take() {
             loop {
-                let msg_res: de::Result<Message> = de::from_reader(&mut reader);
+                let mut buffer: [u8; BUFFER_SIZE] = [0; BUFFER_SIZE];
+                let n = match reader.read(&mut buffer) {
+                    Ok(n) => n,
+                    Err(err) => return Some(Err(de::Error::IoError(err.to_string()))),
+                };
+                if n <= 0 {
+                    return Some(Ok(Message::Disconnected(self.id)));
+                }
+                buffer[..n].iter().for_each(|b| self.buffer.push(b.clone()));
+
+                let msg_res: de::Result<Message> = de::from_bytes(&mut self.buffer.as_slice());
                 let res = match msg_res {
                     Ok(msg) => {
                         println!("Manager {} : received `{:?}`.", self.id, msg);
@@ -51,6 +65,7 @@ impl<R: Read> Iterator for MessageReader<R> {
                         println!("Manager {} : invalid message '{}'", self.id, msg);
                         continue;
                     }
+                    // TODO: useful anymore ?
                     Err(de::Error::Parser(de::ParseError::Eof, _)) => {
                         Ok(Message::Disconnected(self.id))
                     }
@@ -64,6 +79,7 @@ impl<R: Read> Iterator for MessageReader<R> {
                     }
                 };
 
+                self.buffer.clear();
                 return Some(res);
             }
         } else {

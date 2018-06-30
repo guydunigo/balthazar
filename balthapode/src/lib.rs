@@ -6,6 +6,8 @@ use std::fmt::Display;
 use std::io;
 use std::io::prelude::*;
 use std::net::{Shutdown, TcpStream, ToSocketAddrs};
+use std::thread::sleep;
+use std::time::Duration;
 
 use message::{de, ser, Message, MessageReader};
 
@@ -60,9 +62,14 @@ impl Pode {
             }?;
             println!("Handshake successful, received id : {}.", id);
 
+            let id_msg = Message::Connected(id);
+            let msg_str = ser::to_string(&id_msg)?;
+            socket.write_all(msg_str.as_bytes())?;
+
             let reader = MessageReader::new(id, socket.try_clone()?);
             reader
                 .map(|msg_res| -> Result<(), Error> {
+                    sleep(Duration::from_secs(1));
                     match msg_res {
                         Ok(msg) => {
                             println!("Received : `{:?}`", msg);
