@@ -4,19 +4,18 @@ extern crate balthmessage as message;
 use std::convert::From;
 use std::fmt::Display;
 use std::io;
-use std::io::prelude::*;
 use std::net::{Shutdown, TcpStream, ToSocketAddrs};
 use std::thread::sleep;
 use std::time::Duration;
 
-use message::{de, ser, Message, MessageReader};
+use message::{Message, MessageReader};
 
 #[derive(Debug)]
 pub enum Error {
     IoError(io::Error),
     FailedHandshake,
-    SerError(ser::Error),
-    DeError(de::Error),
+    ReadError(message::ReadError),
+    WriteError(message::WriteError),
 }
 
 impl From<io::Error> for Error {
@@ -25,15 +24,15 @@ impl From<io::Error> for Error {
     }
 }
 
-impl From<ser::Error> for Error {
-    fn from(err: ser::Error) -> Error {
-        Error::SerError(err)
+impl From<message::ReadError> for Error {
+    fn from(err: message::ReadError) -> Error {
+        Error::ReadError(err)
     }
 }
 
-impl From<de::Error> for Error {
-    fn from(err: de::Error) -> Error {
-        Error::DeError(err)
+impl From<message::WriteError> for Error {
+    fn from(err: message::WriteError) -> Error {
+        Error::WriteError(err)
     }
 }
 
@@ -62,9 +61,7 @@ impl Pode {
             }?;
             println!("Handshake successful, received id : {}.", id);
 
-            let id_msg = Message::Connected(id);
-            let msg_str = ser::to_string(&id_msg)?;
-            socket.write_all(msg_str.as_bytes())?;
+            Message::Connected(id).send(&mut socket)?;
 
             let reader = MessageReader::new(id, socket.try_clone()?);
             reader
@@ -73,8 +70,7 @@ impl Pode {
                     match msg_res {
                         Ok(msg) => {
                             println!("Received : `{:?}`", msg);
-                            let msg_str = ser::to_string(&msg)?;
-                            socket.write_all(msg_str.as_bytes())?;
+                            msg.send(&mut socket)?;
                         }
                         Err(err) => return Err(Error::from(err)),
                     }

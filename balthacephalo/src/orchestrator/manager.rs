@@ -1,5 +1,4 @@
 use std::io;
-use std::io::prelude::*;
 use std::net::{Shutdown, TcpStream};
 use std::sync::mpsc;
 use std::sync::Arc;
@@ -7,15 +6,16 @@ use std::thread;
 
 // TODO: replace TcpStream by Read + Write
 
-use message::{de, ser, Message, MessageReader};
+use message;
+use message::{Message, MessageReader};
 
 #[derive(Debug)]
 pub enum Error {
     IoError(io::Error),
     OrchestratorTxError(mpsc::SendError<Message>),
-    SerError(ser::Error),
-    DeError(de::Error),
     AlreadyManagedError,
+    ReadError(message::ReadError),
+    WriteError(message::WriteError),
 }
 
 impl From<io::Error> for Error {
@@ -30,15 +30,15 @@ impl From<mpsc::SendError<Message>> for Error {
     }
 }
 
-impl From<ser::Error> for Error {
-    fn from(err: ser::Error) -> Error {
-        Error::SerError(err)
+impl From<message::ReadError> for Error {
+    fn from(err: message::ReadError) -> Error {
+        Error::ReadError(err)
     }
 }
 
-impl From<de::Error> for Error {
-    fn from(err: de::Error) -> Error {
-        Error::DeError(err)
+impl From<message::WriteError> for Error {
+    fn from(err: message::WriteError) -> Error {
+        Error::WriteError(err)
     }
 }
 
@@ -83,9 +83,7 @@ pub fn manage(
     let peer_addr = stream.peer_addr()?;
     println!("New Pode {} at address : `{}`", id, peer_addr);
 
-    let id_msg = Message::Connected(id);
-    let msg_str = ser::to_string(&id_msg)?;
-    stream.write_all(msg_str.as_bytes())?;
+    Message::Connected(id).send(&mut stream)?;
 
     let reader = MessageReader::new(id, stream.try_clone()?);
     reader
@@ -97,10 +95,8 @@ pub fn manage(
                 Err(err) => return Err(Error::from(err)),
             }
 
-            let msg = Message::Hello("salut".to_string());
-            let msg_str = ser::to_string(&msg)?;
+            Message::Hello("salut".to_string()).send(&mut stream)?;
 
-            stream.write_all(msg_str.as_bytes())?;
             Ok(())
         })
         .skip_while(|result| result.is_ok())

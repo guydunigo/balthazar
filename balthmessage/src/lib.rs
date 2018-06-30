@@ -5,10 +5,47 @@ extern crate ron;
 extern crate serde;
 
 pub use ron::{de, ser};
+use std::io;
 use std::io::prelude::*;
 use std::iter::FusedIterator;
 
 pub const BUFFER_SIZE: usize = 1024;
+
+#[derive(Debug)]
+pub enum WriteError {
+    IoError(io::Error),
+    SerError(ser::Error),
+}
+
+impl From<io::Error> for WriteError {
+    fn from(err: io::Error) -> WriteError {
+        WriteError::IoError(err)
+    }
+}
+
+impl From<ser::Error> for WriteError {
+    fn from(err: ser::Error) -> WriteError {
+        WriteError::SerError(err)
+    }
+}
+
+#[derive(Debug)]
+pub enum ReadError {
+    IoError(io::Error),
+    DeError(de::Error),
+}
+
+impl From<io::Error> for ReadError {
+    fn from(err: io::Error) -> ReadError {
+        ReadError::IoError(err)
+    }
+}
+
+impl From<de::Error> for ReadError {
+    fn from(err: de::Error) -> ReadError {
+        ReadError::DeError(err)
+    }
+}
 
 #[derive(Serialize, Deserialize, Debug)]
 pub enum Message {
@@ -17,6 +54,14 @@ pub enum Message {
     Disconnect,
     Disconnected(usize),
     Idle(usize),
+}
+
+impl Message {
+    pub fn send<W: Write>(&self, writer: &mut W) -> Result<(), WriteError> {
+        let msg_str = ser::to_string(self)?;
+        writer.write_all(msg_str.as_bytes())?;
+        Ok(())
+    }
 }
 
 pub struct MessageReader<R: Read> {
@@ -38,16 +83,16 @@ impl<R: Read> MessageReader<R> {
 impl<R: Read> FusedIterator for MessageReader<R> {}
 
 impl<R: Read> Iterator for MessageReader<R> {
-    type Item = de::Result<Message>;
+    type Item = Result<Message, ReadError>;
 
     // TODO: clean this mess... (multiple returns ...)
-    fn next(&mut self) -> Option<de::Result<Message>> {
+    fn next(&mut self) -> Option<Result<Message, ReadError>> {
         if let Some(mut reader) = self.reader.take() {
             loop {
                 let mut buffer: [u8; BUFFER_SIZE] = [0; BUFFER_SIZE];
                 let n = match reader.read(&mut buffer) {
                     Ok(n) => n,
-                    Err(err) => return Some(Err(de::Error::IoError(err.to_string()))),
+                    Err(err) => return Some(Err(ReadError::IoError(err))),
                 };
                 if n <= 0 {
                     return Some(Ok(Message::Disconnected(self.id)));
@@ -75,7 +120,7 @@ impl<R: Read> Iterator for MessageReader<R> {
                     }
                     Err(de::Error::IoError(err)) => {
                         println!("Manager {} : IoError `{}`", self.id, err);
-                        Err(de::Error::IoError(err))
+                        Err(ReadError::from(de::Error::IoError(err)))
                     }
                 };
 
