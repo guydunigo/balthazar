@@ -1,13 +1,16 @@
 #[macro_use]
 extern crate serde_derive;
 
+extern crate ron;
 extern crate serde;
+
+pub use ron::{de, ser};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub enum Message {
     Hello(String),
-    Bye(u8),
     Connected(usize),
+    Disconnect,
     Disconnected(usize),
     Idle(usize),
 }

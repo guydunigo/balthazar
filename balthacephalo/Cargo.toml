@@ -4,6 +4,4 @@ version = "0.1.0"
 authors = ["GONI Guillaume <gdn3@live.fr>"]
 
 [dependencies]
-serde = "1.0.68"
-ron = "0.3.0"
 balthmessage = { path = "../balthmessage" }

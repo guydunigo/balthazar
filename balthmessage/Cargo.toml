@@ -6,3 +6,4 @@ authors = ["GONI Guillaume <gdn3@live.fr>"]
 [dependencies]
 serde_derive = "1.0.68"
 serde = "1.0.68"
+ron = "0.3.0"
