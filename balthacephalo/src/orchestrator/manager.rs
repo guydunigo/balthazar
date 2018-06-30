@@ -5,7 +5,9 @@ use std::sync::mpsc;
 use std::sync::Arc;
 use std::thread;
 
-use message::{de, ser, Message};
+// TODO: replace TcpStream by Read + Write
+
+use message::{de, ser, Message, MessageReader};
 
 #[derive(Debug)]
 pub enum Error {
@@ -89,22 +91,18 @@ pub fn manage(
 
     // let mut buffer = [0; BUF_SIZE];
     // let mut n = stream.read(&mut buffer)?;
-    loop {
-        let msg_res: de::Result<Message> = de::from_reader(&mut stream);
-        match msg_res {
-            Ok(msg) => println!("Manager {} : received `{:?}`.", id, msg),
-            Err(de::Error::Message(msg)) => println!("Manager {} : invalid message '{}'", id, msg),
-            Err(de::Error::Parser(de::ParseError::Eof, _)) => {
-                // println!("Manager {} : EOF", id);
-                break;
-            }
-            Err(de::Error::Parser(err, _)) => println!("Manager {} : parse error `{:?}`", id, err),
-            Err(de::Error::IoError(err)) => {
-                println!("Manager {} : IoError `{}`", id, err);
-                break;
-            }
-        };
-    }
+    let reader = MessageReader {
+        reader: Some(stream.try_clone()?),
+        id,
+    };
+    reader
+        .map(|msg_res| -> de::Result<()> {
+            stream.write_all(msg_str.as_bytes())?;
+            Ok(())
+        })
+        .skip_while(|result| result.is_ok())
+        .next()
+        .unwrap()?;
 
     // println!("Manager {} : Disconnected, notifying orchestrator...", id);
     // TODO: Report errors ?
