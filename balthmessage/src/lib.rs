@@ -18,8 +18,17 @@ pub enum Message {
 }
 
 pub struct MessageReader<R: Read> {
-    reader: Option<R>,
     id: usize,
+    reader: Option<R>,
+}
+
+impl<R: Read> MessageReader<R> {
+    pub fn new(id: usize, reader: R) -> MessageReader<R> {
+        MessageReader {
+            id,
+            reader: Some(reader),
+        }
+    }
 }
 
 impl<R: Read> FusedIterator for MessageReader<R> {}
