@@ -1,19 +1,37 @@
+extern crate balthmessage as message;
+//TODO: +everywhere stream or socket or ...
+
 use std::convert::From;
 use std::fmt::Display;
 use std::io;
 use std::io::prelude::*;
 use std::net::{Shutdown, TcpStream, ToSocketAddrs};
 
-const BUF_SIZE: usize = 1024;
+use message::{de, ser, Message, MessageReader};
 
 #[derive(Debug)]
 pub enum Error {
     IoError(io::Error),
+    FailedHandshake,
+    SerError(ser::Error),
+    DeError(de::Error),
 }
 
 impl From<io::Error> for Error {
     fn from(err: io::Error) -> Error {
         Error::IoError(err)
+    }
+}
+
+impl From<ser::Error> for Error {
+    fn from(err: ser::Error) -> Error {
+        Error::SerError(err)
+    }
+}
+
+impl From<de::Error> for Error {
+    fn from(err: de::Error) -> Error {
+        Error::DeError(err)
     }
 }
 
@@ -33,18 +51,32 @@ impl Pode {
 
     pub fn swim(&mut self) -> Result<(), Error> {
         if let Some(mut socket) = self.cephalo.take() {
-            let mut msg = [0; BUF_SIZE];
-            let n = socket.read(&mut msg)?;
+            let id = {
+                let mut init_reader = MessageReader::new(0, socket.try_clone()?);
+                match init_reader.next() {
+                    Some(Ok(Message::Connected(id))) => Ok(id),
+                    _ => Err(Error::FailedHandshake),
+                }
+            }?;
+            println!("Handshake successful, received id : {}.", id);
 
-            let str_msg = String::from_utf8_lossy(&msg[..n]);
-            println!("Received : `{}`", str_msg);
+            let reader = MessageReader::new(id, socket.try_clone()?);
+            reader
+                .map(|msg_res| -> Result<(), Error> {
+                    match msg_res {
+                        Ok(msg) => {
+                            println!("Received : `{:?}`", msg);
+                            let msg_str = ser::to_string(&msg)?;
+                            socket.write_all(msg_str.as_bytes())?;
+                        }
+                        Err(err) => return Err(Error::from(err)),
+                    }
 
-            let answer = format!(
-                "local: {} - server: {}",
-                socket.local_addr().unwrap(),
-                socket.peer_addr().unwrap()
-            );
-            socket.write_all(answer.as_bytes())?;
+                    Ok(())
+                })
+                .skip_while(|result| result.is_ok())
+                .next()
+                .unwrap()?;
         }
 
         Ok(())

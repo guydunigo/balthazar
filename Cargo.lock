@@ -23,6 +23,9 @@ dependencies = [
 [[package]]
 name = "balthapode"
 version = "0.1.0"
+dependencies = [
+ "balthmessage 0.1.0",
+]
 
 [[package]]
 name = "balthmessage"
