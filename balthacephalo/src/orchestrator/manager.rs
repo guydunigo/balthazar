@@ -5,10 +5,7 @@ use std::sync::mpsc;
 use std::sync::Arc;
 use std::thread;
 
-use ron::{ser, de};
-use message::Message;
-
-const BUF_SIZE: usize = 1024;
+use message::{de, ser, Message};
 
 #[derive(Debug)]
 pub enum Error {
@@ -88,20 +85,29 @@ pub fn manage(
     let msg_str = ser::to_string(&msg)?;
 
     stream.write_all(msg_str.as_bytes())?;
-    stream.flush()?;
+    // stream.flush()?;
 
-    let mut buffer = [0; BUF_SIZE];
-    let mut n = stream.read(&mut buffer)?;
-    while n > 0 {
-        println!(
-            "Manager {} : received `{}`.",
-            id,
-            String::from_utf8_lossy(&buffer[..n])
-        );
-        n = stream.read(&mut buffer)?;
+    // let mut buffer = [0; BUF_SIZE];
+    // let mut n = stream.read(&mut buffer)?;
+    loop {
+        let msg_res: de::Result<Message> = de::from_reader(&mut stream);
+        match msg_res {
+            Ok(msg) => println!("Manager {} : received `{:?}`.", id, msg),
+            Err(de::Error::Message(msg)) => println!("Manager {} : invalid message '{}'", id, msg),
+            Err(de::Error::Parser(de::ParseError::Eof, _)) => {
+                // println!("Manager {} : EOF", id);
+                break;
+            }
+            Err(de::Error::Parser(err, _)) => println!("Manager {} : parse error `{:?}`", id, err),
+            Err(de::Error::IoError(err)) => {
+                println!("Manager {} : IoError `{}`", id, err);
+                break;
+            }
+        };
     }
 
     // println!("Manager {} : Disconnected, notifying orchestrator...", id);
+    // TODO: Report errors ?
     orch_tx.send(Message::Disconnected(id))?;
 
     Ok(())
