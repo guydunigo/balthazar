@@ -92,9 +92,10 @@ impl<R: Read> Iterator for MessageReader<R> {
                 let mut buffer: [u8; BUFFER_SIZE] = [0; BUFFER_SIZE];
                 let n = match reader.read(&mut buffer) {
                     Ok(n) => n,
-                    Err(err) => return Some(Err(ReadError::IoError(err))),
+                    Err(err) => return Some(Err(ReadError::from(err))),
                 };
                 if n <= 0 {
+                    // TODO: Or directly return none...
                     return Some(Ok(Message::Disconnected(self.id)));
                 }
                 buffer[..n].iter().for_each(|b| self.buffer.push(b.clone()));
@@ -102,12 +103,12 @@ impl<R: Read> Iterator for MessageReader<R> {
                 let msg_res: de::Result<Message> = de::from_bytes(&mut self.buffer.as_slice());
                 let res = match msg_res {
                     Ok(msg) => {
-                        println!("Manager {} : received `{:?}`.", self.id, msg);
+                        println!("{} : received `{:?}`.", self.id, msg);
                         self.reader = Some(reader);
                         Ok(msg)
                     }
                     Err(de::Error::Message(msg)) => {
-                        println!("Manager {} : invalid message '{}'", self.id, msg);
+                        println!("{} : invalid message '{}'", self.id, msg);
                         continue;
                     }
                     // TODO: useful anymore ?
@@ -115,11 +116,11 @@ impl<R: Read> Iterator for MessageReader<R> {
                         Ok(Message::Disconnected(self.id))
                     }
                     Err(de::Error::Parser(err, _)) => {
-                        println!("Manager {} : parse error `{:?}`", self.id, err);
+                        println!("{} : parse error `{:?}`", self.id, err);
                         continue;
                     }
                     Err(de::Error::IoError(err)) => {
-                        println!("Manager {} : IoError `{}`", self.id, err);
+                        println!("{} : IoError `{}`", self.id, err);
                         Err(ReadError::from(de::Error::IoError(err)))
                     }
                 };

@@ -4,7 +4,7 @@ extern crate balthmessage as message;
 use std::convert::From;
 use std::fmt::Display;
 use std::io;
-use std::net::{Shutdown, TcpStream, ToSocketAddrs};
+use std::net::{TcpStream, ToSocketAddrs};
 use std::thread::sleep;
 use std::time::Duration;
 
@@ -16,6 +16,7 @@ pub enum Error {
     FailedHandshake,
     ReadError(message::ReadError),
     WriteError(message::WriteError),
+    AlreadyUsed,
 }
 
 impl From<io::Error> for Error {
@@ -37,6 +38,8 @@ impl From<message::WriteError> for Error {
 }
 
 pub struct Pode {
+    //TODO: as option
+    id: usize,
     cephalo: Option<TcpStream>,
 }
 
@@ -46,52 +49,71 @@ impl Pode {
         println!("Connected to : `{}`", addr);
 
         Ok(Pode {
+            id: 0,
             cephalo: Some(socket),
         })
     }
 
     pub fn swim(&mut self) -> Result<(), Error> {
         if let Some(mut socket) = self.cephalo.take() {
-            let id = {
-                let mut init_reader = MessageReader::new(0, socket.try_clone()?);
+            self.id = {
+                let mut init_reader = MessageReader::new(self.id, socket.try_clone()?);
                 match init_reader.next() {
                     Some(Ok(Message::Connected(id))) => Ok(id),
                     _ => Err(Error::FailedHandshake),
                 }
             }?;
-            println!("Handshake successful, received id : {}.", id);
+            println!("Handshake successful, received id : {}.", self.id);
 
-            Message::Connected(id).send(&mut socket)?;
+            Message::Connected(self.id).send(&mut socket)?;
 
-            let reader = MessageReader::new(id, socket.try_clone()?);
-            reader
-                .map(|msg_res| -> Result<(), Error> {
-                    sleep(Duration::from_secs(1));
+            let reader = MessageReader::new(self.id, socket.try_clone()?);
+            let result = reader
+                .map(|msg_res| -> Result<Message, Error> {
                     match msg_res {
-                        Ok(msg) => {
-                            println!("Received : `{:?}`", msg);
-                            msg.send(&mut socket)?;
-                        }
-                        Err(err) => return Err(Error::from(err)),
+                        Ok(res) => Ok(res),
+                        Err(err) => Err(Error::from(err)),
+                    }
+                })
+                .take_while(|result| match result {
+                    Ok(Message::Disconnect) => {
+                        println!("{} : Disconnection announced.", self.id);
+                        false
+                    }
+                    Ok(Message::Disconnected(_)) => {
+                        println!("{} : Disconnected socket.", self.id);
+                        false
+                    }
+                    _ => true,
+                })
+                .map(|msg_res| -> Result<Message, Error> {
+                    sleep(Duration::from_secs(1));
+
+                    if let Ok(msg) = &msg_res {
+                        msg.send(&mut socket)?;
                     }
 
-                    Ok(())
+                    msg_res
                 })
                 .skip_while(|result| result.is_ok())
-                .next()
-                .unwrap()?;
+                .next();
+
+            self.cephalo = Some(socket);
+
+            return match result {
+                Some(Err(err)) => Err(err),
+                _ => Ok(()),
+            };
         }
 
-        Ok(())
+        Err(Error::AlreadyUsed)
     }
 }
 
 impl Drop for Pode {
     fn drop(&mut self) {
-        println!("Closing socket...");
-        // TODO: Send stop signal before closing
-        if let Some(socket) = self.cephalo.take() {
-            socket.shutdown(Shutdown::Both).unwrap();
+        if let Some(mut socket) = self.cephalo.take() {
+            Message::Disconnect.send(&mut socket).unwrap_or_default();
         }
     }
 }

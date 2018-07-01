@@ -1,5 +1,5 @@
 use std::io;
-use std::net::{Shutdown, TcpStream};
+use std::net::TcpStream;
 use std::sync::mpsc;
 use std::sync::Arc;
 use std::thread;
@@ -86,46 +86,62 @@ pub fn manage(
     Message::Connected(id).send(&mut stream)?;
 
     let reader = MessageReader::new(id, stream.try_clone()?);
-    reader
-        .map(|msg_res| -> Result<(), Error> {
+    let result = reader
+        .map(|msg_res| -> Result<Message, Error> {
             match msg_res {
-                Ok(msg) => {
-                    println!("Received : `{:?}`", msg);
-                }
-                Err(err) => return Err(Error::from(err)),
+                Ok(res) => Ok(res),
+                Err(err) => Err(Error::from(err)),
+            }
+        })
+        .take_while(|result| match result {
+            Ok(Message::Disconnect) => {
+                println!("{} : Disconnection announced.", id);
+                false
+            }
+            Ok(Message::Disconnected(_)) => {
+                println!("{} : Disconnected socket.", id);
+                false
+            }
+            _ => true,
+        })
+        .map(|msg_res| -> Result<Message, Error> {
+            if let Ok(_) = &msg_res {
+                Message::Hello("salut".to_string()).send(&mut stream)?;
             }
 
-            Message::Hello("salut".to_string()).send(&mut stream)?;
-
-            Ok(())
+            msg_res
         })
         .skip_while(|result| result.is_ok())
-        .next()
-        .unwrap()?;
+        .next();
 
     // println!("Manager {} : Disconnected, notifying orchestrator...", id);
     // TODO: Report errors ?
+    Message::Disconnect.send(&mut stream).unwrap_or_default();
     orch_tx.send(Message::Disconnected(id))?;
 
-    Ok(())
+    match result {
+        Some(Err(err)) => Err(err),
+        _ => Ok(()),
+    }
 }
 
 impl Drop for Manager {
     fn drop(&mut self) {
-        // println!("Manager {} : Dropping...", self.id);
-
         if let Some(handle) = self.handle.take() {
-            // println!("Manager {} : Joining the thread...", self.id);
-            handle.join().unwrap().unwrap();
-        } else {
-            // println!("Manager {} : Closing the stream...", self.id);
-            self.stream
-                .take()
-                .unwrap()
-                .shutdown(Shutdown::Both)
-                .unwrap();
+            let res = handle.join();
+            match res {
+                Err(err) => println!(
+                    "{} : Couldn't join the thread (it might have panicked) : {:?}",
+                    self.id, err
+                ),
+                Ok(Err(err)) => println!(
+                    "{} : The manager returned the following errors : {:?}",
+                    self.id, err
+                ),
+                Ok(Ok(_)) => (), // println!("{} : The manager closed properly.", self.id),
+            }
+        } else if let Some(mut stream) = self.stream.take() {
+            Message::Disconnect.send(&mut stream).unwrap_or_default();
         }
-
-        // println!("Manager {} : Deleted", self.id);
     }
 }
