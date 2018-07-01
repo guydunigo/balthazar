@@ -12,11 +12,10 @@ use message::{Message, MessageReader};
 
 #[derive(Debug)]
 pub enum Error {
-    IoError(io::Error),
-    FailedHandshake,
-    ReadError(message::ReadError),
-    WriteError(message::WriteError),
     AlreadyUsed,
+    FailedHandshake,
+    IoError(io::Error),
+    MessageError(message::Error),
 }
 
 impl From<io::Error> for Error {
@@ -25,15 +24,9 @@ impl From<io::Error> for Error {
     }
 }
 
-impl From<message::ReadError> for Error {
-    fn from(err: message::ReadError) -> Error {
-        Error::ReadError(err)
-    }
-}
-
-impl From<message::WriteError> for Error {
-    fn from(err: message::WriteError) -> Error {
-        Error::WriteError(err)
+impl From<message::Error> for Error {
+    fn from(err: message::Error) -> Error {
+        Error::MessageError(err)
     }
 }
 
@@ -67,46 +60,24 @@ impl Pode {
 
             Message::Connected(self.id).send(&mut socket)?;
 
-            let reader = MessageReader::new(self.id, socket.try_clone()?);
-            let result = reader
-                .map(|msg_res| -> Result<Message, Error> {
-                    match msg_res {
-                        Ok(res) => Ok(res),
-                        Err(err) => Err(Error::from(err)),
-                    }
-                })
-                .take_while(|result| match result {
-                    Ok(Message::Disconnect) => {
-                        println!("{} : Disconnection announced.", self.id);
-                        false
-                    }
-                    Ok(Message::Disconnected(_)) => {
-                        println!("{} : Disconnected socket.", self.id);
-                        false
-                    }
-                    _ => true,
-                })
-                .map(|msg_res| -> Result<Message, Error> {
+            let mut reader = MessageReader::new(self.id, socket.try_clone()?);
+            let result = {
+                let mut socket = socket.try_clone()?;
+                reader.for_each_until_error(|msg| {
                     sleep(Duration::from_secs(1));
-
-                    if let Ok(msg) = &msg_res {
-                        msg.send(&mut socket)?;
-                    }
-
-                    msg_res
+                    msg.send(&mut socket)
                 })
-                .skip_while(|result| result.is_ok())
-                .next();
+            };
 
             self.cephalo = Some(socket);
 
-            return match result {
-                Some(Err(err)) => Err(err),
-                _ => Ok(()),
-            };
+            match result {
+                Err(err) => Err(Error::from(err)),
+                Ok(_) => Ok(()),
+            }
+        } else {
+            Err(Error::AlreadyUsed)
         }
-
-        Err(Error::AlreadyUsed)
     }
 }
 

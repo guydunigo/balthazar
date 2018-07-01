@@ -14,8 +14,7 @@ pub enum Error {
     IoError(io::Error),
     OrchestratorTxError(mpsc::SendError<Message>),
     AlreadyManagedError,
-    ReadError(message::ReadError),
-    WriteError(message::WriteError),
+    MessageError(message::Error),
 }
 
 impl From<io::Error> for Error {
@@ -30,15 +29,9 @@ impl From<mpsc::SendError<Message>> for Error {
     }
 }
 
-impl From<message::ReadError> for Error {
-    fn from(err: message::ReadError) -> Error {
-        Error::ReadError(err)
-    }
-}
-
-impl From<message::WriteError> for Error {
-    fn from(err: message::WriteError) -> Error {
-        Error::WriteError(err)
+impl From<message::Error> for Error {
+    fn from(err: message::Error) -> Error {
+        Error::MessageError(err)
     }
 }
 
@@ -85,34 +78,11 @@ pub fn manage(
 
     Message::Connected(id).send(&mut stream)?;
 
-    let reader = MessageReader::new(id, stream.try_clone()?);
-    let result = reader
-        .map(|msg_res| -> Result<Message, Error> {
-            match msg_res {
-                Ok(res) => Ok(res),
-                Err(err) => Err(Error::from(err)),
-            }
-        })
-        .take_while(|result| match result {
-            Ok(Message::Disconnect) => {
-                println!("{} : Disconnection announced.", id);
-                false
-            }
-            Ok(Message::Disconnected(_)) => {
-                println!("{} : Disconnected socket.", id);
-                false
-            }
-            _ => true,
-        })
-        .map(|msg_res| -> Result<Message, Error> {
-            if let Ok(_) = &msg_res {
-                Message::Hello("salut".to_string()).send(&mut stream)?;
-            }
-
-            msg_res
-        })
-        .skip_while(|result| result.is_ok())
-        .next();
+    let mut reader = MessageReader::new(id, stream.try_clone()?);
+    let result = {
+        let mut stream = stream.try_clone()?;
+        reader.for_each_until_error(|_| Message::Hello("Hey".to_string()).send(&mut stream))
+    };
 
     // println!("Manager {} : Disconnected, notifying orchestrator...", id);
     // TODO: Report errors ?
@@ -120,8 +90,8 @@ pub fn manage(
     orch_tx.send(Message::Disconnected(id))?;
 
     match result {
-        Some(Err(err)) => Err(err),
-        _ => Ok(()),
+        Err(err) => Err(Error::from(err)),
+        Ok(_) => Ok(()),
     }
 }
 
