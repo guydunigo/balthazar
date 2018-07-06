@@ -7,9 +7,11 @@ use std::thread;
 
 use message::Message;
 
+// ------------------------------------------------------------------
+// Errors
+
 #[derive(Debug)]
 pub enum Error {
-    // ListenerRecvError(mpsc::RecvError), // Should only happen when the other end is disconnected
     ManagerError(manager::Error),
     IoError(io::Error),
     ThreadPanicked,
@@ -27,28 +29,24 @@ impl From<io::Error> for Error {
     }
 }
 
+// ------------------------------------------------------------------
+
 pub fn orchestrate(listener_rx: mpsc::Receiver<TcpStream>) -> Result<(), Error> {
     let podes: Vec<Option<manager::Manager>> = Vec::new();
     let podes_rc = Arc::new(Mutex::new(podes));
 
     let (man_tx, man_rx) = mpsc::channel();
 
-    /*let manager_creator_handle = */
-    new_manager_creator(podes_rc.clone(), listener_rx, man_tx);
+    let manager_creator_handle = new_manager_creator(podes_rc.clone(), listener_rx, man_tx);
 
-    for msg in man_rx.iter() {
-        if let Message::Disconnected(id) = msg {
-            println!("Manager {} announced disconnected : Cleaning...", id);
-            podes_rc.lock().unwrap()[id] = None;
-        }
-    }
+    new_manager_cleaner(podes_rc.clone(), man_rx);
 
     // TODO: Do I need to join the thread ? (possible problems with the mutex (use of a Weak ?) ?)
-    // match manager_creator_handle.join() {
-    //     Err(_) => return Err(Error::ThreadPanicked),
-    //     Ok(Err(err)) => return Err(Error::from(err)),
-    //     _ => (),
-    // };
+    match manager_creator_handle.join() {
+        Err(_) => return Err(Error::ThreadPanicked),
+        Ok(Err(err)) => return Err(Error::from(err)),
+        _ => (),
+    };
 
     Ok(())
 }
@@ -68,20 +66,35 @@ fn new_manager_creator(
     podes_rc: Arc<Mutex<Vec<Option<manager::Manager>>>>,
     listener_rx: mpsc::Receiver<TcpStream>,
     man_tx: mpsc::Sender<Message>,
-) -> thread::JoinHandle<Result<(), Error>> {
+    ) -> thread::JoinHandle<Result<(), Error>> {
     thread::spawn(move || -> Result<(), Error> {
         for stream in listener_rx.iter() {
             let mut podes = podes_rc.lock().unwrap();
 
             let id = get_new_id(&mut podes);
 
-            let mut manager = manager::Manager::new(id, stream, man_tx.clone());
-            manager.manage()?;
+            let manager = manager::Manager::new(id, stream, man_tx.clone());
 
             podes[id] = Some(manager);
         }
 
         println!("Channel from listener closed. Exiting...");
+
+        Ok(())
+    })
+}
+
+fn new_manager_cleaner(
+    podes_rc: Arc<Mutex<Vec<Option<manager::Manager>>>>,
+    man_rx: mpsc::Receiver<Message>,
+    ) -> thread::JoinHandle<Result<(), Error>> {
+    thread::spawn(move || -> Result<(), Error> {
+        for msg in man_rx.iter() {
+            if let Message::Disconnected(id) = msg {
+                println!("Manager {} announced disconnected : Cleaning...", id);
+                podes_rc.lock().unwrap()[id] = None;
+            }
+        }
 
         Ok(())
     })

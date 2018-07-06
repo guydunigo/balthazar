@@ -9,11 +9,13 @@ use std::thread;
 use message;
 use message::{Message, MessageReader};
 
+// ------------------------------------------------------------------
+// Errors
+
 #[derive(Debug)]
 pub enum Error {
     IoError(io::Error),
     OrchestratorTxError(mpsc::SendError<Message>),
-    AlreadyManagedError,
     MessageError(message::Error),
 }
 
@@ -35,36 +37,23 @@ impl From<message::Error> for Error {
     }
 }
 
+// ------------------------------------------------------------------
+
 pub struct Manager {
     id: usize,
-    stream: Option<TcpStream>,
-    orch_tx: Option<mpsc::Sender<Message>>,
     handle: Option<thread::JoinHandle<Result<(), Error>>>,
     _job: Option<Arc<()>>,
 }
 
 impl Manager {
     pub fn new(id: usize, stream: TcpStream, orch_tx: mpsc::Sender<Message>) -> Manager {
+        let handle = Some(thread::spawn(move || manage(id, stream, orch_tx)));
+
         Manager {
             id,
-            stream: Some(stream),
-            orch_tx: Some(orch_tx),
-            handle: None,
+            handle,
             _job: None,
         }
-    }
-
-    pub fn manage(&mut self) -> Result<(), Error> {
-        if let (None, Some(stream), Some(orch_tx)) =
-            (&self.handle, self.stream.take(), self.orch_tx.take())
-        {
-            let id = self.id;
-            self.handle = Some(thread::spawn(move || manage(id, stream, orch_tx)));
-        } else {
-            return Err(Error::AlreadyManagedError);
-        }
-
-        Ok(())
     }
 }
 
@@ -110,8 +99,14 @@ impl Drop for Manager {
                 ),
                 Ok(Ok(_)) => (), // println!("{} : The manager closed properly.", self.id),
             }
-        } else if let Some(mut stream) = self.stream.take() {
-            Message::Disconnect.send(&mut stream).unwrap_or_default();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn it_works() {
+        assert_eq!(2 + 2, 4);
     }
 }
