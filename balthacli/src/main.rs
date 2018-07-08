@@ -10,10 +10,7 @@ fn main() -> Result<(), balthalib::Error> {
 
     match config.command {
         CephalopodeType::Cephalo => cephalo::swim(config.addr)?,
-        CephalopodeType::Pode => {
-            let mut pode = pode::Pode::new(config.addr)?;
-            pode.swim()?;
-        }
+        CephalopodeType::Pode => pode::swim(config.addr)?,
     };
 
     Ok(())

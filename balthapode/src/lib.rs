@@ -10,9 +10,11 @@ use std::time::Duration;
 
 use message::{Message, MessageReader};
 
+// ------------------------------------------------------------------
+// Errors
+
 #[derive(Debug)]
 pub enum Error {
-    AlreadyUsed,
     FailedHandshake,
     IoError(io::Error),
     MessageError(message::Error),
@@ -30,62 +32,36 @@ impl From<message::Error> for Error {
     }
 }
 
-pub struct Pode {
+// ------------------------------------------------------------------
+
+pub fn swim<A: ToSocketAddrs + Display>(addr: A) -> Result<(), Error> {
+    let mut socket = TcpStream::connect(&addr)?;
+    println!("Connected to : `{}`", addr);
+
     //TODO: as option
-    id: usize,
-    cephalo: Option<TcpStream>,
-}
+    let id = {
+        let mut init_reader = MessageReader::new(0, socket.try_clone()?);
+        match init_reader.next() {
+            Some(Ok(Message::Connected(id))) => Ok(id),
+            _ => Err(Error::FailedHandshake),
+        }
+    }?;
+    println!("Handshake successful, received id : {}.", id);
 
-impl Pode {
-    pub fn new<A: ToSocketAddrs + Display>(addr: A) -> Result<Pode, Error> {
-        let socket = TcpStream::connect(&addr)?;
-        println!("Connected to : `{}`", addr);
+    Message::Connected(id).send(&mut socket)?;
 
-        Ok(Pode {
-            id: 0,
-            cephalo: Some(socket),
+    let mut reader = MessageReader::new(id, socket.try_clone()?);
+    let result = {
+        let mut socket = socket.try_clone()?;
+        reader.for_each_until_error(|msg| {
+            sleep(Duration::from_secs(1));
+            msg.send(&mut socket)
         })
-    }
+    };
 
-    pub fn swim(&mut self) -> Result<(), Error> {
-        if let Some(mut socket) = self.cephalo.take() {
-            self.id = {
-                let mut init_reader = MessageReader::new(self.id, socket.try_clone()?);
-                match init_reader.next() {
-                    Some(Ok(Message::Connected(id))) => Ok(id),
-                    _ => Err(Error::FailedHandshake),
-                }
-            }?;
-            println!("Handshake successful, received id : {}.", self.id);
-
-            Message::Connected(self.id).send(&mut socket)?;
-
-            let mut reader = MessageReader::new(self.id, socket.try_clone()?);
-            let result = {
-                let mut socket = socket.try_clone()?;
-                reader.for_each_until_error(|msg| {
-                    sleep(Duration::from_secs(1));
-                    msg.send(&mut socket)
-                })
-            };
-
-            self.cephalo = Some(socket);
-
-            match result {
-                Err(err) => Err(Error::from(err)),
-                Ok(_) => Ok(()),
-            }
-        } else {
-            Err(Error::AlreadyUsed)
-        }
-    }
-}
-
-impl Drop for Pode {
-    fn drop(&mut self) {
-        if let Some(mut socket) = self.cephalo.take() {
-            Message::Disconnect.send(&mut socket).unwrap_or_default();
-        }
+    match result {
+        Err(err) => Err(Error::from(err)),
+        Ok(_) => Ok(()),
     }
 }
 
