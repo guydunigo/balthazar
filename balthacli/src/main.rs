@@ -9,10 +9,7 @@ fn main() -> Result<(), balthalib::Error> {
     let config = config_parser::parse_config(env::args())?;
 
     match config.command {
-        CephalopodeType::Cephalo => {
-            let mut cephalo = cephalo::Cephalo::new(config.addr);
-            cephalo.swim()?;
-        }
+        CephalopodeType::Cephalo => cephalo::swim(config.addr)?,
         CephalopodeType::Pode => {
             let mut pode = pode::Pode::new(config.addr)?;
             pode.swim()?;

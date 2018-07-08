@@ -66,7 +66,7 @@ fn new_manager_creator(
     podes_rc: Arc<Mutex<Vec<Option<manager::Manager>>>>,
     listener_rx: mpsc::Receiver<TcpStream>,
     man_tx: mpsc::Sender<Message>,
-    ) -> thread::JoinHandle<Result<(), Error>> {
+) -> thread::JoinHandle<Result<(), Error>> {
     thread::spawn(move || -> Result<(), Error> {
         for stream in listener_rx.iter() {
             let mut podes = podes_rc.lock().unwrap();
@@ -87,7 +87,7 @@ fn new_manager_creator(
 fn new_manager_cleaner(
     podes_rc: Arc<Mutex<Vec<Option<manager::Manager>>>>,
     man_rx: mpsc::Receiver<Message>,
-    ) -> thread::JoinHandle<Result<(), Error>> {
+) -> thread::JoinHandle<Result<(), Error>> {
     thread::spawn(move || -> Result<(), Error> {
         for msg in man_rx.iter() {
             if let Message::Disconnected(id) = msg {

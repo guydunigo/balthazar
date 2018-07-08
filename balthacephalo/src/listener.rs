@@ -4,6 +4,9 @@ use std::io;
 use std::net::{TcpListener, TcpStream, ToSocketAddrs};
 use std::sync::mpsc::{SendError, Sender};
 
+// ------------------------------------------------------------------
+// Errors
+
 #[derive(Debug)]
 pub enum Error {
     OrchestratorSendError(SendError<TcpStream>),
@@ -21,6 +24,8 @@ impl From<io::Error> for Error {
         Error::IoError(err)
     }
 }
+
+// ------------------------------------------------------------------
 
 // TODO: channel to communicate orders like shutdown ?
 pub fn listen<A: ToSocketAddrs + Display>(
