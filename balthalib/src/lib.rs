@@ -5,6 +5,9 @@ pub mod config_parser;
 
 use std::convert::From;
 
+// ------------------------------------------------------------------
+// Errors
+
 #[derive(Debug)]
 pub enum Error {
     CephaloError(cephalo::Error),
@@ -29,6 +32,8 @@ impl From<config_parser::ArgError> for Error {
         Error::ArgError(err)
     }
 }
+
+// ------------------------------------------------------------------
 
 // pub trait Mollusque {
 //     // Can't run with tentacles...

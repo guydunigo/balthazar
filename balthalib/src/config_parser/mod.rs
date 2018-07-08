@@ -8,6 +8,9 @@ use std::net::ToSocketAddrs;
 pub use self::config::Config;
 use super::CephalopodeType;
 
+// ------------------------------------------------------------------
+// Errors
+
 #[derive(Debug)]
 pub enum ArgError {
     NoCommand,
@@ -22,6 +25,8 @@ impl From<io::Error> for ArgError {
         ArgError::InvalidAddress(err)
     }
 }
+
+// ------------------------------------------------------------------
 
 pub fn parse_config(mut args: env::Args) -> Result<Config, ArgError> {
     args.next();
