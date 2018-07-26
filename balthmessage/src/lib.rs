@@ -11,6 +11,9 @@ use std::iter::FusedIterator;
 
 pub const BUFFER_SIZE: usize = 1024;
 
+// ------------------------------------------------------------------
+// Errors
+
 #[derive(Debug)]
 pub enum Error {
     IoError(io::Error),
@@ -36,6 +39,8 @@ impl From<de::Error> for Error {
     }
 }
 
+// ------------------------------------------------------------------
+
 #[derive(Serialize, Deserialize, Debug)]
 pub enum Message {
     Hello(String),
@@ -44,6 +49,8 @@ pub enum Message {
     Disconnect,
     Disconnected(usize),
     Idle(usize),
+    Job(Vec<u8>),
+    NoJob,
 }
 
 impl Message {

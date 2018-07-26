@@ -2,6 +2,7 @@ use std::io;
 use std::net::TcpStream;
 use std::sync::mpsc;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::thread;
 
 // TODO: replace TcpStream by Read + Write
@@ -46,8 +47,13 @@ pub struct Manager {
 }
 
 impl Manager {
-    pub fn new(id: usize, stream: TcpStream, orch_tx: mpsc::Sender<Message>) -> Manager {
-        let handle = Some(thread::spawn(move || manage(id, stream, orch_tx)));
+    pub fn new(
+        id: usize,
+        stream: TcpStream,
+        orch_tx: mpsc::Sender<Message>,
+        jobs_rc: Arc<Mutex<Vec<Vec<u8>>>>,
+    ) -> Manager {
+        let handle = Some(thread::spawn(move || manage(id, stream, orch_tx, jobs_rc)));
 
         Manager {
             id,
@@ -61,6 +67,7 @@ pub fn manage(
     id: usize,
     mut stream: TcpStream,
     orch_tx: mpsc::Sender<Message>,
+    jobs_rc: Arc<Mutex<Vec<Vec<u8>>>>,
 ) -> Result<(), Error> {
     let peer_addr = stream.peer_addr()?;
     println!("New Pode {} at address : `{}`", id, peer_addr);
@@ -70,7 +77,23 @@ pub fn manage(
     let mut reader = MessageReader::new(id, stream.try_clone()?);
     let result = {
         let mut stream = stream.try_clone()?;
-        reader.for_each_until_error(|_| Message::Hello("Hey".to_string()).send(&mut stream))
+        reader.for_each_until_error(|msg| match msg {
+            Message::Idle(i) => {
+                let res = (0..i)
+                    .map(|_| match jobs_rc.lock().unwrap().pop() {
+                        Some(job) => Message::Job(job).send(&mut stream),
+                        None => Message::NoJob.send(&mut stream),
+                    })
+                    .skip_while(|res| res.is_ok())
+                    .next();
+
+                match res {
+                    Some(Err(err)) => Err(err),
+                    _ => Ok(()),
+                }
+            }
+            _ => Message::Hello("Hey".to_string()).send(&mut stream),
+        })
     };
 
     // println!("Manager {} : Disconnected, notifying orchestrator...", id);

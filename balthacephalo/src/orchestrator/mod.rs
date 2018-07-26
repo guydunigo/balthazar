@@ -31,13 +31,18 @@ impl From<io::Error> for Error {
 
 // ------------------------------------------------------------------
 
-pub fn orchestrate(listener_rx: mpsc::Receiver<TcpStream>) -> Result<(), Error> {
+pub fn orchestrate(
+    listener_rx: mpsc::Receiver<TcpStream>,
+    jobs: Vec<Vec<u8>>,
+) -> Result<(), Error> {
     let podes: Vec<Option<manager::Manager>> = Vec::new();
     let podes_rc = Arc::new(Mutex::new(podes));
+    let jobs_rc = Arc::new(Mutex::new(jobs));
 
     let (man_tx, man_rx) = mpsc::channel();
 
-    let manager_creator_handle = new_manager_creator(podes_rc.clone(), listener_rx, man_tx);
+    let manager_creator_handle =
+        new_manager_creator(podes_rc.clone(), jobs_rc, listener_rx, man_tx);
 
     new_manager_cleaner(podes_rc.clone(), man_rx);
 
@@ -64,6 +69,7 @@ fn get_new_id<T>(vec: &mut Vec<Option<T>>) -> usize {
 
 fn new_manager_creator(
     podes_rc: Arc<Mutex<Vec<Option<manager::Manager>>>>,
+    jobs_rc: Arc<Mutex<Vec<Vec<u8>>>>,
     listener_rx: mpsc::Receiver<TcpStream>,
     man_tx: mpsc::Sender<Message>,
 ) -> thread::JoinHandle<Result<(), Error>> {
@@ -73,7 +79,7 @@ fn new_manager_creator(
 
             let id = get_new_id(&mut podes);
 
-            let manager = manager::Manager::new(id, stream, man_tx.clone());
+            let manager = manager::Manager::new(id, stream, man_tx.clone(), jobs_rc.clone());
 
             podes[id] = Some(manager);
         }

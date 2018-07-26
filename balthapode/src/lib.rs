@@ -53,9 +53,15 @@ pub fn swim<A: ToSocketAddrs + Display>(addr: A) -> Result<(), Error> {
     let mut reader = MessageReader::new(id, socket.try_clone()?);
     let result = {
         let mut socket = socket.try_clone()?;
+        Message::Idle(1).send(&mut socket)?;
         reader.for_each_until_error(|msg| {
-            sleep(Duration::from_secs(1));
-            msg.send(&mut socket)
+            if let Message::Job(_) = msg {
+                println!("Received a job");
+                Ok(())
+            } else {
+                sleep(Duration::from_secs(1));
+                msg.send(&mut socket)
+            }
         })
     };
 
