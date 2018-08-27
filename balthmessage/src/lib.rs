@@ -9,7 +9,7 @@ use std::io;
 use std::io::prelude::*;
 use std::iter::FusedIterator;
 
-pub const BUFFER_SIZE: usize = 1024;
+pub const BUFFER_SIZE: usize = 65536;
 
 // ------------------------------------------------------------------
 // Errors
@@ -56,6 +56,11 @@ pub enum Message {
 impl Message {
     pub fn send<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
         let msg_str = ser::to_string(self)?;
+        if let Message::Job(_) = self {
+            println!("sending Job of {} bytes.", msg_str.len());
+        } else {
+            println!("sending `{}` of {} bytes.", msg_str, msg_str.len());
+        }
         writer.write_all(msg_str.as_bytes())?;
         Ok(())
     }
@@ -116,8 +121,8 @@ impl<R: Read> Iterator for MessageReader<R> {
     // TODO: clean this mess... (multiple returns ...)
     fn next(&mut self) -> Option<Result<Message, Error>> {
         if let Some(mut reader) = self.reader.take() {
+            let mut buffer: [u8; BUFFER_SIZE] = [0; BUFFER_SIZE];
             loop {
-                let mut buffer: [u8; BUFFER_SIZE] = [0; BUFFER_SIZE];
                 let n = match reader.read(&mut buffer) {
                     Ok(n) => n,
                     Err(err) => return Some(Err(Error::from(err))),
@@ -126,23 +131,31 @@ impl<R: Read> Iterator for MessageReader<R> {
                     // TODO: Or directly return none...
                     return Some(Ok(Message::Disconnected(self.id)));
                 }
-                buffer[..n].iter().for_each(|b| self.buffer.push(b.clone()));
+                buffer[..n].iter().for_each(|b| self.buffer.push(*b));
+
+                //println!("{}", String::from_utf8_lossy(self.buffer.as_slice()));
+                println!("{}", self.buffer.len());
 
                 let msg_res: de::Result<Message> = de::from_bytes(&mut self.buffer.as_slice());
                 let res = match msg_res {
                     Ok(msg) => {
-                        println!("{} : received `{:?}`.", self.id, msg);
+                        if let Message::Job(_) = msg {
+                            println!("{} : received a Job.", self.id);
+                        } else {
+                            println!("{} : received `{:?}`.", self.id, msg);
+                        }
                         self.reader = Some(reader);
                         Ok(msg)
                     }
                     Err(de::Error::Message(msg)) => {
-                        println!("{} : invalid message '{}'", self.id, msg);
+                        println!("{} : invalid message `{}`", self.id, msg);
                         continue;
                     }
                     // TODO: useful anymore ?
-                    Err(de::Error::Parser(de::ParseError::Eof, _)) => {
+                    /*Err(de::Error::Parser(de::ParseError::Eof, a)) => {
+                        println!("{:?}",a);
                         Ok(Message::Disconnected(self.id))
-                    }
+                    }*/
                     Err(de::Error::Parser(err, _)) => {
                         println!("{} : parse error `{:?}`", self.id, err);
                         continue;
