@@ -91,7 +91,7 @@ pub fn manage(
                     Some(Err(err)) => Err(err),
                     _ => Ok(()),
                 }
-            }
+            },
             _ => Message::Hello("Hey".to_string()).send(&mut stream),
         })
     };

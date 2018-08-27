@@ -1,7 +1,7 @@
 [workspace]
-name = "balthamar"
-version = "0.1.0"
-authors = ["GONI Guillaume <gdn3@live.fr>"]
+# name = "balthamar"
+# version = "0.1.0"
+# authors = ["GONI Guillaume <gdn3@live.fr>"]
 
 members = [
     "balthacli",

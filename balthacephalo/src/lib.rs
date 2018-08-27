@@ -50,7 +50,7 @@ pub fn swim<A: 'static + ToSocketAddrs + Display + Send>(listen_addr: A) -> Resu
     thread::spawn(move || -> Result<(), listener::Error> { listener::listen(listen_addr, tx) });
 
     let mut jobs: Vec<Vec<u8>> = Vec::new();
-    let mut f = File::open("../hello_world.wasm")?;
+    let mut f = File::open("hello_world.wasm")?;
     let mut code: Vec<u8> = Vec::new();
     f.read_to_end(&mut code)?;
     jobs.push(code);

@@ -5,8 +5,6 @@ use std::convert::From;
 use std::fmt::Display;
 use std::io;
 use std::net::{TcpStream, ToSocketAddrs};
-use std::thread::sleep;
-use std::time::Duration;
 
 use message::{Message, MessageReader};
 
@@ -48,22 +46,31 @@ pub fn swim<A: ToSocketAddrs + Display>(addr: A) -> Result<(), Error> {
     }?;
     println!("Handshake successful, received id : {}.", id);
 
-    Message::Connected(id).send(&mut socket)?;
-
     let mut reader = MessageReader::new(id, socket.try_clone()?);
     let result = {
-        let mut socket = socket.try_clone()?;
+        //let mut socket = socket.try_clone()?;
         Message::Idle(1).send(&mut socket)?;
-        reader.for_each_until_error(|msg| {
-            if let Message::Job(_) = msg {
-                println!("Received a job");
+        match reader.next() {
+            Some(Ok(Message::Job(_))) => {
+                println!("Pode received a job !");
                 Ok(())
-            } else {
-                sleep(Duration::from_secs(1));
-                msg.send(&mut socket)
             }
-        })
+            Some(Ok(Message::Disconnected(_))) => {
+                println!("Disconnected");
+                Ok(())
+            }
+            Some(Ok(msg)) => {
+                println!("Recieved {:?}, quitting...", msg);
+                Message::Disconnect.send(&mut socket)
+            }
+            _ => {
+                println!("Recieved something, quitting...");
+                Message::Disconnect.send(&mut socket)
+            }
+        }
     };
+
+    // Message::Connected(id).send(&mut socket)?;
 
     match result {
         Err(err) => Err(Error::from(err)),
