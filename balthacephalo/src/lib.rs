@@ -53,6 +53,9 @@ pub fn swim<A: 'static + ToSocketAddrs + Display + Send>(listen_addr: A) -> Resu
     let mut f = File::open("hello_world.wasm")?;
     let mut code: Vec<u8> = Vec::new();
     f.read_to_end(&mut code)?;
+    jobs.push(code.clone());
+    jobs.push(code.clone());
+    jobs.push(code.clone());
     jobs.push(code);
 
     orchestrator::orchestrate(rx, jobs)?;
