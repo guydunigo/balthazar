@@ -9,7 +9,7 @@ use std::io;
 use std::io::prelude::*;
 use std::iter::FusedIterator;
 
-pub const BUFFER_SIZE: usize = 65536;
+pub const BUFFER_SIZE: usize = 1024;
 
 // ------------------------------------------------------------------
 // Errors
@@ -70,6 +70,7 @@ pub struct MessageReader<R: Read> {
     id: usize,
     reader: Option<R>,
     buffer: Vec<u8>,
+    n: u32,
 }
 
 impl<R: Read> MessageReader<R> {
@@ -78,6 +79,7 @@ impl<R: Read> MessageReader<R> {
             id,
             reader: Some(reader),
             buffer: Vec::with_capacity(BUFFER_SIZE),
+            n: 0,
         }
     }
 
@@ -131,10 +133,15 @@ impl<R: Read> Iterator for MessageReader<R> {
                     // TODO: Or directly return none...
                     return Some(Ok(Message::Disconnected(self.id)));
                 }
-                buffer[..n].iter().for_each(|b| self.buffer.push(*b));
 
-                //println!("{}", String::from_utf8_lossy(self.buffer.as_slice()));
-                println!("{}", self.buffer.len());
+                /*let capacity = self.buffer.capacity();
+                if capacity - self.buffer.len() < BUFFER_SIZE {
+                    self.buffer.reserve(capacity);
+                }*/
+                self.buffer.extend_from_slice(&buffer[..n]);
+                self.n += 1;
+
+                println!("{} {} {} {}", self.n, n, self.buffer.len(), self.buffer.capacity());
 
                 let msg_res: de::Result<Message> = de::from_bytes(&mut self.buffer.as_slice());
                 let res = match msg_res {
@@ -167,6 +174,7 @@ impl<R: Read> Iterator for MessageReader<R> {
                 };
 
                 self.buffer.clear();
+                // TODO? : self.buffer.shrink_to(BUFFER_SIZE);
                 return Some(res);
             }
         } else {
