@@ -10,6 +10,7 @@ use std::io::prelude::*;
 use std::iter::FusedIterator;
 
 pub const BUFFER_SIZE: usize = 1024;
+pub const SIMPLE_MSG_MAX_SIZE: usize = 256;
 
 // ------------------------------------------------------------------
 // Errors
@@ -133,13 +134,14 @@ impl<R: Read> Iterator for MessageReader<R> {
                     // TODO: Or directly return none...
                     return Some(Ok(Message::Disconnected(self.id)));
                 }
-
-                /*let capacity = self.buffer.capacity();
-                if capacity - self.buffer.len() < BUFFER_SIZE {
-                    self.buffer.reserve(capacity);
-                }*/
+                
                 self.buffer.extend_from_slice(&buffer[..n]);
                 self.n += 1;
+
+                // TODO: cleaner way to reduce problem ?
+                if n > SIMPLE_MSG_MAX_SIZE && buffer[n-1] != ')' as u8 {
+                    continue;
+                }
 
                 println!("{} {} {} {}", self.n, n, self.buffer.len(), self.buffer.capacity());
 
