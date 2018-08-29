@@ -1,3 +1,6 @@
+#![feature(int_to_from_bytes)]
+#![feature(vec_resize_default)]
+
 #[macro_use]
 extern crate serde_derive;
 
@@ -20,6 +23,8 @@ pub enum Error {
     IoError(io::Error),
     SerError(ser::Error),
     DeError(de::Error),
+    CouldNotGetSize,
+    MessageTooBig(usize),
 }
 
 impl From<io::Error> for Error {
@@ -57,11 +62,19 @@ pub enum Message {
 impl Message {
     pub fn send<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
         let msg_str = ser::to_string(self)?;
+        let len = msg_str.len();
+
         if let Message::Job(_) = self {
-            println!("sending Job of {} bytes.", msg_str.len());
+            println!("sending Job of {} bytes.", len);
         } else {
-            println!("sending `{}` of {} bytes.", msg_str, msg_str.len());
+            println!("sending `{}` of {} bytes.", msg_str, len);
         }
+
+        if len >= u32::max_value() as usize {
+            return Err(Error::MessageTooBig(len));
+        }
+        writer.write_all(&(len as u32).to_le_bytes())?;
+
         writer.write_all(msg_str.as_bytes())?;
         Ok(())
     }
@@ -70,8 +83,6 @@ impl Message {
 pub struct MessageReader<R: Read> {
     id: usize,
     reader: Option<R>,
-    buffer: Vec<u8>,
-    n: u32,
 }
 
 impl<R: Read> MessageReader<R> {
@@ -79,8 +90,6 @@ impl<R: Read> MessageReader<R> {
         MessageReader {
             id,
             reader: Some(reader),
-            buffer: Vec::with_capacity(BUFFER_SIZE),
-            n: 0,
         }
     }
 
@@ -89,8 +98,8 @@ impl<R: Read> MessageReader<R> {
         F: FnMut(Message) -> Result<(), Error>,
     {
         let id = self.id;
-        let res =
-            self.take_while(|result| match result {
+        let res = self
+            .take_while(|result| match result {
                 Ok(Message::Disconnect) => {
                     println!("{} : Disconnection announced.", id);
                     false
@@ -101,13 +110,12 @@ impl<R: Read> MessageReader<R> {
                 }
                 _ => true,
             }).map(|msg_res| -> Result<(), Error> {
-                    match msg_res {
-                        Ok(msg) => closure(msg),
-                        Err(err) => Err(err),
-                    }
-                })
-                .skip_while(|result| result.is_ok())
-                .next();
+                match msg_res {
+                    Ok(msg) => closure(msg),
+                    Err(err) => Err(err),
+                }
+            }).skip_while(|result| result.is_ok())
+            .next();
 
         match res {
             Some(Err(err)) => Err(err),
@@ -124,9 +132,26 @@ impl<R: Read> Iterator for MessageReader<R> {
     // TODO: clean this mess... (multiple returns ...)
     fn next(&mut self) -> Option<Result<Message, Error>> {
         if let Some(mut reader) = self.reader.take() {
-            let mut buffer: [u8; BUFFER_SIZE] = [0; BUFFER_SIZE];
-            loop {
-                let n = match reader.read(&mut buffer) {
+            let mut buffer: [u8; 4] = [0; 4];
+
+            let n = match reader.read(&mut buffer) {
+                Ok(n) => n,
+                Err(err) => return Some(Err(Error::from(err))),
+            };
+            if n != 4 {
+                return Some(Err(Error::CouldNotGetSize));
+            }
+
+            let msg_size: usize = u32::from_le_bytes(buffer) as usize;
+            println!("{} : Receiving {} bytes...", self.id, msg_size);
+
+            let mut buffer: Vec<u8> = Vec::new();
+            buffer.resize_default(msg_size);
+
+            for i in 0..(msg_size / BUFFER_SIZE + 1) {
+                let limit = (i + 1) * BUFFER_SIZE;
+                let max_limit = if limit >= msg_size { msg_size } else { limit };
+                let n = match reader.read(&mut buffer[i * BUFFER_SIZE..max_limit]) {
                     Ok(n) => n,
                     Err(err) => return Some(Err(Error::from(err))),
                 };
@@ -134,51 +159,22 @@ impl<R: Read> Iterator for MessageReader<R> {
                     // TODO: Or directly return none...
                     return Some(Ok(Message::Disconnected(self.id)));
                 }
-                
-                self.buffer.extend_from_slice(&buffer[..n]);
-                self.n += 1;
-
-                // TODO: cleaner way to reduce problem ?
-                if n > SIMPLE_MSG_MAX_SIZE && buffer[n-1] != ')' as u8 {
-                    continue;
-                }
-
-                println!("{} {} {} {}", self.n, n, self.buffer.len(), self.buffer.capacity());
-
-                let msg_res: de::Result<Message> = de::from_bytes(&mut self.buffer.as_slice());
-                let res = match msg_res {
-                    Ok(msg) => {
-                        if let Message::Job(_) = msg {
-                            println!("{} : received a Job.", self.id);
-                        } else {
-                            println!("{} : received `{:?}`.", self.id, msg);
-                        }
-                        self.reader = Some(reader);
-                        Ok(msg)
-                    }
-                    Err(de::Error::Message(msg)) => {
-                        println!("{} : invalid message `{}`", self.id, msg);
-                        continue;
-                    }
-                    // TODO: useful anymore ?
-                    /*Err(de::Error::Parser(de::ParseError::Eof, a)) => {
-                        println!("{:?}",a);
-                        Ok(Message::Disconnected(self.id))
-                    }*/
-                    Err(de::Error::Parser(err, _)) => {
-                        println!("{} : parse error `{:?}`", self.id, err);
-                        continue;
-                    }
-                    Err(de::Error::IoError(err)) => {
-                        println!("{} : IoError `{}`", self.id, err);
-                        Err(Error::from(de::Error::IoError(err)))
-                    }
-                };
-
-                self.buffer.clear();
-                // TODO? : self.buffer.shrink_to(BUFFER_SIZE);
-                return Some(res);
             }
+
+            let msg_res: de::Result<Message> = de::from_bytes(&mut buffer.as_slice());
+            let res = match msg_res {
+                Ok(msg) => {
+                    if let Message::Job(_) = msg {
+                        println!("{} : received a Job.", self.id);
+                    } else {
+                        println!("{} : received `{:?}`.", self.id, msg);
+                    }
+                    self.reader = Some(reader);
+                    Ok(msg)
+                }
+                Err(err) => Err(Error::from(err)),
+            };
+            return Some(res);
         } else {
             return None;
         }
