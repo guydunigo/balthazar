@@ -12,9 +12,6 @@ use std::io;
 use std::io::prelude::*;
 use std::iter::FusedIterator;
 
-pub const BUFFER_SIZE: usize = 1024;
-pub const SIMPLE_MSG_MAX_SIZE: usize = 256;
-
 // ------------------------------------------------------------------
 // Errors
 
@@ -132,26 +129,28 @@ impl<R: Read> Iterator for MessageReader<R> {
     // TODO: clean this mess... (multiple returns ...)
     fn next(&mut self) -> Option<Result<Message, Error>> {
         if let Some(mut reader) = self.reader.take() {
-            let mut buffer: [u8; 4] = [0; 4];
+            let msg_size: usize = {
+                let mut buffer: [u8; 4] = [0; 4];
 
-            let n = match reader.read(&mut buffer) {
-                Ok(n) => n,
-                Err(err) => return Some(Err(Error::from(err))),
+                let n = match reader.read(&mut buffer) {
+                    Ok(n) => n,
+                    Err(err) => return Some(Err(Error::from(err))),
+                };
+                if n != 4 {
+                    return Some(Err(Error::CouldNotGetSize));
+                }
+
+                u32::from_le_bytes(buffer) as usize
             };
-            if n != 4 {
-                return Some(Err(Error::CouldNotGetSize));
-            }
-
-            let msg_size: usize = u32::from_le_bytes(buffer) as usize;
             println!("{} : Receiving {} bytes...", self.id, msg_size);
 
             let mut buffer: Vec<u8> = Vec::new();
             buffer.resize_default(msg_size);
 
-            for i in 0..(msg_size / BUFFER_SIZE + 1) {
-                let limit = (i + 1) * BUFFER_SIZE;
-                let max_limit = if limit >= msg_size { msg_size } else { limit };
-                let n = match reader.read(&mut buffer[i * BUFFER_SIZE..max_limit]) {
+            // Loops until it got the full message:
+            let mut downloaded_size = 0;
+            while downloaded_size < buffer.len() {
+                let n = match reader.read(&mut buffer[downloaded_size..]) {
                     Ok(n) => n,
                     Err(err) => return Some(Err(Error::from(err))),
                 };
@@ -159,6 +158,8 @@ impl<R: Read> Iterator for MessageReader<R> {
                     // TODO: Or directly return none...
                     return Some(Ok(Message::Disconnected(self.id)));
                 }
+
+                downloaded_size += n;
             }
 
             let msg_res: de::Result<Message> = de::from_bytes(&mut buffer.as_slice());
