@@ -83,15 +83,14 @@ pub fn manage(
                     .map(|_| match jobs_rc.lock().unwrap().pop() {
                         Some(job) => Message::Job(job).send(&mut stream),
                         None => Message::NoJob.send(&mut stream),
-                    })
-                    .skip_while(|res| res.is_ok())
+                    }).skip_while(|res| res.is_ok())
                     .next();
 
                 match res {
                     Some(Err(err)) => Err(err),
                     _ => Ok(()),
                 }
-            },
+            }
             _ => Message::Hello("Hey".to_string()).send(&mut stream),
         })
     };

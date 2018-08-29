@@ -49,25 +49,17 @@ pub fn swim<A: ToSocketAddrs + Display>(addr: A) -> Result<(), Error> {
     let mut reader = MessageReader::new(id, socket.try_clone()?);
     let result = {
         //let mut socket = socket.try_clone()?;
-        Message::Idle(1).send(&mut socket)?;
-        match reader.next() {
-            Some(Ok(Message::Job(_))) => {
+        Message::Idle(10).send(&mut socket)?;
+        reader.for_each_until_error(|msg| match msg {
+            Message::Job(_) => {
                 println!("Pode received a job !");
                 Ok(())
             }
-            Some(Ok(Message::Disconnected(_))) => {
-                println!("Disconnected");
-                Ok(())
-            }
-            Some(Ok(msg)) => {
-                println!("Recieved {:?}, quitting...", msg);
-                Message::Disconnect.send(&mut socket)
-            }
             _ => {
-                println!("Recieved something, quitting...");
                 Message::Disconnect.send(&mut socket)
+                //Ok(())
             }
-        }
+        })
     };
 
     // Message::Connected(id).send(&mut socket)?;
