@@ -79,18 +79,17 @@ pub fn manage(
         let mut stream = stream.try_clone()?;
         reader.for_each_until_error(|msg| match msg {
             Message::Idle(i) => {
-                let res = (0..i)
-                    .map(|_| match jobs_rc.lock().unwrap().pop() {
-                        Some(job) => Message::Job(job).send(&mut stream),
-                        None => Message::NoJob.send(&mut stream),
-                    }).skip_while(|res| res.is_ok())
-                    .next();
-
-                match res {
-                    Some(Err(err)) => Err(err),
-                    _ => Ok(()),
+                for _ in 0..i {
+                    match jobs_rc.lock().unwrap().pop() {
+                        Some(job) => Message::Job(job).send(&mut stream)?,
+                        None => {
+                            Message::NoJob.send(&mut stream)?;
+                            break;
+                        },
+                    }
                 }
-            }
+                Ok(())
+            },
             _ => Message::Hello("Hey".to_string()).send(&mut stream),
         })
     };
