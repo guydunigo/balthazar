@@ -85,11 +85,15 @@ pub fn manage(
                         None => {
                             Message::NoJob.send(&mut stream)?;
                             break;
-                        },
+                        }
                     }
                 }
                 Ok(())
-            },
+            }
+            Message::Job(job) => {
+                jobs_rc.lock().unwrap().push(job);
+                Ok(())
+            }
             _ => Message::Hello("Hey".to_string()).send(&mut stream),
         })
     };
