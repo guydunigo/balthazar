@@ -4,6 +4,6 @@ version = "0.1.0"
 authors = ["GONI Guillaume <gdn3@live.fr>"]
 
 [dependencies]
-serde_derive = "1.0.68"
-serde = "1.0.68"
-ron = "0.3.0"
+serde_derive = "1.0.78"
+serde = "1.0.78"
+ron = "0.4.0"

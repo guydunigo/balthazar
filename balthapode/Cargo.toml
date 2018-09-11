@@ -4,4 +4,7 @@ version = "0.1.0"
 authors = ["GONI Guillaume <gdn3@live.fr>"]
 
 [dependencies]
+parity-wasm = "0.32.0"
+wasmi = "0.4.0"
+
 balthmessage = { path = "../balthmessage" }

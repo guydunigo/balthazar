@@ -1,4 +1,11 @@
+#![feature(extern_prelude)]
+
 extern crate balthmessage as message;
+extern crate parity_wasm;
+extern crate wasmi;
+
+mod wasm;
+
 //TODO: +everywhere stream or socket or ...
 
 use std::convert::From;
@@ -49,10 +56,11 @@ pub fn swim<A: ToSocketAddrs + Display>(addr: A) -> Result<(), Error> {
     let mut reader = MessageReader::new(id, socket.try_clone()?);
     let result = {
         //let mut socket = socket.try_clone()?;
-        Message::Idle(10).send(&mut socket)?;
+        Message::Idle(1).send(&mut socket)?;
         reader.for_each_until_error(|msg| match msg {
-            Message::Job(_) => {
+            Message::Job(job) => {
                 println!("Pode received a job !");
+                wasm::exec_wasm(job);
                 Ok(())
             }
             _ => {
