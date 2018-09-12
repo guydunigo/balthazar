@@ -9,4 +9,3 @@ crate-type = ["cdylib"]
 
 [dependencies]
 sha3 = "0.7.3"
-generic-array = "0.9"
