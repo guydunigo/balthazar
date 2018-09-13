@@ -52,7 +52,9 @@ pub enum Message {
     Disconnect,
     Disconnected(usize),
     Idle(usize),
-    Job(Vec<u8>),
+    Job(Vec<u8>),                     // TODO: Job ids?
+    ReturnValue(Result<Vec<u8>, ()>), // TODO: proper error
+    // External(E) // TODO: generic type
     NoJob,
 }
 
