@@ -1,10 +1,31 @@
 use wasmi::{
     Error as InterpreterError, Externals, FuncInstance, FuncRef, ImportsBuilder, Module,
-    ModuleImportResolver, ModuleInstance, RuntimeArgs, RuntimeValue, Signature, Trap,
+    ModuleImportResolver, ModuleInstance, RuntimeArgs, RuntimeValue, Signature, Trap, TrapKind,
 };
+
+use std::string::FromUtf8Error;
 
 //TODO: clean this mess!!!
 //TODO: unwrap to proper errors
+//TODO: prevent  adding too many items to vec
+
+#[derive(Debug)]
+pub enum Error {
+    InterpreterError(InterpreterError),
+    ResultToStringError(FromUtf8Error),
+}
+
+impl From<InterpreterError> for Error {
+    fn from(err: InterpreterError) -> Error {
+        Error::InterpreterError(err)
+    }
+}
+
+impl From<FromUtf8Error> for Error {
+    fn from(err: FromUtf8Error) -> Error {
+        Error::ResultToStringError(err)
+    }
+}
 
 struct Runtime {
     txt: Vec<u8>,
@@ -20,7 +41,11 @@ impl Externals for Runtime {
             0 => {
                 let mut args_vec: Vec<u8> = Vec::with_capacity(32);
                 for i in 0..args.len() {
-                    args_vec.push(args.nth_checked(i).unwrap());
+                    if let Ok(n) = args.nth_checked(i) {
+                        args_vec.push(n);
+                    } /*else {
+                        //TODO: return Err(Trap::new(TrapKind::Host())
+                    }*/
                 }
 
                 print!("hash: 0x");
@@ -50,7 +75,7 @@ impl<'a> ModuleImportResolver for RuntimeModuleImportResolver {
         let func_ref = match field_name {
             // TODO: manually do the signature?
             // TODO: dynamically fetch the index?
-            "return_32bytes" => FuncInstance::alloc_host(signature.clone(), 0),
+            "return_256bits" => FuncInstance::alloc_host(signature.clone(), 0),
             "push_char" => FuncInstance::alloc_host(signature.clone(), 1),
             _ => {
                 return Err(InterpreterError::Function(format!(
@@ -72,36 +97,36 @@ pub fn get_functions_list(bytecode: Vec<u8>) {
         names_section
             .names()
             .iter()
-            .take(10)
+            //.take(10)
             .for_each(|t| println!("{}", t.1));
         //println!("J: {}", names_section.names());
     }
 }
 
-pub fn exec_wasm(bytecode: Vec<u8>) -> Result<u8, u8> {
-    let module = Module::from_buffer(&bytecode).expect("test");
+pub fn exec_wasm(bytecode: Vec<u8>) -> Result<Vec<u8>, Error> {
+    let module = Module::from_buffer(&bytecode)?;
 
     let resolver = RuntimeModuleImportResolver;
     let imports = ImportsBuilder::new().with_resolver("env", &resolver);
-    let instance = ModuleInstance::new(&module, &imports)
-        .expect("failed to instantiate wasm module")
-        .assert_no_start();
+    let instance = ModuleInstance::new(&module, &imports)?.assert_no_start();
 
     let mut runtime = Runtime { txt: Vec::new() };
-    let res = instance
-        .invoke_export("start", &[], &mut runtime)
-        .expect("failed to execute export");
+    let res = instance.invoke_export("start", &[], &mut runtime)?;
 
-    if let Some(RuntimeValue::I32(res)) = res {
-        println!("start : {:x}", res);
+    if let Some(res) = res {
+        match res {
+            RuntimeValue::I32(res) => println!("Return value: {}", res),
+            RuntimeValue::I64(res) => println!("Return value: {}", res),
+            res => println!("Return value unknown: {:?}", res),
+        }
     } else {
-        println!("start : {:?}", res);
+        println!("No return value.");
     }
 
     println!(
-        "hash src: {}",
+        "Returned text: {}",
         String::from_utf8_lossy(runtime.txt.as_slice())
     );
 
-    Ok(0)
+    Ok(runtime.txt)
 }

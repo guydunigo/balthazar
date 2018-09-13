@@ -23,6 +23,7 @@ pub enum Error {
     FailedHandshake,
     IoError(io::Error),
     MessageError(message::Error),
+    WasmError(wasm::Error),
 }
 
 impl From<io::Error> for Error {
@@ -34,6 +35,12 @@ impl From<io::Error> for Error {
 impl From<message::Error> for Error {
     fn from(err: message::Error) -> Error {
         Error::MessageError(err)
+    }
+}
+
+impl From<wasm::Error> for Error {
+    fn from(err: wasm::Error) -> Error {
+        Error::WasmError(err)
     }
 }
 
@@ -60,8 +67,14 @@ pub fn swim<A: ToSocketAddrs + Display>(addr: A) -> Result<(), Error> {
         reader.for_each_until_error(|msg| match msg {
             Message::Job(job) => {
                 println!("Pode received a job !");
-                wasm::exec_wasm(job);
-                Ok(())
+                //TODO: do not fail on job error
+                let res = wasm::exec_wasm(job);
+                if let Ok(res) = res {
+                    Message::ReturnValue(Ok(res)).send(&mut socket)
+                } else {
+                    //TODO: return proper error
+                    Message::ReturnValue(Err(())).send(&mut socket)
+                }
             }
             _ => {
                 Message::Disconnect.send(&mut socket)

@@ -4,7 +4,7 @@ use sha3::{Digest, Sha3_256};
 
 extern "C" {
     fn push_char(s: u8);
-    fn return_32bytes(s: [u8; 32]);
+    fn return_256bits(s: [u8; 32]);
 }
 
 #[no_mangle]
@@ -24,7 +24,7 @@ pub extern "C" fn start() -> u32 {
     }
 
     unsafe {
-        return_32bytes(array_hash);
+        return_256bits(array_hash);
         let string = String::from("test");
         string
             .into_bytes()
