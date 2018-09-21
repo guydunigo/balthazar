@@ -1,11 +1,12 @@
-use std::rc::Weak;
+use std::sync::Weak;
 
-#[derive(Debug)]
+// TODO: id with clone ?
+#[derive(Debug, Clone)]
 pub struct Task {
-    id: usize,
-    args: Vec<u8>, // TODO: wasm arg list ?
-    result: Vec<u8>,
-    pode: Option<Weak<u8>>,
+    pub id: usize,
+    pub args: Vec<u8>, // TODO: wasm arg list ?
+    pub result: Vec<u8>,
+    pub pode: Option<Weak<u8>>,
     // TODO: date?
 }
 

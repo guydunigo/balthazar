@@ -1,10 +1,11 @@
 pub mod task;
 
-#[derive(Debug)]
+// TODO: id with clone ?
+#[derive(Debug, Clone)]
 pub struct Job {
-    id: usize,
-    bytecode: Vec<u8>,
-    tasks: Vec<task::Task>,
+    pub id: usize,
+    pub bytecode: Vec<u8>,
+    pub tasks: Vec<task::Task>,
 }
 
 impl Job {
@@ -20,7 +21,7 @@ impl Job {
         let mut id = 0;
 
         loop {
-            if id < usize::max_value() {
+            if id >= usize::max_value() {
                 break None;
             // TODO: not very efficient...
             } else if let Some(_) = list.iter().find(|job| job.id == id) {

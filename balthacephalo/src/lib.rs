@@ -1,16 +1,16 @@
 extern crate balthmessage as message;
+extern crate balthajob as job;
 
 mod listener;
 mod orchestrator;
 
+use job::Job;
 use std::convert::From;
 use std::fmt::Display;
-use std::fs::File;
-use std::io;
-use std::io::prelude::*;
 use std::net::ToSocketAddrs;
 use std::sync::mpsc;
 use std::thread;
+use std::io;
 
 // ------------------------------------------------------------------
 // Errors
@@ -48,15 +48,7 @@ pub fn swim<A: 'static + ToSocketAddrs + Display + Send>(listen_addr: A) -> Resu
     let (tx, rx) = mpsc::channel();
 
     thread::spawn(move || -> Result<(), listener::Error> { listener::listen(listen_addr, tx) });
-
-    let mut jobs: Vec<Vec<u8>> = Vec::new();
-    let mut f = File::open("main.wasm")?;
-    let mut code: Vec<u8> = Vec::new();
-    f.read_to_end(&mut code)?;
-    jobs.push(code.clone());
-    jobs.push(code.clone());
-    jobs.push(code.clone());
-    jobs.push(code);
+    let jobs: Vec<Job> = Vec::new();
 
     orchestrator::orchestrate(rx, jobs)?;
 

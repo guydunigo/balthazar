@@ -1,3 +1,4 @@
+use job::Job;
 use std::io;
 use std::net::TcpStream;
 use std::sync::mpsc;
@@ -51,7 +52,7 @@ impl Manager {
         id: usize,
         stream: TcpStream,
         orch_tx: mpsc::Sender<Message>,
-        jobs_rc: Arc<Mutex<Vec<Vec<u8>>>>,
+        jobs_rc: Arc<Mutex<Vec<Job>>>,
     ) -> Manager {
         let handle = Some(thread::spawn(move || manage(id, stream, orch_tx, jobs_rc)));
 
@@ -67,7 +68,7 @@ pub fn manage(
     id: usize,
     mut stream: TcpStream,
     orch_tx: mpsc::Sender<Message>,
-    jobs_rc: Arc<Mutex<Vec<Vec<u8>>>>,
+    jobs_rc: Arc<Mutex<Vec<Job>>>,
 ) -> Result<(), Error> {
     let peer_addr = stream.peer_addr()?;
     println!("New Pode {} at address : `{}`", id, peer_addr);
@@ -82,7 +83,7 @@ pub fn manage(
                 for _ in 0..i {
                     let mut jobs = jobs_rc.lock().unwrap();
                     match jobs.pop() {
-                        Some(job) => Message::Job(jobs.len(), job).send(&mut stream)?,
+                        Some(job) => Message::Job(job.id, job.bytecode).send(&mut stream)?,
                         None => {
                             Message::NoJob.send(&mut stream)?;
                             break;
@@ -92,7 +93,9 @@ pub fn manage(
                 Ok(())
             }
             Message::Job(_, job) => {
-                jobs_rc.lock().unwrap().push(job);
+                let mut jobs = jobs_rc.lock().unwrap();
+                let mut job = Job::new(Job::get_free_job_id(&jobs[..]).unwrap(), job,Vec::new());
+                jobs.push(job);
                 Ok(())
             }
             _ => Message::Hello("Hey".to_string()).send(&mut stream),

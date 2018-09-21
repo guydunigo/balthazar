@@ -1,5 +1,6 @@
 mod manager;
 
+use job::Job;
 use std::io;
 use std::net::TcpStream;
 use std::sync::{mpsc, Arc, Mutex};
@@ -33,7 +34,7 @@ impl From<io::Error> for Error {
 
 pub fn orchestrate(
     listener_rx: mpsc::Receiver<TcpStream>,
-    jobs: Vec<Vec<u8>>,
+    jobs: Vec<Job>,
 ) -> Result<(), Error> {
     let podes: Vec<Option<manager::Manager>> = Vec::new();
     let podes_rc = Arc::new(Mutex::new(podes));
@@ -69,7 +70,7 @@ fn get_new_id<T>(vec: &mut Vec<Option<T>>) -> usize {
 
 fn new_manager_creator(
     podes_rc: Arc<Mutex<Vec<Option<manager::Manager>>>>,
-    jobs_rc: Arc<Mutex<Vec<Vec<u8>>>>,
+    jobs_rc: Arc<Mutex<Vec<Job>>>,
     listener_rx: mpsc::Receiver<TcpStream>,
     man_tx: mpsc::Sender<Message>,
 ) -> thread::JoinHandle<Result<(), Error>> {

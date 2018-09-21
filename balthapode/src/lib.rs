@@ -8,9 +8,11 @@ mod wasm;
 
 //TODO: +everywhere stream or socket or ...
 
+use std::fs::File;
 use std::convert::From;
 use std::fmt::Display;
 use std::io;
+use std::io::prelude::*;
 use std::net::{TcpStream, ToSocketAddrs};
 
 use message::{Message, MessageReader};
@@ -62,6 +64,12 @@ pub fn swim<A: ToSocketAddrs + Display>(addr: A) -> Result<(), Error> {
 
     let mut reader = MessageReader::new(id, socket.try_clone()?);
     let result = {
+        let mut f = File::open("main.wasm")?;
+        let mut code: Vec<u8> = Vec::new();
+        f.read_to_end(&mut code)?;
+
+        Message::Job(0, code).send(&mut socket)?;
+
         //let mut socket = socket.try_clone()?;
         Message::Idle(1).send(&mut socket)?;
         reader.for_each_until_error(|msg| match msg {
