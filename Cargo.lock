@@ -7,6 +7,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 name = "balthacephalo"
 version = "0.1.0"
 dependencies = [
+ "balthajob 0.1.0",
  "balthmessage 0.1.0",
 ]
 
@@ -16,6 +17,10 @@ version = "0.1.0"
 dependencies = [
  "balthalib 0.1.0",
 ]
+
+[[package]]
+name = "balthajob"
+version = "0.1.0"
 
 [[package]]
 name = "balthalib"

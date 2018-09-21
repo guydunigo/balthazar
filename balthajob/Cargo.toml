@@ -1,0 +1,7 @@
+[package]
+name = "balthajob"
+version = "0.1.0"
+authors = ["GONI Guillaume <gdn3@live.fr>"]
+edition = "2018"
+
+[dependencies]
