@@ -5,3 +5,4 @@ authors = ["GONI Guillaume <gdn3@live.fr>"]
 
 [dependencies]
 balthmessage = { path = "../balthmessage" }
+balthajob = { path = "../balthajob" }

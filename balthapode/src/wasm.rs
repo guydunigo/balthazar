@@ -1,6 +1,6 @@
 use wasmi::{
     Error as InterpreterError, Externals, FuncInstance, FuncRef, ImportsBuilder, Module,
-    ModuleImportResolver, ModuleInstance, RuntimeArgs, RuntimeValue, Signature, Trap, TrapKind,
+    ModuleImportResolver, ModuleInstance, RuntimeArgs, RuntimeValue, Signature, Trap,
 };
 
 use std::string::FromUtf8Error;
@@ -72,23 +72,20 @@ impl<'a> ModuleImportResolver for RuntimeModuleImportResolver {
         signature: &Signature,
     ) -> Result<FuncRef, InterpreterError> {
         // println!("{} {:?}", field_name, signature);
-        let func_ref = match field_name {
+        match field_name {
             // TODO: manually do the signature?
             // TODO: dynamically fetch the index?
-            "return_256bits" => FuncInstance::alloc_host(signature.clone(), 0),
-            "push_char" => FuncInstance::alloc_host(signature.clone(), 1),
-            _ => {
-                return Err(InterpreterError::Function(format!(
-                    "host module doesn't export function with name {}",
-                    field_name
-                )))
-            }
-        };
-        Ok(func_ref)
+            "return_256bits" => Ok(FuncInstance::alloc_host(signature.clone(), 0)),
+            "push_char" => Ok(FuncInstance::alloc_host(signature.clone(), 1)),
+            _ => Err(InterpreterError::Function(format!(
+                "host module doesn't export function with name {}",
+                field_name
+            ))),
+        }
     }
 }
 
-pub fn get_functions_list(bytecode: Vec<u8>) {
+pub fn _get_functions_list(bytecode: Vec<u8>) {
     let module: parity_wasm::elements::Module =
         parity_wasm::deserialize_buffer(&bytecode[..]).unwrap();
     let module = module.parse_names().unwrap();
@@ -124,7 +121,7 @@ pub fn exec_wasm(bytecode: Vec<u8>) -> Result<Vec<u8>, Error> {
     }
 
     println!(
-        "Returned text: {}",
+        "Returned text: '{}'",
         String::from_utf8_lossy(runtime.txt.as_slice())
     );
 

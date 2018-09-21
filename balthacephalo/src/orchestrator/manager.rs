@@ -80,8 +80,9 @@ pub fn manage(
         reader.for_each_until_error(|msg| match msg {
             Message::Idle(i) => {
                 for _ in 0..i {
-                    match jobs_rc.lock().unwrap().pop() {
-                        Some(job) => Message::Job(job).send(&mut stream)?,
+                    let mut jobs = jobs_rc.lock().unwrap();
+                    match jobs.pop() {
+                        Some(job) => Message::Job(jobs.len(), job).send(&mut stream)?,
                         None => {
                             Message::NoJob.send(&mut stream)?;
                             break;
@@ -90,7 +91,7 @@ pub fn manage(
                 }
                 Ok(())
             }
-            Message::Job(job) => {
+            Message::Job(_, job) => {
                 jobs_rc.lock().unwrap().push(job);
                 Ok(())
             }

@@ -65,15 +65,15 @@ pub fn swim<A: ToSocketAddrs + Display>(addr: A) -> Result<(), Error> {
         //let mut socket = socket.try_clone()?;
         Message::Idle(1).send(&mut socket)?;
         reader.for_each_until_error(|msg| match msg {
-            Message::Job(job) => {
+            Message::Job(id, job) => {
                 println!("Pode received a job !");
                 //TODO: do not fail on job error
                 let res = wasm::exec_wasm(job);
                 if let Ok(res) = res {
-                    Message::ReturnValue(Ok(res)).send(&mut socket)
+                    Message::ReturnValue(id, Ok(res)).send(&mut socket)
                 } else {
                     //TODO: return proper error
-                    Message::ReturnValue(Err(())).send(&mut socket)
+                    Message::ReturnValue(id, Err(())).send(&mut socket)
                 }
             }
             _ => {
