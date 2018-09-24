@@ -1,5 +1,3 @@
-#![feature(extern_prelude)]
-
 extern crate balthmessage as message;
 extern crate parity_wasm;
 extern crate wasmi;
