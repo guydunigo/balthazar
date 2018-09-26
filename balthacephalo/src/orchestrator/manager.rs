@@ -68,7 +68,9 @@ impl Manager {
 
         {
             man.lock().unwrap().handle = Some(thread::spawn(move || {
-                Manager::manage(clone, stream, orch_tx, jobs_rc)
+                let res = Manager::manage(clone, stream, orch_tx, jobs_rc);
+                println!("{} : {:?}", id, res);
+                res
             }));
         }
 
