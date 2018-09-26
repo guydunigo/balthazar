@@ -52,8 +52,8 @@ pub enum Message {
     Disconnect,
     Disconnected(usize),
     Idle(usize),
-    Job(usize, Vec<u8>),                     // TODO: Job ids?
-    ReturnValue(usize, Result<Vec<u8>, ()>), // TODO: proper error
+    Job(usize, usize, Vec<u8>),                     // TODO: Job ids?
+    ReturnValue(usize, usize, Result<Vec<u8>, ()>), // TODO: proper error
     // External(E) // TODO: generic type
     NoJob,
 }
@@ -63,8 +63,11 @@ impl Message {
         let msg_str = ser::to_string(self)?;
         let len = msg_str.len();
 
-        if let Message::Job(id, _) = self {
-            println!("sending Job #{} of {} bytes.", id, len);
+        if let Message::Job(job_id, task_id, _) = self {
+            println!(
+                "sending Task #{} of Job #{} of {} bytes.",
+                task_id, job_id, len
+            );
         } else {
             println!("sending `{}` of {} bytes.", msg_str, len);
         }
@@ -167,8 +170,11 @@ impl<R: Read> Iterator for MessageReader<R> {
             let msg_res: de::Result<Message> = de::from_bytes(&mut buffer.as_slice());
             let res = match msg_res {
                 Ok(msg) => {
-                    if let Message::Job(job_id, _) = msg {
-                        println!("{} : received Job #{}.", self.id, job_id);
+                    if let Message::Job(job_id, task_id, _) = msg {
+                        println!(
+                            "{} : received Task #{} of Job #{}.",
+                            self.id, task_id, job_id
+                        );
                     } else {
                         println!("{} : received `{:?}`.", self.id, msg);
                     }

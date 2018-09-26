@@ -1,4 +1,3 @@
-use job::Job;
 use std::io;
 use std::net::TcpStream;
 use std::sync::mpsc;
@@ -8,6 +7,9 @@ use std::thread;
 
 // TODO: replace TcpStream by Read + Write
 
+use job;
+use job::task::Task;
+use job::Job;
 use message;
 use message::{Message, MessageReader};
 
@@ -44,7 +46,8 @@ impl From<message::Error> for Error {
 pub struct Manager {
     id: usize,
     handle: Option<thread::JoinHandle<Result<(), Error>>>,
-    _job: Option<Arc<()>>,
+    job: Option<Arc<Job<Mutex<Manager>>>>,
+    task: Option<Arc<Mutex<Task<Mutex<Manager>>>>>,
 }
 
 impl Manager {
@@ -52,64 +55,86 @@ impl Manager {
         id: usize,
         stream: TcpStream,
         orch_tx: mpsc::Sender<Message>,
-        jobs_rc: Arc<Mutex<Vec<Job>>>,
-    ) -> Manager {
-        let handle = Some(thread::spawn(move || manage(id, stream, orch_tx, jobs_rc)));
-
-        Manager {
+        jobs_rc: Arc<Mutex<Vec<Arc<Job<Mutex<Manager>>>>>>,
+    ) -> Arc<Mutex<Manager>> {
+        let man = Arc::from(Mutex::new(Manager {
             id,
-            handle,
-            _job: None,
+            handle: None,
+            job: None,
+            task: None,
+        }));
+
+        let clone = man.clone();
+
+        {
+            man.lock().unwrap().handle = Some(thread::spawn(move || {
+                Manager::manage(clone, stream, orch_tx, jobs_rc)
+            }));
         }
+
+        man
     }
-}
 
-pub fn manage(
-    id: usize,
-    mut stream: TcpStream,
-    orch_tx: mpsc::Sender<Message>,
-    jobs_rc: Arc<Mutex<Vec<Job>>>,
-) -> Result<(), Error> {
-    let peer_addr = stream.peer_addr()?;
-    println!("New Pode {} at address : `{}`", id, peer_addr);
+    pub fn manage(
+        manager: Arc<Mutex<Manager>>,
+        mut stream: TcpStream,
+        orch_tx: mpsc::Sender<Message>,
+        jobs_rc: Arc<Mutex<Vec<Arc<Job<Mutex<Manager>>>>>>,
+    ) -> Result<(), Error> {
+        let man_id = manager.lock().unwrap().id;
+        let peer_addr = stream.peer_addr()?;
+        println!("New Pode {} at address : `{}`", man_id, peer_addr);
 
-    Message::Connected(id).send(&mut stream)?;
+        Message::Connected(man_id).send(&mut stream)?;
 
-    let mut reader = MessageReader::new(id, stream.try_clone()?);
-    let result = {
-        let mut stream = stream.try_clone()?;
-        reader.for_each_until_error(|msg| match msg {
-            Message::Idle(i) => {
-                for _ in 0..i {
-                    let mut jobs = jobs_rc.lock().unwrap();
-                    match jobs.pop() {
-                        Some(job) => Message::Job(job.id, job.bytecode).send(&mut stream)?,
-                        None => {
-                            Message::NoJob.send(&mut stream)?;
-                            break;
+        let mut reader = MessageReader::new(man_id, stream.try_clone()?);
+        let result = {
+            let mut stream = stream.try_clone()?;
+            reader.for_each_until_error(|msg| match msg {
+                Message::Idle(i) => {
+                    for _ in 0..i {
+                        let mut jobs = jobs_rc.lock().unwrap();
+                        match job::get_available_task(&*jobs) {
+                            Some((job, task)) => {
+                                task.lock().unwrap().pode = Some(Arc::downgrade(&manager));
+                                {
+                                    let mut manager = manager.lock().unwrap();
+                                    manager.job = Some(job.clone());
+                                    manager.task = Some(task.clone());
+                                }
+                                Message::Job(job.id, task.lock().unwrap().id, job.bytecode.clone())
+                                    .send(&mut stream)?
+                            }
+                            None => {
+                                Message::NoJob.send(&mut stream)?;
+                                break;
+                            }
                         }
                     }
+                    Ok(())
                 }
-                Ok(())
-            }
-            Message::Job(_, job) => {
-                let mut jobs = jobs_rc.lock().unwrap();
-                let mut job = Job::new(Job::get_free_job_id(&jobs[..]).unwrap(), job,Vec::new());
-                jobs.push(job);
-                Ok(())
-            }
-            _ => Message::Hello("Hey".to_string()).send(&mut stream),
-        })
-    };
+                Message::Job(_, _, job) => {
+                    let mut jobs = jobs_rc.lock().unwrap();
+                    let mut job =
+                        Job::new(Job::get_free_job_id(&jobs[..]).unwrap(), job, Vec::new());
+                    job.new_task(Vec::new());
 
-    // println!("Manager {} : Disconnected, notifying orchestrator...", id);
-    // TODO: Report errors ?
-    Message::Disconnect.send(&mut stream).unwrap_or_default();
-    orch_tx.send(Message::Disconnected(id))?;
+                    jobs.push(Arc::new(job));
+                    Ok(())
+                }
+                _ => Message::Hello("Hey".to_string()).send(&mut stream),
+            })
+        };
 
-    match result {
-        Err(err) => Err(Error::from(err)),
-        Ok(_) => Ok(()),
+        // println!("Manager {} : Disconnected, notifying orchestrator...", man_id);
+        // TODO: Report errors ?
+        Message::Disconnect.send(&mut stream).unwrap_or_default();
+        orch_tx.send(Message::Disconnected(man_id))?;
+
+        match result {
+            Err(err) => Err(Error::from(err)),
+            Ok(_) => Ok(()),
+        }
     }
 }
 
