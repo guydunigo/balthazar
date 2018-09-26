@@ -12,6 +12,9 @@ use std::io;
 use std::io::prelude::*;
 use std::iter::FusedIterator;
 
+// TODO: As a parameter...
+const MESSAGE_SIZE_LIMIT: usize = 2 << 20;
+
 // ------------------------------------------------------------------
 // Errors
 
@@ -51,6 +54,7 @@ pub enum Message {
     // TODO: Useful to annouce deconnection ?
     Disconnect,
     Disconnected(usize),
+    MessageTooBig,
     Idle(usize),
     Job(usize, usize, Vec<u8>),                     // TODO: Job ids?
     ReturnValue(usize, usize, Result<Vec<u8>, ()>), // TODO: proper error
@@ -72,7 +76,7 @@ impl Message {
             println!("sending `{}` of {} bytes.", msg_str, len);
         }
 
-        if len >= u32::max_value() as usize {
+        if len >= MESSAGE_SIZE_LIMIT as usize {
             return Err(Error::MessageTooBig(len));
         }
         writer.write_all(&(len as u32).to_le_bytes())?;
@@ -147,6 +151,12 @@ impl<R: Read> Iterator for MessageReader<R> {
 
                 u32::from_le_bytes(buffer) as usize
             };
+
+            if msg_size > MESSAGE_SIZE_LIMIT {
+                // TODO: notify sender ?
+                return Some(Err(Error::MessageTooBig(msg_size)));
+            }
+
             println!("{} : Receiving {} bytes...", self.id, msg_size);
 
             let mut buffer: Vec<u8> = Vec::new();
