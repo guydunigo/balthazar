@@ -96,14 +96,17 @@ impl Manager {
                         let mut jobs = jobs_rc.lock().unwrap();
                         match job::get_available_task(&*jobs) {
                             Some((job, task)) => {
-                                task.lock().unwrap().pode = Some(Arc::downgrade(&manager));
                                 {
                                     let mut manager = manager.lock().unwrap();
                                     manager.job = Some(job.clone());
                                     manager.task = Some(task.clone());
                                 }
-                                Message::Job(job.id, task.lock().unwrap().id, job.bytecode.clone())
+                                {
+                                    let mut task = task.lock().unwrap();
+                                    task.pode = Some(Arc::downgrade(&manager));
+                                    Message::Job(job.id, task.id, job.bytecode.clone())
                                     .send(&mut stream)?
+                                }
                             }
                             None => {
                                 Message::NoJob.send(&mut stream)?;
