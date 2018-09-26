@@ -49,13 +49,7 @@ impl<T> Job<T> {
     }
 
     pub fn get_available_task(&self) -> Option<Arc<Mutex<task::Task<T>>>> {
-        match self.tasks.iter().find(|t| {
-            let t = t.lock().unwrap();
-            t.result.is_none() && match &t.pode {
-                None => true,
-                Some(p) => p.upgrade().is_none(),
-            }
-        }) {
+        match self.tasks.iter().find(|t| t.lock().unwrap().is_available()) {
             Some(t) => Some(t.clone()),
             None => None,
         }
