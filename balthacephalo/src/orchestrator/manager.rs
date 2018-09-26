@@ -46,7 +46,7 @@ impl From<message::Error> for Error {
 pub struct Manager {
     id: usize,
     handle: Option<thread::JoinHandle<Result<(), Error>>>,
-    job: Option<Arc<Job<Mutex<Manager>>>>,
+    // TODO: Job as well ?
     task: Option<Arc<Mutex<Task<Mutex<Manager>>>>>,
 }
 
@@ -60,7 +60,6 @@ impl Manager {
         let man = Arc::from(Mutex::new(Manager {
             id,
             handle: None, // TODO: useful ?
-            job: None,
             task: None,
         }));
 
@@ -109,7 +108,6 @@ impl Manager {
                                 };
                                 {
                                     let mut manager = manager.lock().unwrap();
-                                    manager.job = Some(job.clone());
                                     manager.task = Some(task.clone());
                                 }
                                 send_res
@@ -129,6 +127,24 @@ impl Manager {
                     job.new_task(Vec::new());
 
                     jobs.push(Arc::new(job));
+                    Ok(())
+                }
+                Message::ReturnValue(_, _, value) => {
+                    // TODO: deadlock?
+                    // TODO: check job and task ids ?
+                    let mut manager = manager.lock().unwrap();
+                    let task = manager.task.clone();
+                    if let Some(task) = task {
+                        {
+                            let mut task = task.lock().unwrap();
+                            task.result = Some(value);
+                            task.pode = None;
+                        }
+                        manager.task = None;
+                    } else {
+                        // TODO: proper error handling ?
+                        println!("{} : The pode sent a return value but doesn't have a linked task, discarding...", man_id);
+                    }
                     Ok(())
                 }
                 _ => Message::Hello("Hey".to_string()).send(&mut stream),
