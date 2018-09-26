@@ -59,7 +59,7 @@ impl Manager {
     ) -> Arc<Mutex<Manager>> {
         let man = Arc::from(Mutex::new(Manager {
             id,
-            handle: None,
+            handle: None, // TODO: useful ?
             job: None,
             task: None,
         }));
@@ -96,17 +96,21 @@ impl Manager {
                         let mut jobs = jobs_rc.lock().unwrap();
                         match job::get_available_task(&*jobs) {
                             Some((job, task)) => {
+                                let send_res = {
+                                    let mut task = task.lock().unwrap();
+                                    // If the sending fails, we don't register the task.
+                                    let send_res =
+                                        Message::Job(job.id, task.id, job.bytecode.clone())
+                                            .send(&mut stream)?;
+                                    task.pode = Some(Arc::downgrade(&manager));
+                                    send_res
+                                };
                                 {
                                     let mut manager = manager.lock().unwrap();
                                     manager.job = Some(job.clone());
                                     manager.task = Some(task.clone());
                                 }
-                                {
-                                    let mut task = task.lock().unwrap();
-                                    task.pode = Some(Arc::downgrade(&manager));
-                                    Message::Job(job.id, task.id, job.bytecode.clone())
-                                    .send(&mut stream)?
-                                }
+                                send_res
                             }
                             None => {
                                 Message::NoJob.send(&mut stream)?;
@@ -137,25 +141,6 @@ impl Manager {
         match result {
             Err(err) => Err(Error::from(err)),
             Ok(_) => Ok(()),
-        }
-    }
-}
-
-impl Drop for Manager {
-    fn drop(&mut self) {
-        if let Some(handle) = self.handle.take() {
-            let res = handle.join();
-            match res {
-                Err(err) => println!(
-                    "{} : Couldn't join the thread (it might have panicked) : {:?}",
-                    self.id, err
-                ),
-                Ok(Err(err)) => println!(
-                    "{} : The manager returned the following errors : {:?}",
-                    self.id, err
-                ),
-                Ok(Ok(_)) => (), // println!("{} : The manager closed properly.", self.id),
-            }
         }
     }
 }
