@@ -111,6 +111,7 @@ impl<R: Read> MessageReader<R> {
         }
     }
 
+    // TODO: use std::io::Error s ?
     pub fn for_each_until_error<F>(&mut self, mut closure: F) -> Result<(), Error>
     where
         F: FnMut(Message) -> Result<(), Error>,
@@ -148,6 +149,7 @@ impl<R: Read> Iterator for MessageReader<R> {
     type Item = Result<Message, Error>;
 
     // TODO: clean this mess... (multiple returns ...)
+    // TODO: use std::io::Error s ?
     fn next(&mut self) -> Option<Result<Message, Error>> {
         if let Some(mut reader) = self.reader.take() {
             let msg_size: usize = {
@@ -249,28 +251,25 @@ mod tests {
         }
     }
 
-    fn test_send_msg(msg: Message) -> (Result<(), Error>, usize) {
+    fn test_send_msg(msg: Message) -> Result<(), Error> {
         let mut writer = MockWriter::new();
-
-        let msg_str = ser::to_string(&msg).unwrap();
-        let msg_len = msg_str.len();
 
         let res = msg.send(&mut writer);
 
-        (
-            match res {
-                Ok(()) => {
-                    assert_eq!(writer.len, 4 + msg_len);
+        match res {
+            Ok(()) => {
+                let msg_str = ser::to_string(&msg).unwrap();
+                let msg_len = msg_str.len();
 
-                    assert_eq!(&writer.bytes[..4], (msg_len as u32).to_le_bytes());
-                    assert_eq!(String::from_utf8_lossy(&writer.bytes[4..]), msg_str);
+                assert_eq!(writer.len, 4 + msg_len);
 
-                    Ok(())
-                }
-                Err(err) => Err(err),
-            },
-            msg_len,
-        )
+                assert_eq!(&writer.bytes[..4], (msg_len as u32).to_le_bytes());
+                assert_eq!(String::from_utf8_lossy(&writer.bytes[4..]), msg_str);
+
+                Ok(())
+            }
+            Err(err) => Err(err),
+        }
     }
 
     // ------------------------------------------------------------------
@@ -279,7 +278,7 @@ mod tests {
     fn it_sends_a_small_msg() {
         let msg = Message::NoJob;
 
-        if let Err(err) = test_send_msg(msg).0 {
+        if let Err(err) = test_send_msg(msg) {
             panic!("Returned an error: {:?}", err);
         }
     }
@@ -294,7 +293,7 @@ mod tests {
 
         let msg = Message::TestBig(vec);
 
-        if let Err(err) = test_send_msg(msg).0 {
+        if let Err(err) = test_send_msg(msg) {
             panic!("Returned an error: {:?}", err);
         }
     }
@@ -310,11 +309,9 @@ mod tests {
 
         let msg = Message::TestBig(vec);
 
-        let (res, msg_len) = test_send_msg(msg);
-
-        match res {
+        match test_send_msg(msg) {
             Ok(_) => panic!("Didn't return an error!"),
-            Err(Error::MessageTooBig(returned_len)) => assert_eq!(returned_len, msg_len),
+            Err(Error::MessageTooBig(_)) => {}
             Err(err) => panic!("Didn't return MessageTooBig, returned : {:?}", err),
         }
     }
@@ -331,9 +328,7 @@ mod tests {
 
         let msg = Message::Job(job_id, task_id, vec);
 
-        let (res, _) = test_send_msg(msg);
-
-        match res {
+        match test_send_msg(msg) {
             Ok(_) => panic!("Didn't return an error!"),
             Err(Error::JobTooBig(returned_size)) => assert_eq!(returned_size, job_size),
             Err(err) => panic!("Didn't return JobTooBig, returned : {:?}", err),
