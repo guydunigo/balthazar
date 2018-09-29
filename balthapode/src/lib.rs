@@ -76,11 +76,13 @@ pub fn swim<A: ToSocketAddrs + Display>(addr: A) -> Result<(), Error> {
                 //TODO: do not fail on job error
                 let res = wasm::exec_wasm(job);
                 if let Ok(res) = res {
-                    Message::ReturnValue(job_id, task_id, Ok(res)).send(&mut socket)
+                    Message::ReturnValue(job_id, task_id, Ok(res)).send(&mut socket)?
                 } else {
                     //TODO: return proper error
-                    Message::ReturnValue(job_id, task_id, Err(())).send(&mut socket)
+                    Message::ReturnValue(job_id, task_id, Err(())).send(&mut socket)?
                 }
+
+                Message::Idle(1).send(&mut socket)
             }
             _ => {
                 Message::Disconnect.send(&mut socket)
