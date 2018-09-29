@@ -72,6 +72,7 @@ pub fn swim<A: ToSocketAddrs + Display>(addr: A) -> Result<(), Error> {
         Message::Idle(1).send(&mut socket)?;
         reader.for_each_until_error(|msg| match msg {
             Message::Job(job_id, task_id, job) => {
+                //TODO: use balthajob to represent jobs and tasks and execute them there.
                 println!("Pode received a job !");
                 //TODO: do not fail on job error
                 let res = wasm::exec_wasm(job);

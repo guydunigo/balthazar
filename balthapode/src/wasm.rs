@@ -7,7 +7,7 @@ use std::string::FromUtf8Error;
 
 //TODO: clean this mess!!!
 //TODO: unwrap to proper errors
-//TODO: prevent  adding too many items to vec
+//TODO: prevent adding too many items to vec
 
 #[derive(Debug)]
 pub enum Error {
@@ -126,4 +126,12 @@ pub fn exec_wasm(bytecode: Vec<u8>) -> Result<Vec<u8>, Error> {
     );
 
     Ok(runtime.txt)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn it_execs_wasm() {
+        unimplemented!();
+    }
 }
