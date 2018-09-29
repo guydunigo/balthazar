@@ -12,8 +12,10 @@ use std::io;
 use std::io::prelude::*;
 use std::iter::FusedIterator;
 
-// TODO: As a parameter...
+// TODO: As parameters...
 const MESSAGE_SIZE_LIMIT: usize = 2 << 20;
+// TODO: Is there a window between JOB_SIZE_LIMIT converted and MESSAGE_SIZE_LIMIT?
+const JOB_SIZE_LIMIT: usize = MESSAGE_SIZE_LIMIT >> 2;
 
 // ------------------------------------------------------------------
 // Errors
@@ -25,6 +27,7 @@ pub enum Error {
     DeError(de::Error),
     CouldNotGetSize,
     MessageTooBig(usize),
+    JobTooBig(usize),
 }
 
 impl From<io::Error> for Error {
@@ -46,6 +49,7 @@ impl From<de::Error> for Error {
 }
 
 // ------------------------------------------------------------------
+// Message
 
 #[derive(Serialize, Deserialize, Debug)]
 pub enum Message {
@@ -60,10 +64,18 @@ pub enum Message {
     ReturnValue(usize, usize, Result<Vec<u8>, ()>), // TODO: proper error
     // External(E) // TODO: generic type
     NoJob,
+    TestBig(Vec<u8>),
 }
 
 impl Message {
     pub fn send<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
+        // This prevents spending time to convert the task... :
+        if let Message::Job(_, _, bytecode) = self {
+            if bytecode.len() >= JOB_SIZE_LIMIT as usize {
+                return Err(Error::JobTooBig(bytecode.len()));
+            }
+        }
+
         let msg_str = ser::to_string(self)?;
         let len = msg_str.len();
 
@@ -200,10 +212,131 @@ impl<R: Read> Iterator for MessageReader<R> {
     }
 }
 
+// ------------------------------------------------------------------
+// Tests
+
 #[cfg(test)]
 mod tests {
+    use super::Error;
+    use super::Message;
+    use super::JOB_SIZE_LIMIT;
+    use super::MESSAGE_SIZE_LIMIT;
+    use ron::{de, ser};
+    use std::io::prelude::*;
+
+    // ------------------------------------------------------------------
+
+    struct MockWriter {
+        bytes: Vec<u8>,
+        len: usize,
+    }
+    impl MockWriter {
+        pub fn new() -> MockWriter {
+            MockWriter {
+                bytes: Vec::new(),
+                len: 0,
+            }
+        }
+    }
+    impl Write for MockWriter {
+        fn write(&mut self, bytes: &[u8]) -> std::result::Result<usize, std::io::Error> {
+            bytes.iter().for_each(|b| self.bytes.push(b.clone()));
+            self.len += bytes.len();
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::result::Result<(), std::io::Error> {
+            unimplemented!();
+        }
+    }
+
+    fn test_send_msg(msg: Message) -> (Result<(), Error>, usize) {
+        let mut writer = MockWriter::new();
+
+        let msg_str = ser::to_string(&msg).unwrap();
+        let msg_len = msg_str.len();
+
+        let res = msg.send(&mut writer);
+
+        (
+            match res {
+                Ok(()) => {
+                    assert_eq!(writer.len, 4 + msg_len);
+
+                    assert_eq!(&writer.bytes[..4], (msg_len as u32).to_le_bytes());
+                    assert_eq!(String::from_utf8_lossy(&writer.bytes[4..]), msg_str);
+
+                    Ok(())
+                }
+                Err(err) => Err(err),
+            },
+            msg_len,
+        )
+    }
+
+    // ------------------------------------------------------------------
+
     #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
+    fn it_sends_a_small_msg() {
+        let msg = Message::NoJob;
+
+        if let Err(err) = test_send_msg(msg).0 {
+            panic!("Returned an error: {:?}", err);
+        }
+    }
+    #[test]
+    fn it_sends_a_big_msg() {
+        let job_size = MESSAGE_SIZE_LIMIT >> 5;
+
+        let mut vec = Vec::with_capacity(job_size);
+        unsafe {
+            vec.set_len(job_size);
+        }
+
+        let msg = Message::TestBig(vec);
+
+        if let Err(err) = test_send_msg(msg).0 {
+            panic!("Returned an error: {:?}", err);
+        }
+    }
+    #[test]
+    #[ignore]
+    fn it_shouldnt_send_a_huge_msg() {
+        let job_size = MESSAGE_SIZE_LIMIT << 1;
+
+        let mut vec = Vec::with_capacity(job_size);
+        unsafe {
+            vec.set_len(job_size);
+        }
+
+        let msg = Message::TestBig(vec);
+
+        let (res, msg_len) = test_send_msg(msg);
+
+        match res {
+            Ok(_) => panic!("Didn't return an error!"),
+            Err(Error::MessageTooBig(returned_len)) => assert_eq!(returned_len, msg_len),
+            Err(err) => panic!("Didn't return MessageTooBig, returned : {:?}", err),
+        }
+    }
+    #[test]
+    fn it_shouldnt_send_a_huge_job() {
+        let job_id = 10;
+        let task_id = 1246;
+        let job_size = JOB_SIZE_LIMIT << 1;
+
+        let mut vec = Vec::with_capacity(job_size);
+        unsafe {
+            vec.set_len(job_size);
+        }
+
+        let msg = Message::Job(job_id, task_id, vec);
+
+        let (res, _) = test_send_msg(msg);
+
+        match res {
+            Ok(_) => panic!("Didn't return an error!"),
+            Err(Error::JobTooBig(returned_size)) => assert_eq!(returned_size, job_size),
+            Err(err) => panic!("Didn't return JobTooBig, returned : {:?}", err),
+        }
     }
 }
