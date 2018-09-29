@@ -112,6 +112,7 @@ impl<R: Read> MessageReader<R> {
     }
 
     // TODO: use std::io::Error s ?
+    // TODO: tests
     pub fn for_each_until_error<F>(&mut self, mut closure: F) -> Result<(), Error>
     where
         F: FnMut(Message) -> Result<(), Error>,
@@ -314,139 +315,145 @@ mod tests {
 
     // ------------------------------------------------------------------
     // Message::send(...) :
+    mod message_send {
+        use super::*;
+        #[test]
+        fn it_sends_a_small_msg() {
+            let msg = Message::NoJob;
 
-    #[test]
-    fn it_sends_a_small_msg() {
-        let msg = Message::NoJob;
-
-        if let Err(err) = test_send_msg(msg) {
-            panic!("Returned an error: {:?}", err);
+            if let Err(err) = test_send_msg(msg) {
+                panic!("Returned an error: {:?}", err);
+            }
         }
-    }
-    #[test]
-    fn it_sends_a_big_msg() {
-        let job_size = MESSAGE_SIZE_LIMIT >> 5;
+        #[test]
+        fn it_sends_a_big_msg() {
+            let job_size = MESSAGE_SIZE_LIMIT >> 5;
 
-        let mut vec = Vec::with_capacity(job_size);
-        unsafe {
-            vec.set_len(job_size);
+            let mut vec = Vec::with_capacity(job_size);
+            unsafe {
+                vec.set_len(job_size);
+            }
+
+            let msg = Message::TestBig(vec);
+
+            if let Err(err) = test_send_msg(msg) {
+                panic!("Returned an error: {:?}", err);
+            }
         }
+        #[test]
+        // #[ignore]
+        fn it_doesnt_send_a_huge_msg() {
+            let job_size = MESSAGE_SIZE_LIMIT << 1;
 
-        let msg = Message::TestBig(vec);
+            let mut vec = Vec::with_capacity(job_size);
+            unsafe {
+                vec.set_len(job_size);
+            }
 
-        if let Err(err) = test_send_msg(msg) {
-            panic!("Returned an error: {:?}", err);
+            let msg = Message::TestBig(vec);
+
+            match test_send_msg(msg) {
+                Ok(_) => panic!("Didn't return an error!"),
+                Err(Error::MessageTooBig(_)) => {}
+                Err(err) => panic!("Didn't return MessageTooBig, returned : {:?}", err),
+            }
         }
-    }
-    #[test]
-    #[ignore]
-    fn it_doesnt_send_a_huge_msg() {
-        let job_size = MESSAGE_SIZE_LIMIT << 1;
+        #[test]
+        fn it_doesnt_send_a_huge_job() {
+            let job_id = 10;
+            let task_id = 1246;
+            let job_size = JOB_SIZE_LIMIT << 1;
 
-        let mut vec = Vec::with_capacity(job_size);
-        unsafe {
-            vec.set_len(job_size);
-        }
+            let mut vec = Vec::with_capacity(job_size);
+            unsafe {
+                vec.set_len(job_size);
+            }
 
-        let msg = Message::TestBig(vec);
+            let msg = Message::Job(job_id, task_id, vec);
 
-        match test_send_msg(msg) {
-            Ok(_) => panic!("Didn't return an error!"),
-            Err(Error::MessageTooBig(_)) => {}
-            Err(err) => panic!("Didn't return MessageTooBig, returned : {:?}", err),
-        }
-    }
-    #[test]
-    fn it_doesnt_send_a_huge_job() {
-        let job_id = 10;
-        let task_id = 1246;
-        let job_size = JOB_SIZE_LIMIT << 1;
-
-        let mut vec = Vec::with_capacity(job_size);
-        unsafe {
-            vec.set_len(job_size);
-        }
-
-        let msg = Message::Job(job_id, task_id, vec);
-
-        match test_send_msg(msg) {
-            Ok(_) => panic!("Didn't return an error!"),
-            Err(Error::JobTooBig(returned_size)) => assert_eq!(returned_size, job_size),
-            Err(err) => panic!("Didn't return JobTooBig, returned : {:?}", err),
+            match test_send_msg(msg) {
+                Ok(_) => panic!("Didn't return an error!"),
+                Err(Error::JobTooBig(returned_size)) => assert_eq!(returned_size, job_size),
+                Err(err) => panic!("Didn't return JobTooBig, returned : {:?}", err),
+            }
         }
     }
 
     // ------------------------------------------------------------------
     // MessageReader::next() :
+    mod message_reader_next {
+        use super::*;
+        #[test]
+        fn it_receives_a_small_msg() {
+            let msg = Message::NoJob;
 
-    #[test]
-    fn it_receives_a_small_msg() {
-        let msg = Message::NoJob;
-
-        if let Err(err) = test_receive_msg(None, msg) {
-            panic!("Received an error : {:?}", err);
-        }
-    }
-    #[test]
-    fn it_receives_a_big_msg() {
-        let job_size = MESSAGE_SIZE_LIMIT >> 5;
-        let mut vec = Vec::with_capacity(job_size);
-        unsafe {
-            vec.set_len(job_size);
-        }
-
-        let msg = Message::TestBig(vec.clone());
-
-        match test_receive_msg(None, msg) {
-            Ok(Message::TestBig(received_vec)) => assert_eq!(received_vec, vec),
-            Ok(msg) => panic!("Didn't receive the right message : {:?}", msg),
-            Err(err) => panic!("Received an error : {:?}", err),
-        }
-    }
-    #[test]
-    fn it_doesnt_receive_a_huge_msg() {
-        let job_size = MESSAGE_SIZE_LIMIT << 1;
-        let job_size_buffer = u32::to_le_bytes(job_size as u32);
-
-        let mut stream = MockStream::new();
-        stream.write(&job_size_buffer[..]).unwrap();
-
-        let mut reader = MessageReader::new(0, stream);
-
-        match reader.next() {
-            Some(Ok(msg)) => panic!("Received a message : {:?}", msg),
-            Some(Err(Error::MessageTooBig(received_size))) => assert_eq!(job_size, received_size),
-            Some(Err(err)) => panic!("Didn't received the correct error : {:?}", err),
-            None => panic!("Didn't receive any message!"),
-        }
-    }
-    #[test]
-    fn it_receives_none_when_connection_closed() {
-        let stream = MockStream::new();
-        let mut reader = MessageReader::new(0, stream);
-
-        match reader.next() {
-            Some(Ok(msg)) => panic!("Received a message : {:?}", msg),
-            Some(Err(err)) => panic!("Received an error : {:?}", err),
-            None => {}
-        }
-    }
-    #[test]
-    fn it_receives_several_messages() {
-        let mut stream = MockStream::new();
-
-        let mut msgs = vec![
-            Message::NoJob,
-            Message::MessageTooBig,
-            Message::Hello(String::from("this is a test")),
-        ];
-        msgs.iter().for_each(|m| m.send(&mut stream).unwrap());
-
-        msgs.drain(..).for_each(|m| {
-            if let Err(err) = test_receive_msg(Some(&mut stream), m) {
+            if let Err(err) = test_receive_msg(None, msg) {
                 panic!("Received an error : {:?}", err);
             }
-        });
+        }
+        #[test]
+        fn it_receives_a_big_msg() {
+            let job_size = MESSAGE_SIZE_LIMIT >> 5;
+            let mut vec = Vec::with_capacity(job_size);
+            unsafe {
+                vec.set_len(job_size);
+            }
+
+            let msg = Message::TestBig(vec.clone());
+
+            match test_receive_msg(None, msg) {
+                Ok(Message::TestBig(received_vec)) => assert_eq!(received_vec, vec),
+                Ok(msg) => panic!("Didn't receive the right message : {:?}", msg),
+                Err(err) => panic!("Received an error : {:?}", err),
+            }
+        }
+        #[test]
+        fn it_doesnt_receive_a_huge_msg() {
+            let job_size = MESSAGE_SIZE_LIMIT << 1;
+            let job_size_buffer = u32::to_le_bytes(job_size as u32);
+
+            let mut stream = MockStream::new();
+            stream.write(&job_size_buffer[..]).unwrap();
+
+            let mut reader = MessageReader::new(0, stream);
+
+            match reader.next() {
+                Some(Ok(msg)) => panic!("Received a message : {:?}", msg),
+                Some(Err(Error::MessageTooBig(received_size))) => {
+                    assert_eq!(job_size, received_size)
+                }
+                Some(Err(err)) => panic!("Didn't received the correct error : {:?}", err),
+                None => panic!("Didn't receive any message!"),
+            }
+        }
+        #[test]
+        fn it_receives_none_when_connection_closed() {
+            let stream = MockStream::new();
+            let mut reader = MessageReader::new(0, stream);
+
+            match reader.next() {
+                Some(Ok(msg)) => panic!("Received a message : {:?}", msg),
+                Some(Err(err)) => panic!("Received an error : {:?}", err),
+                None => {}
+            }
+        }
+        #[test]
+        fn it_receives_several_messages() {
+            let mut stream = MockStream::new();
+
+            let mut msgs = vec![
+                Message::NoJob,
+                Message::MessageTooBig,
+                Message::Hello(String::from("this is a test")),
+            ];
+            msgs.iter().for_each(|m| m.send(&mut stream).unwrap());
+
+            msgs.drain(..).for_each(|m| {
+                if let Err(err) = test_receive_msg(Some(&mut stream), m) {
+                    panic!("Received an error : {:?}", err);
+                }
+            });
+        }
+        // TODO: fuzzy testing
     }
-    // TODO: fuzzy testing
 }
