@@ -28,12 +28,40 @@ impl<T> Task<T> {
     }
 }
 
-/*
 #[cfg(test)]
 mod tests {
+    use super::Task;
+    use std::sync::Arc;
+
     #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
+    fn available_when_created() {
+        let t: Task<u8> = Task::new(1, Vec::new());
+        assert!(t.is_available());
+    }
+    #[test]
+    fn not_available_if_result() {
+        let mut t: Task<u8> = Task::new(1, Vec::new());
+        t.result = Some(Ok(Vec::new()));
+        assert!(!t.is_available());
+    }
+    #[test]
+    fn not_available_if_attributed() {
+        let mut t: Task<u8> = Task::new(1, Vec::new());
+        let arc = Arc::new(0);
+        let weak = Arc::downgrade(&arc);
+        t.pode = Some(weak);
+
+        assert!(!t.is_available());
+    }
+    #[test]
+    fn available_if_attributed_is_dead() {
+        let mut t: Task<u8> = Task::new(1, Vec::new());
+        let arc = Arc::new(0);
+        let weak = Arc::downgrade(&arc);
+        t.pode = Some(weak);
+
+        drop(arc);
+
+        assert!(t.is_available());
     }
 }
-*/
