@@ -39,6 +39,7 @@ impl<T> Job<T> {
 
     fn get_new_task_id(&mut self) -> usize {
         let res = self.next_task_id;
+        // TODO: usize limit ?
         self.next_task_id += 1;
         res
     }
@@ -48,6 +49,7 @@ impl<T> Job<T> {
         self.tasks.push(Arc::new(Mutex::new(task)));
     }
 
+    // TODO: what happens between the mutex unlock and the new lock ? return MutexGuard ?
     pub fn get_available_task(&self) -> Option<Arc<Mutex<task::Task<T>>>> {
         match self.tasks.iter().find(|t| t.lock().unwrap().is_available()) {
             Some(t) => Some(t.clone()),
@@ -57,6 +59,7 @@ impl<T> Job<T> {
 }
 
 // TODO: name?
+// TODO: what happens between the mutex unlock and the new lock ? return MutexGuard ?
 pub fn get_available_task<T>(
     jobs: &Vec<Arc<Job<T>>>,
 ) -> Option<(Arc<Job<T>>, Arc<Mutex<task::Task<T>>>)> {
@@ -72,6 +75,7 @@ pub fn get_available_task<T>(
         }).next()
 }
 
+/*
 #[cfg(test)]
 mod tests {
     #[test]
@@ -79,3 +83,4 @@ mod tests {
         assert_eq!(2 + 2, 4);
     }
 }
+*/

@@ -7,6 +7,8 @@ extern crate serde_derive;
 extern crate ron;
 extern crate serde;
 
+pub mod mock_stream;
+
 pub use ron::{de, ser};
 use std::io;
 use std::io::prelude::*;
@@ -222,102 +224,35 @@ impl<R: Read> Iterator for MessageReader<R> {
 
 #[cfg(test)]
 mod tests {
-    use super::Error;
-    use super::Message;
-    use super::MessageReader;
-    use super::JOB_SIZE_LIMIT;
-    use super::MESSAGE_SIZE_LIMIT;
-    use ron::ser;
-    use std::io;
-    use std::io::prelude::*;
-
-    // ------------------------------------------------------------------
-
-    struct MockStream {
-        pub bytes: Vec<u8>,
-    }
-    impl MockStream {
-        pub fn new() -> MockStream {
-            MockStream { bytes: Vec::new() }
-        }
-    }
-    impl Write for MockStream {
-        fn write(&mut self, bytes: &[u8]) -> std::result::Result<usize, std::io::Error> {
-            bytes.iter().for_each(|b| self.bytes.push(b.clone()));
-            Ok(bytes.len())
-        }
-        fn flush(&mut self) -> std::result::Result<(), std::io::Error> {
-            unimplemented!();
-        }
-    }
-    impl Read for MockStream {
-        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-            let buf_len = buf.len();
-            let bytes_len = self.bytes.len();
-            let length = if buf_len > bytes_len {
-                bytes_len
-            } else {
-                buf_len
-            };
-
-            if length > 0 {
-                let read_vec: Vec<u8> = self.bytes.drain(..length).collect();
-                buf.copy_from_slice(&read_vec[..]);
-
-                Ok(length)
-            } else {
-                Ok(0)
-            }
-        }
-    }
-
-    fn test_send_msg(msg: Message) -> Result<(), Error> {
-        let mut writer = MockStream::new();
-
-        let res = msg.send(&mut writer);
-
-        match res {
-            Ok(()) => {
-                let msg_str = ser::to_string(&msg).unwrap();
-                let msg_len = msg_str.len();
-
-                assert_eq!(writer.bytes.len(), 4 + msg_len);
-
-                assert_eq!(&writer.bytes[..4], (msg_len as u32).to_le_bytes());
-                assert_eq!(String::from_utf8_lossy(&writer.bytes[4..]), msg_str);
-
-                Ok(())
-            }
-            Err(err) => Err(err),
-        }
-    }
-    fn test_receive_msg(
-        mut given_stream: Option<&mut MockStream>,
-        ref_msg: Message,
-    ) -> Result<Message, Error> {
-        let mut stream = MockStream::new();
-        ref_msg.send(&mut stream).unwrap();
-
-        let stream = match given_stream.take() {
-            Some(stream) => stream,
-            None => &mut stream,
-        };
-        let mut reader = MessageReader::new(0, stream);
-
-        match reader.next() {
-            Some(Ok(read_msg)) => {
-                assert_eq!(read_msg, ref_msg);
-                Ok(read_msg)
-            }
-            Some(Err(err)) => Err(err),
-            None => panic!("Didn't receive any message!"),
-        }
-    }
+    use super::*;
+    use mock_stream::*;
 
     // ------------------------------------------------------------------
     // Message::send(...) :
     mod message_send {
         use super::*;
+
+        fn test_send_msg(msg: Message) -> Result<(), Error> {
+            let mut writer = MockStream::new();
+
+            let res = msg.send(&mut writer);
+
+            match res {
+                Ok(()) => {
+                    let msg_str = ser::to_string(&msg).unwrap();
+                    let msg_len = msg_str.len();
+
+                    assert_eq!(writer.bytes.len(), 4 + msg_len);
+
+                    assert_eq!(&writer.bytes[..4], (msg_len as u32).to_le_bytes());
+                    assert_eq!(String::from_utf8_lossy(&writer.bytes[4..]), msg_str);
+
+                    Ok(())
+                }
+                Err(err) => Err(err),
+            }
+        }
+
         #[test]
         fn it_sends_a_small_msg() {
             let msg = Message::NoJob;
@@ -384,6 +319,30 @@ mod tests {
     // MessageReader::next() :
     mod message_reader_next {
         use super::*;
+
+        fn test_receive_msg(
+            mut given_stream: Option<&mut MockStream>,
+            ref_msg: Message,
+        ) -> Result<Message, Error> {
+            let mut stream = MockStream::new();
+            ref_msg.send(&mut stream).unwrap();
+
+            let stream = match given_stream.take() {
+                Some(stream) => stream,
+                None => &mut stream,
+            };
+            let mut reader = MessageReader::new(0, stream);
+
+            match reader.next() {
+                Some(Ok(read_msg)) => {
+                    assert_eq!(read_msg, ref_msg);
+                    Ok(read_msg)
+                }
+                Some(Err(err)) => Err(err),
+                None => panic!("Didn't receive any message!"),
+            }
+        }
+
         #[test]
         fn it_receives_a_small_msg() {
             let msg = Message::NoJob;

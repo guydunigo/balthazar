@@ -93,6 +93,10 @@ impl Manager {
             let mut stream = stream.try_clone()?;
             reader.for_each_until_error(|msg| match msg {
                 Message::Idle(i) => {
+                    // TODO: check if the pode doesn't already have a task:
+                    //      - Free the previous task
+                    //      - Send again the previous task
+                    //      - Send error
                     for _ in 0..i {
                         let mut jobs = jobs_rc.lock().unwrap();
                         match job::get_available_task(&*jobs) {
