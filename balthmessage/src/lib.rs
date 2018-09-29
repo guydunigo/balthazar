@@ -179,7 +179,8 @@ impl<R: Read> Iterator for MessageReader<R> {
             let mut buffer: Vec<u8> = Vec::new();
             buffer.resize_default(msg_size);
 
-            // Loops until it got the full message:
+            // Loops until it has the full message:
+            // TODO: use read_exact ?
             let mut downloaded_size = 0;
             while downloaded_size < buffer.len() {
                 let n = match reader.read(&mut buffer[downloaded_size..]) {
