@@ -153,6 +153,7 @@ impl Manager {
 
         // println!("Manager {} : Disconnected, notifying orchestrator...", man_id);
         // TODO: Report errors ?
+        // TODO: useful if already EOF ?
         Message::Disconnect.send(&mut stream).unwrap_or_default();
         orch_tx.send(Message::Disconnected(man_id))?;
 

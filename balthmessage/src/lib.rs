@@ -51,7 +51,7 @@ impl From<de::Error> for Error {
 // ------------------------------------------------------------------
 // Message
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug)]
 pub enum Message {
     Hello(String),
     Connected(usize),
@@ -123,10 +123,7 @@ impl<R: Read> MessageReader<R> {
                     println!("{} : Disconnection announced.", id);
                     false
                 }
-                Ok(Message::Disconnected(_)) => {
-                    println!("{} : Disconnected socket.", id);
-                    false
-                }
+                Ok(Message::Disconnected(_)) => false,
                 _ => true,
             }).map(|msg_res| -> Result<(), Error> {
                 match msg_res {
@@ -138,7 +135,10 @@ impl<R: Read> MessageReader<R> {
 
         match res {
             Some(Err(err)) => Err(err),
-            _ => Ok(()),
+            _ => {
+                println!("{} : Disconnected socket.", id);
+                Ok(())
+            }
         }
     }
 }
@@ -155,13 +155,15 @@ impl<R: Read> Iterator for MessageReader<R> {
             let msg_size: usize = {
                 let mut buffer: [u8; 4] = [0; 4];
 
-                let n = match reader.read(&mut buffer) {
-                    Ok(n) => n,
-                    Err(err) => return Some(Err(Error::from(err))),
+                match reader.read_exact(&mut buffer) {
+                    Ok(_) => {}
+                    Err(err) => {
+                        return match err.kind() {
+                            io::ErrorKind::UnexpectedEof => None,
+                            _ => Some(Err(Error::from(err))),
+                        }
+                    }
                 };
-                if n != 4 {
-                    return Some(Err(Error::CouldNotGetSize));
-                }
 
                 u32::from_le_bytes(buffer) as usize
             };
@@ -184,8 +186,7 @@ impl<R: Read> Iterator for MessageReader<R> {
                     Err(err) => return Some(Err(Error::from(err))),
                 };
                 if n <= 0 {
-                    // TODO: Or directly return none...
-                    return Some(Ok(Message::Disconnected(self.id)));
+                    return None;
                 }
 
                 downloaded_size += n;
@@ -221,38 +222,55 @@ impl<R: Read> Iterator for MessageReader<R> {
 mod tests {
     use super::Error;
     use super::Message;
+    use super::MessageReader;
     use super::JOB_SIZE_LIMIT;
     use super::MESSAGE_SIZE_LIMIT;
-    use ron::{de, ser};
+    use ron::ser;
+    use std::io;
     use std::io::prelude::*;
 
     // ------------------------------------------------------------------
 
-    struct MockWriter {
-        bytes: Vec<u8>,
-        len: usize,
+    struct MockStream {
+        pub bytes: Vec<u8>,
     }
-    impl MockWriter {
-        pub fn new() -> MockWriter {
-            MockWriter {
-                bytes: Vec::new(),
-                len: 0,
-            }
+    impl MockStream {
+        pub fn new() -> MockStream {
+            MockStream { bytes: Vec::new() }
         }
     }
-    impl Write for MockWriter {
+    impl Write for MockStream {
         fn write(&mut self, bytes: &[u8]) -> std::result::Result<usize, std::io::Error> {
             bytes.iter().for_each(|b| self.bytes.push(b.clone()));
-            self.len += bytes.len();
             Ok(bytes.len())
         }
         fn flush(&mut self) -> std::result::Result<(), std::io::Error> {
             unimplemented!();
         }
     }
+    impl Read for MockStream {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            let buf_len = buf.len();
+            let bytes_len = self.bytes.len();
+            let length = if buf_len > bytes_len {
+                bytes_len
+            } else {
+                buf_len
+            };
+
+            if length > 0 {
+                let read_vec: Vec<u8> = self.bytes.drain(..length).collect();
+                buf.copy_from_slice(&read_vec[..]);
+
+                Ok(length)
+            } else {
+                Ok(0)
+            }
+        }
+    }
 
     fn test_send_msg(msg: Message) -> Result<(), Error> {
-        let mut writer = MockWriter::new();
+        let mut writer = MockStream::new();
 
         let res = msg.send(&mut writer);
 
@@ -261,7 +279,7 @@ mod tests {
                 let msg_str = ser::to_string(&msg).unwrap();
                 let msg_len = msg_str.len();
 
-                assert_eq!(writer.len, 4 + msg_len);
+                assert_eq!(writer.bytes.len(), 4 + msg_len);
 
                 assert_eq!(&writer.bytes[..4], (msg_len as u32).to_le_bytes());
                 assert_eq!(String::from_utf8_lossy(&writer.bytes[4..]), msg_str);
@@ -271,8 +289,31 @@ mod tests {
             Err(err) => Err(err),
         }
     }
+    fn test_receive_msg(
+        mut given_stream: Option<&mut MockStream>,
+        ref_msg: Message,
+    ) -> Result<Message, Error> {
+        let mut stream = MockStream::new();
+        ref_msg.send(&mut stream).unwrap();
+
+        let stream = match given_stream.take() {
+            Some(stream) => stream,
+            None => &mut stream,
+        };
+        let mut reader = MessageReader::new(0, stream);
+
+        match reader.next() {
+            Some(Ok(read_msg)) => {
+                assert_eq!(read_msg, ref_msg);
+                Ok(read_msg)
+            }
+            Some(Err(err)) => Err(err),
+            None => panic!("Didn't receive any message!"),
+        }
+    }
 
     // ------------------------------------------------------------------
+    // Message::send(...) :
 
     #[test]
     fn it_sends_a_small_msg() {
@@ -299,7 +340,7 @@ mod tests {
     }
     #[test]
     #[ignore]
-    fn it_shouldnt_send_a_huge_msg() {
+    fn it_doesnt_send_a_huge_msg() {
         let job_size = MESSAGE_SIZE_LIMIT << 1;
 
         let mut vec = Vec::with_capacity(job_size);
@@ -316,7 +357,7 @@ mod tests {
         }
     }
     #[test]
-    fn it_shouldnt_send_a_huge_job() {
+    fn it_doesnt_send_a_huge_job() {
         let job_id = 10;
         let task_id = 1246;
         let job_size = JOB_SIZE_LIMIT << 1;
@@ -334,4 +375,78 @@ mod tests {
             Err(err) => panic!("Didn't return JobTooBig, returned : {:?}", err),
         }
     }
+
+    // ------------------------------------------------------------------
+    // MessageReader::next() :
+
+    #[test]
+    fn it_receives_a_small_msg() {
+        let msg = Message::NoJob;
+
+        if let Err(err) = test_receive_msg(None, msg) {
+            panic!("Received an error : {:?}", err);
+        }
+    }
+    #[test]
+    fn it_receives_a_big_msg() {
+        let job_size = MESSAGE_SIZE_LIMIT >> 5;
+        let mut vec = Vec::with_capacity(job_size);
+        unsafe {
+            vec.set_len(job_size);
+        }
+
+        let msg = Message::TestBig(vec.clone());
+
+        match test_receive_msg(None, msg) {
+            Ok(Message::TestBig(received_vec)) => assert_eq!(received_vec, vec),
+            Ok(msg) => panic!("Didn't receive the right message : {:?}", msg),
+            Err(err) => panic!("Received an error : {:?}", err),
+        }
+    }
+    #[test]
+    fn it_doesnt_receive_a_huge_msg() {
+        let job_size = MESSAGE_SIZE_LIMIT << 1;
+        let job_size_buffer = u32::to_le_bytes(job_size as u32);
+
+        let mut stream = MockStream::new();
+        stream.write(&job_size_buffer[..]).unwrap();
+
+        let mut reader = MessageReader::new(0, stream);
+
+        match reader.next() {
+            Some(Ok(msg)) => panic!("Received a message : {:?}", msg),
+            Some(Err(Error::MessageTooBig(received_size))) => assert_eq!(job_size, received_size),
+            Some(Err(err)) => panic!("Didn't received the correct error : {:?}", err),
+            None => panic!("Didn't receive any message!"),
+        }
+    }
+    #[test]
+    fn it_receives_none_when_connection_closed() {
+        let stream = MockStream::new();
+        let mut reader = MessageReader::new(0, stream);
+
+        match reader.next() {
+            Some(Ok(msg)) => panic!("Received a message : {:?}", msg),
+            Some(Err(err)) => panic!("Received an error : {:?}", err),
+            None => {}
+        }
+    }
+    #[test]
+    fn it_receives_several_messages() {
+        let mut stream = MockStream::new();
+
+        let mut msgs = vec![
+            Message::NoJob,
+            Message::MessageTooBig,
+            Message::Hello(String::from("this is a test")),
+        ];
+        msgs.iter().for_each(|m| m.send(&mut stream).unwrap());
+
+        msgs.drain(..).for_each(|m| {
+            if let Err(err) = test_receive_msg(Some(&mut stream), m) {
+                panic!("Received an error : {:?}", err);
+            }
+        });
+    }
+    // TODO: fuzzy testing
 }
