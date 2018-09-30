@@ -56,14 +56,18 @@ impl<T> Job<T> {
         res
     }
 
-    pub fn new_task(&mut self, args: Arguments) {
-        let task_id = self.get_new_task_id();
-        self.push_task(task_id, args);
+    pub fn push_task(&mut self, task: task::Task<T>) {
+        self.tasks.push(Arc::new(Mutex::new(task)));
     }
 
-    pub fn push_task(&mut self, task_id: usize, args: Arguments) {
+    pub fn push_new_task(&mut self, task_id: usize, args: Arguments) {
         let task = task::Task::new(task_id, args);
-        self.tasks.push(Arc::new(Mutex::new(task)));
+        self.push_task(task);
+    }
+
+    pub fn new_task(&mut self, args: Arguments) {
+        let task_id = self.get_new_task_id();
+        self.push_new_task(task_id, args);
     }
 
     // TODO: what happens between the mutex unlock and the new lock ? return MutexGuard ?

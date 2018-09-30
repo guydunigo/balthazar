@@ -60,22 +60,20 @@ pub fn orchestrate(
                 (job.id, job.bytecode.clone())
             };
 
-            if bytecode.len() > 0 {
-                let res = wasm::exec_wasm(&bytecode[..], &args);
-                println!(
-                    "Executed Task #{} for Job #{} : `{:?}`",
-                    task_id, job_id, res
-                );
+            let res = wasm::exec_wasm(&bytecode[..], &args);
+            println!(
+                "Executed Task #{} for Job #{} : `{:?}`",
+                task_id, job_id, res
+            );
 
-                //TODO: return proper error
-                let res = match res {
-                    Ok(args) => Ok(args),
-                    Err(_) => Err(()),
-                };
-                task.lock().unwrap().result = Some(res.clone());
+            //TODO: return proper error
+            let res = match res {
+                Ok(args) => Ok(args),
+                Err(_) => Err(()),
+            };
+            task.lock().unwrap().result = Some(res.clone());
 
-                sender.send(Message::ReturnValue(job_id, task_id, res))?;
-            }
+            sender.send(Message::ReturnValue(job_id, task_id, res))?;
         } else {
             // TODO: How to wait for new jobs?
             println!("Sleeping...");

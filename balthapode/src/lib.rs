@@ -16,6 +16,7 @@ use std::net::{TcpStream, ToSocketAddrs};
 use std::sync::Arc;
 use std::sync::Mutex;
 
+use job::task::{LoneTask, Task};
 use job::Job;
 use message::{Message, MessageReader};
 
@@ -59,6 +60,8 @@ pub fn swim<A: ToSocketAddrs + Display>(addr: A) -> Result<(), Error> {
 
     let mut reader = MessageReader::new(id, socket.try_clone()?);
     let result = {
+        let mut lone_tasks: Vec<LoneTask<bool>> = Vec::new();
+
         let jobs: Vec<Arc<Mutex<Job<bool>>>> = Vec::new();
         let jobs = Arc::new(Mutex::new(jobs));
 
@@ -87,11 +90,21 @@ pub fn swim<A: ToSocketAddrs + Display>(addr: A) -> Result<(), Error> {
                 };
 
                 match job_opt {
+                    // TODO: Useful ?
                     Some(job) => job.lock().unwrap().set_bytecode(bytecode),
-                    None => jobs
-                        .lock()
-                        .unwrap()
-                        .push(Arc::new(Mutex::new(Job::new(job_id, bytecode)))),
+                    None => {
+                        let mut job = Job::new(job_id, bytecode);
+                        let mut new_lone_tasks = Vec::new();
+                        for t in lone_tasks.drain(..) {
+                            if t.job_id == job_id {
+                                job.push_task(t.task);
+                            } else {
+                                new_lone_tasks.push(t);
+                            }
+                        }
+                        lone_tasks = new_lone_tasks;
+                        jobs.lock().unwrap().push(Arc::new(Mutex::new(job)));
+                    }
                 }
 
                 Ok(())
@@ -109,17 +122,15 @@ pub fn swim<A: ToSocketAddrs + Display>(addr: A) -> Result<(), Error> {
                     None => None,
                 };
 
-                let job = match job_opt {
-                    Some(job) => job,
+                match job_opt {
+                    Some(job) => job.lock().unwrap().push_new_task(task_id, args),
                     None => {
-                        let job = Arc::new(Mutex::new(Job::new(job_id, Vec::new())));
-                        jobs.lock().unwrap().push(job.clone());
+                        let task = Task::new(task_id, args);
+                        lone_tasks.push(LoneTask { job_id, task });
                         Message::RequestJob(job_id).send(&mut socket)?;
-                        job
                     }
-                };
+                }
 
-                job.lock().unwrap().push_task(task_id, args);
                 println!("Task #{} for Job #{} saved", task_id, job_id);
 
                 Ok(())

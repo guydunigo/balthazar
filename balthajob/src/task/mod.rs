@@ -4,6 +4,12 @@ use std::sync::Weak;
 
 type Arguments = arguments::Arguments;
 
+#[derive(Debug)]
+pub struct LoneTask<T> {
+    pub job_id: usize,
+    pub task: Task<T>,
+}
+
 // TODO: id with clone ?
 #[derive(Debug, Clone)]
 pub struct Task<T> {
