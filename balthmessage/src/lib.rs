@@ -7,7 +7,7 @@ extern crate serde_derive;
 extern crate ron;
 extern crate serde;
 
-extern crate balthajob;
+extern crate balthajob as job;
 
 pub mod mock_stream;
 
@@ -16,7 +16,7 @@ use std::io;
 use std::io::prelude::*;
 use std::iter::FusedIterator;
 
-use balthajob::task::arguments::Arguments;
+use job::task::arguments::Arguments;
 
 // TODO: As parameters...
 const MESSAGE_SIZE_LIMIT: usize = 2 << 20;

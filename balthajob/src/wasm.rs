@@ -5,8 +5,9 @@ use wasmi::{
 
 use std::string::FromUtf8Error;
 
-use job::task::arguments::argument_kind::ArgumentKind;
-use job::task::arguments::Arguments;
+use super::task::arguments::argument_kind::ArgumentKind;
+use super::task::arguments::Arguments;
+use super::*;
 
 //TODO: clean this mess!!!
 //TODO: unwrap to proper errors
@@ -104,8 +105,8 @@ pub fn _get_functions_list(bytecode: Vec<u8>) {
 }
 
 // TODO: Use arguments
-pub fn exec_wasm(bytecode: Vec<u8>, args: Arguments) -> Result<Arguments, Error> {
-    let module = Module::from_buffer(&bytecode)?;
+pub fn exec_wasm(bytecode: &[u8], args: &Arguments) -> Result<Arguments, Error> {
+    let module = Module::from_buffer(bytecode)?;
 
     let args: Vec<RuntimeValue> = args.args.iter().map(|a| a.to_runtime_value()).collect();
 
