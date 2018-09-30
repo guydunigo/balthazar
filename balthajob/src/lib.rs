@@ -8,6 +8,7 @@ extern crate serde_derive;
 extern crate wasmi;
 
 pub mod task;
+pub mod wasm;
 
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -33,14 +34,14 @@ impl<T> Job<T> {
         }
     }
 
-    pub fn get_free_job_id(list: &[Arc<Job<T>>]) -> Option<usize> {
+    pub fn get_free_job_id(list: &[Arc<Mutex<Job<T>>>]) -> Option<usize> {
         let mut id = 0;
 
         loop {
             if id >= usize::max_value() {
                 break None;
             // TODO: not very efficient...
-            } else if let Some(_) = list.iter().find(|job| job.id == id) {
+            } else if let Some(_) = list.iter().find(|job| job.lock().unwrap().id == id) {
                 id += 1;
             } else {
                 break Some(id);
@@ -81,10 +82,10 @@ impl<T> Job<T> {
 // TODO: name?
 // TODO: what happens between the mutex unlock and the new lock ? return MutexGuard ?
 pub fn get_available_task<T>(
-    jobs: &Vec<Arc<Job<T>>>,
-) -> Option<(Arc<Job<T>>, Arc<Mutex<task::Task<T>>>)> {
+    jobs: &Vec<Arc<Mutex<Job<T>>>>,
+) -> Option<(Arc<Mutex<Job<T>>>, Arc<Mutex<task::Task<T>>>)> {
     jobs.iter()
-        .map(|job| (job, job.get_available_task()))
+        .map(|job| (job, job.lock().unwrap().get_available_task()))
         .skip_while(|(_, task_option)| task_option.is_none())
         .map(|(job, task_option)| {
             if let Some(task) = task_option {

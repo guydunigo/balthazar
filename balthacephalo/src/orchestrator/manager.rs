@@ -58,7 +58,7 @@ impl Manager {
         id: usize,
         stream: TcpStream,
         orch_tx: mpsc::Sender<Message>,
-        jobs_rc: Arc<Mutex<Vec<Arc<Job<Mutex<Manager>>>>>>,
+        jobs_rc: Arc<Mutex<Vec<Arc<Mutex<Job<Mutex<Manager>>>>>>>,
     ) -> Arc<Mutex<Manager>> {
         let man = Arc::from(Mutex::new(Manager {
             id,
@@ -83,7 +83,7 @@ impl Manager {
         manager: Arc<Mutex<Manager>>,
         mut stream: TcpStream,
         orch_tx: mpsc::Sender<Message>,
-        jobs_rc: Arc<Mutex<Vec<Arc<Job<Mutex<Manager>>>>>>,
+        jobs_rc: Arc<Mutex<Vec<Arc<Mutex<Job<Mutex<Manager>>>>>>>,
     ) -> Result<(), Error> {
         let man_id = manager.lock().unwrap().id;
         let peer_addr = stream.peer_addr()?;
@@ -107,8 +107,9 @@ impl Manager {
                                 let send_res = {
                                     let mut task = task.lock().unwrap();
                                     // If the sending fails, we don't register the task.
+                                    let job_id = job.lock().unwrap().id;
                                     let send_res =
-                                        Message::Task(job.id, task.id, task.args.clone())
+                                        Message::Task(job_id, task.id, task.args.clone())
                                             .send(&mut stream)?;
                                     task.pode = Some(Arc::downgrade(&manager));
                                     send_res
@@ -128,8 +129,12 @@ impl Manager {
                     Ok(())
                 }
                 Message::RequestJob(job_id) => {
-                    match jobs_rc.lock().unwrap().iter().find(|j| j.id == job_id) {
-                        Some(job) => Message::Job(job_id, job.bytecode.clone()), //TODO: Don't like cloning probably big array...
+                    match jobs_rc.lock().unwrap().iter().find(|j| j.lock().unwrap().id == job_id) {
+                        Some(job) => {
+                            //TODO: Don't like cloning probably big array...
+                            let bytecode = job.lock().unwrap().bytecode.clone();
+                            Message::Job(job_id, bytecode)
+                        },
                         None => Message::InvalidJobId(job_id),
                     }.send(&mut stream)
                 }
@@ -139,7 +144,7 @@ impl Manager {
                         Job::new(Job::get_free_job_id(&jobs[..]).unwrap(), job);
                     job.new_task(Arguments::default());
 
-                    jobs.push(Arc::new(job));
+                    jobs.push(Arc::new(Mutex::new(job)));
                     Ok(())
                 }
                 Message::ReturnValue(_, _, value) => {

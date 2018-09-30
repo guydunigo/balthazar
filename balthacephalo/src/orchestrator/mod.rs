@@ -33,7 +33,7 @@ impl From<io::Error> for Error {
 // ------------------------------------------------------------------
 
 pub fn orchestrate(listener_rx: mpsc::Receiver<TcpStream>) -> Result<(), Error> {
-    let jobs: Vec<Arc<Job<Mutex<manager::Manager>>>> = Vec::new();
+    let jobs: Vec<Arc<Mutex<Job<Mutex<manager::Manager>>>>> = Vec::new();
     let podes: Vec<Option<Arc<Mutex<manager::Manager>>>> = Vec::new();
     let podes_rc = Arc::new(Mutex::new(podes));
     let jobs_rc = Arc::new(Mutex::new(jobs));
@@ -68,7 +68,7 @@ fn get_new_id<T>(vec: &mut Vec<Option<T>>) -> usize {
 
 fn new_manager_creator(
     podes_rc: Arc<Mutex<Vec<Option<Arc<Mutex<manager::Manager>>>>>>,
-    jobs_rc: Arc<Mutex<Vec<Arc<Job<Mutex<manager::Manager>>>>>>,
+    jobs_rc: Arc<Mutex<Vec<Arc<Mutex<Job<Mutex<manager::Manager>>>>>>>,
     listener_rx: mpsc::Receiver<TcpStream>,
     man_tx: mpsc::Sender<Message>,
 ) -> thread::JoinHandle<Result<(), Error>> {
