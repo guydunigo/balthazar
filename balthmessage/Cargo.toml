@@ -7,3 +7,5 @@ authors = ["GONI Guillaume <gdn3@live.fr>"]
 serde_derive = "1.0.78"
 serde = "1.0.78"
 ron = "0.4.0"
+
+balthajob = { path = "../balthajob" }

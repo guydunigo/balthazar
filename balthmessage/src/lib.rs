@@ -7,12 +7,16 @@ extern crate serde_derive;
 extern crate ron;
 extern crate serde;
 
+extern crate balthajob;
+
 pub mod mock_stream;
 
 pub use ron::{de, ser};
 use std::io;
 use std::io::prelude::*;
 use std::iter::FusedIterator;
+
+use balthajob::task::arguments::Arguments;
 
 // TODO: As parameters...
 const MESSAGE_SIZE_LIMIT: usize = 2 << 20;
@@ -62,8 +66,10 @@ pub enum Message {
     Disconnected(usize),
     MessageTooBig,
     Idle(usize),
-    Job(usize, usize, Vec<u8>),                     // TODO: Job ids?
-    ReturnValue(usize, usize, Result<Vec<u8>, ()>), // TODO: proper error
+    Job(usize, Vec<u8>),    // TODO: Job ids?
+    Task(usize, Arguments), // TODO: Real type
+    // TODO: or tasks?
+    ReturnValue(usize, usize, Result<Arguments, ()>), // TODO: proper error
     // External(E) // TODO: generic type
     NoJob,
     TestBig(Vec<u8>),
@@ -72,7 +78,7 @@ pub enum Message {
 impl Message {
     pub fn send<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
         // This prevents spending time to convert the task... :
-        if let Message::Job(_, _, bytecode) = self {
+        if let Message::Job(_, bytecode) = self {
             if bytecode.len() >= JOB_SIZE_LIMIT as usize {
                 return Err(Error::JobTooBig(bytecode.len()));
             }
@@ -81,11 +87,8 @@ impl Message {
         let msg_str = ser::to_string(self)?;
         let len = msg_str.len();
 
-        if let Message::Job(job_id, task_id, _) = self {
-            println!(
-                "sending Task #{} of Job #{} of {} bytes.",
-                task_id, job_id, len
-            );
+        if let Message::Job(job_id, _) = self {
+            println!("sending Job #{} of {} bytes.", job_id, len);
         } else {
             println!("sending `{}` of {} bytes.", msg_str, len);
         }
@@ -199,11 +202,8 @@ impl<R: Read> Iterator for MessageReader<R> {
             let msg_res: de::Result<Message> = de::from_bytes(&mut buffer.as_slice());
             let res = match msg_res {
                 Ok(msg) => {
-                    if let Message::Job(job_id, task_id, _) = msg {
-                        println!(
-                            "{} : received Task #{} of Job #{}.",
-                            self.id, task_id, job_id
-                        );
+                    if let Message::Job(job_id, _) = msg {
+                        println!("{} : received Job #{}.", self.id, job_id);
                     } else {
                         println!("{} : received `{:?}`.", self.id, msg);
                     }
