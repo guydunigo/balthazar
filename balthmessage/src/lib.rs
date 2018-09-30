@@ -66,8 +66,10 @@ pub enum Message {
     Disconnected(usize),
     MessageTooBig,
     Idle(usize),
-    Job(usize, Vec<u8>),    // TODO: Job ids?
-    Task(usize, Arguments), // TODO: Real type
+    RequestJob(usize),
+    InvalidJobId(usize),
+    Job(usize, Vec<u8>),           // TODO: Job ids?
+    Task(usize, usize, Arguments), // TODO: Real type
     // TODO: or tasks?
     ReturnValue(usize, usize, Result<Arguments, ()>), // TODO: proper error
     // External(E) // TODO: generic type
@@ -78,6 +80,7 @@ pub enum Message {
 impl Message {
     pub fn send<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
         // This prevents spending time to convert the task... :
+        // TODO: same with Task ?
         if let Message::Job(_, bytecode) = self {
             if bytecode.len() >= JOB_SIZE_LIMIT as usize {
                 return Err(Error::JobTooBig(bytecode.len()));
@@ -87,6 +90,7 @@ impl Message {
         let msg_str = ser::to_string(self)?;
         let len = msg_str.len();
 
+        // TODO: same with Task ?
         if let Message::Job(job_id, _) = self {
             println!("sending Job #{} of {} bytes.", job_id, len);
         } else {
@@ -202,6 +206,7 @@ impl<R: Read> Iterator for MessageReader<R> {
             let msg_res: de::Result<Message> = de::from_bytes(&mut buffer.as_slice());
             let res = match msg_res {
                 Ok(msg) => {
+                    // TODO: same with Task ?
                     if let Message::Job(job_id, _) = msg {
                         println!("{} : received Job #{}.", self.id, job_id);
                     } else {

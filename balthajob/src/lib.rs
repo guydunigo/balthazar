@@ -1,5 +1,7 @@
 #![feature(int_to_from_bytes)]
 
+// TODO: GENERAL: stop using usize as it might change between platforms.
+
 #[macro_use]
 extern crate serde_derive;
 
@@ -54,7 +56,12 @@ impl<T> Job<T> {
     }
 
     pub fn new_task(&mut self, args: Arguments) {
-        let task = task::Task::new(self.get_new_task_id(), args);
+        let task_id = self.get_new_task_id();
+        self.push_task(task_id, args);
+    }
+
+    pub fn push_task(&mut self, task_id: usize, args: Arguments) {
+        let task = task::Task::new(task_id, args);
         self.tasks.push(Arc::new(Mutex::new(task)));
     }
 
@@ -64,6 +71,10 @@ impl<T> Job<T> {
             Some(t) => Some(t.clone()),
             None => None,
         }
+    }
+
+    pub fn set_bytecode(&mut self, bytecode: Vec<u8>) {
+        self.bytecode = bytecode;
     }
 }
 

@@ -13,8 +13,12 @@ use std::fs::File;
 use std::io;
 use std::io::prelude::*;
 use std::net::{TcpStream, ToSocketAddrs};
+use std::sync::Arc;
+use std::sync::Mutex;
 
 use job::task::arguments::Arguments;
+use job::task::Task;
+use job::Job;
 use message::{Message, MessageReader};
 
 // ------------------------------------------------------------------
@@ -64,6 +68,8 @@ pub fn swim<A: ToSocketAddrs + Display>(addr: A) -> Result<(), Error> {
 
     let mut reader = MessageReader::new(id, socket.try_clone()?);
     let result = {
+        let mut jobs: Vec<Arc<Mutex<Job<u8>>>> = Vec::new();
+
         let mut f = File::open("main.wasm")?;
         let mut code: Vec<u8> = Vec::new();
         f.read_to_end(&mut code)?;
@@ -73,10 +79,43 @@ pub fn swim<A: ToSocketAddrs + Display>(addr: A) -> Result<(), Error> {
         //let mut socket = socket.try_clone()?;
         Message::Idle(1).send(&mut socket)?;
         reader.for_each_until_error(|msg| match msg {
-            Message::Job(job_id, job) => {
+            Message::Job(job_id, bytecode) => {
+                // TODO: multiple jobs having same id ?
+                // The use of `is_none` is due to `jobs` being borrowed...
+                let job_opt = match jobs.iter().find(|j| j.lock().unwrap().id == job_id) {
+                    Some(job) => Some(job.clone()),
+                    None => None,
+                };
+
+                match job_opt {
+                    Some(job) => job.lock().unwrap().set_bytecode(bytecode),
+                    None => jobs.push(Arc::new(Mutex::new(Job::new(job_id, bytecode)))),
+                }
+
+                Ok(())
+            }
+            Message::Task(job_id, task_id, args) => {
                 //TODO: use balthajob to represent jobs and tasks and execute them there.
-                println!("Pode received a job !");
                 //TODO: do not fail on job error
+                let job_opt = match jobs.iter().find(|j| j.lock().unwrap().id == job_id) {
+                    Some(job) => Some(job.clone()),
+                    None => None,
+                };
+
+                let job = match job_opt {
+                    Some(job) => job,
+                    None => {
+                        let job = Arc::new(Mutex::new(Job::new(job_id, Vec::new())));
+                        jobs.push(job.clone());
+                        Message::RequestJob(job_id).send(&mut socket)?;
+                        job
+                    }
+                };
+
+                job.lock().unwrap().push_task(task_id, args);
+
+                Ok(())
+                /*
                 let res = wasm::exec_wasm(job, Arguments::default());
                 if let Ok(res) = res {
                     Message::ReturnValue(job_id, 0, Ok(res)).send(&mut socket)?
@@ -86,6 +125,7 @@ pub fn swim<A: ToSocketAddrs + Display>(addr: A) -> Result<(), Error> {
                 }
 
                 Message::Idle(1).send(&mut socket)
+                */
             }
             _ => {
                 Message::Disconnect.send(&mut socket)

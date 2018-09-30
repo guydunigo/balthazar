@@ -6,6 +6,7 @@ use std::sync::Mutex;
 use std::thread;
 
 // TODO: replace TcpStream by Read + Write
+// TODO: copy instead of clone?
 
 use job;
 use job::task::arguments::Arguments;
@@ -107,7 +108,7 @@ impl Manager {
                                     let mut task = task.lock().unwrap();
                                     // If the sending fails, we don't register the task.
                                     let send_res =
-                                        Message::Job(job.id, job.bytecode.clone())
+                                        Message::Task(job.id, task.id, task.args.clone())
                                             .send(&mut stream)?;
                                     task.pode = Some(Arc::downgrade(&manager));
                                     send_res
@@ -125,6 +126,12 @@ impl Manager {
                         }
                     }
                     Ok(())
+                }
+                Message::RequestJob(job_id) => {
+                    match jobs_rc.lock().unwrap().iter().find(|j| j.id == job_id) {
+                        Some(job) => Message::Job(job_id, job.bytecode.clone()), //TODO: Don't like cloning probably big array...
+                        None => Message::InvalidJobId(job_id),
+                    }.send(&mut stream)
                 }
                 Message::Job(_, job) => {
                     let mut jobs = jobs_rc.lock().unwrap();
