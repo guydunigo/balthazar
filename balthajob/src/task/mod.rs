@@ -1,17 +1,21 @@
+pub mod arguments;
+
 use std::sync::Weak;
+
+type Arguments = arguments::Arguments;
 
 // TODO: id with clone ?
 #[derive(Debug, Clone)]
 pub struct Task<T> {
     pub id: usize,
-    pub args: Vec<u8>, // TODO: wasm arg list ?
-    pub result: Option<Result<Vec<u8>, ()>>,
+    pub args: Arguments, // TODO: wasm arg list ?
+    pub result: Option<Result<Arguments, ()>>,
     pub pode: Option<Weak<T>>,
     // TODO: date?
 }
 
 impl<T> Task<T> {
-    pub fn new(id: usize, args: Vec<u8>) -> Task<T> {
+    pub fn new(id: usize, args: Arguments) -> Task<T> {
         Task {
             id,
             args,
@@ -23,6 +27,7 @@ impl<T> Task<T> {
     pub fn is_available(&self) -> bool {
         self.result.is_none() && match &self.pode {
             None => true,
+            // TODO: if weak is dead, set to None?
             Some(p) => p.upgrade().is_none(),
         }
     }
