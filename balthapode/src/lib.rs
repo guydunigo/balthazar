@@ -45,7 +45,7 @@ impl From<message::Error> for Error {
 // ------------------------------------------------------------------
 
 pub fn swim<A: ToSocketAddrs + Display>(addr: A) -> Result<(), Error> {
-    let mut socket = TcpStream::connect(&addr)?;
+    let socket = TcpStream::connect(&addr)?;
     println!("Connected to : `{}`", addr);
 
     //TODO: as option
@@ -60,21 +60,27 @@ pub fn swim<A: ToSocketAddrs + Display>(addr: A) -> Result<(), Error> {
 
     let mut reader = MessageReader::new(id, socket.try_clone()?);
     let result = {
+        let mut socket = Arc::new(Mutex::new(socket));
         let mut lone_tasks: Vec<LoneTask<bool>> = Vec::new();
 
         let jobs: Vec<Arc<Mutex<Job<bool>>>> = Vec::new();
         let jobs = Arc::new(Mutex::new(jobs));
 
-        orchestrator::start_orchestrator(jobs.clone());
+        orchestrator::start_orchestrator(jobs.clone(), socket.clone());
 
         let mut f = File::open("main.wasm")?;
         let mut code: Vec<u8> = Vec::new();
         f.read_to_end(&mut code)?;
 
-        Message::Job(0, code).send(&mut socket)?;
+        {
+            let mut socket = socket.lock().unwrap();
+            Message::Job(0, code).send(&mut *socket)?;
+        }
 
-        //let mut socket = socket.try_clone()?;
-        Message::Idle(1).send(&mut socket)?;
+        {
+            let mut socket = socket.lock().unwrap();
+            Message::Idle(1).send(&mut *socket)?;
+        }
         reader.for_each_until_error(|msg| match msg {
             Message::Job(job_id, bytecode) => {
                 // TODO: multiple jobs having same id ?
@@ -129,17 +135,23 @@ pub fn swim<A: ToSocketAddrs + Display>(addr: A) -> Result<(), Error> {
                     None => {
                         let task = Task::new(task_id, args);
                         lone_tasks.push(LoneTask { job_id, task });
-                        Message::RequestJob(job_id).send(&mut socket)?;
+                        {
+                            let mut socket = socket.lock().unwrap();
+                            Message::RequestJob(job_id).send(&mut *socket)?;
+                        }
                     }
                 }
 
-                println!("Task #{} for Job #{} saved", task_id, job_id);
+                println!("Task #{} for Job #{} saved.", task_id, job_id);
 
                 Ok(())
             }
             _ => {
-                Message::Disconnect.send(&mut socket)
-                //Ok(())
+                /*{
+                    let mut socket = socket.lock().unwrap();
+                    Message::Disconnect.send(&mut *socket)
+                }*/
+                Ok(())
             }
         })
     };

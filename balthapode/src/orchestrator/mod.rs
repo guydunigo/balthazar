@@ -1,4 +1,5 @@
-use std::sync::mpsc;
+use std::io;
+use std::net::TcpStream;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -6,21 +7,24 @@ use std::time::Duration;
 use job;
 use job::wasm;
 use job::Job;
+use message;
 use message::Message;
 
 const SLEEP_TIME_MS: u64 = 1000;
+const NB_TASKS: usize = 4;
 
 // ------------------------------------------------------------------
 
 #[derive(Debug)]
 pub enum Error {
-    SendError(mpsc::SendError<Message>),
+    IoError(io::Error),
     WasmError(wasm::Error),
+    MessageError(message::Error),
 }
 
-impl From<mpsc::SendError<Message>> for Error {
-    fn from(err: mpsc::SendError<Message>) -> Error {
-        Error::SendError(err)
+impl From<io::Error> for Error {
+    fn from(err: io::Error) -> Error {
+        Error::IoError(err)
     }
 }
 
@@ -30,19 +34,24 @@ impl From<wasm::Error> for Error {
     }
 }
 
+impl From<message::Error> for Error {
+    fn from(err: message::Error) -> Error {
+        Error::MessageError(err)
+    }
+}
+
 // ------------------------------------------------------------------
 
-pub fn start_orchestrator(jobs: Arc<Mutex<Vec<Arc<Mutex<Job<bool>>>>>>) -> mpsc::Receiver<Message> {
-    let (tx, rx) = mpsc::channel();
-
-    thread::spawn(move || orchestrate(jobs, tx));
-
-    rx
+pub fn start_orchestrator(
+    jobs: Arc<Mutex<Vec<Arc<Mutex<Job<bool>>>>>>,
+    cephalo: Arc<Mutex<TcpStream>>,
+) {
+    thread::spawn(move || orchestrate(jobs, cephalo));
 }
 
 pub fn orchestrate(
     jobs: Arc<Mutex<Vec<Arc<Mutex<Job<bool>>>>>>,
-    sender: mpsc::Sender<Message>,
+    cephalo: Arc<Mutex<TcpStream>>,
 ) -> Result<(), Error> {
     loop {
         let task_opt = {
@@ -73,10 +82,17 @@ pub fn orchestrate(
             };
             task.lock().unwrap().result = Some(res.clone());
 
-            sender.send(Message::ReturnValue(job_id, task_id, res))?;
+            {
+                let mut cephalo = cephalo.lock().unwrap();
+                Message::ReturnValue(job_id, task_id, res).send(&mut *cephalo)?;
+            }
         } else {
+            {
+                let mut cephalo = cephalo.lock().unwrap();
+                Message::Idle(NB_TASKS).send(&mut *cephalo)?;
+            }
             // TODO: How to wait for new jobs?
-            println!("Sleeping...");
+            println!("Orchestrator sleeping...");
             thread::sleep(Duration::from_millis(SLEEP_TIME_MS));
         }
     }
