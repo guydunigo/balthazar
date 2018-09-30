@@ -5,6 +5,9 @@ use wasmi::{
 
 use std::string::FromUtf8Error;
 
+use job::task::arguments::argument_kind::ArgumentKind;
+use job::task::arguments::Arguments;
+
 //TODO: clean this mess!!!
 //TODO: unwrap to proper errors
 //TODO: prevent adding too many items to vec
@@ -100,32 +103,38 @@ pub fn _get_functions_list(bytecode: Vec<u8>) {
     }
 }
 
-pub fn exec_wasm(bytecode: Vec<u8>) -> Result<Vec<u8>, Error> {
+// TODO: Use arguments
+pub fn exec_wasm(bytecode: Vec<u8>, args: Arguments) -> Result<Arguments, Error> {
     let module = Module::from_buffer(&bytecode)?;
+
+    let args: Vec<RuntimeValue> = args.args.iter().map(|a| a.to_runtime_value()).collect();
 
     let resolver = RuntimeModuleImportResolver;
     let imports = ImportsBuilder::new().with_resolver("env", &resolver);
     let instance = ModuleInstance::new(&module, &imports)?.assert_no_start();
 
     let mut runtime = Runtime { txt: Vec::new() };
-    let res = instance.invoke_export("start", &[], &mut runtime)?;
+    let res = instance.invoke_export("start", &args[..], &mut runtime)?;
 
-    if let Some(res) = res {
+    let return_value = if let Some(res) = res {
         match res {
             RuntimeValue::I32(res) => println!("Return value: {}", res),
             RuntimeValue::I64(res) => println!("Return value: {}", res),
             res => println!("Return value unknown: {:?}", res),
         }
+        vec![ArgumentKind::from(res)]
     } else {
         println!("No return value.");
-    }
+        Vec::new()
+    };
 
     println!(
         "Returned text: '{}'",
         String::from_utf8_lossy(runtime.txt.as_slice())
     );
 
-    Ok(runtime.txt)
+    let ret_args = Arguments::new(return_value.as_slice(), runtime.txt.as_slice());
+    Ok(ret_args)
 }
 
 #[cfg(test)]

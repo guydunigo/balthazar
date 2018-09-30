@@ -1,3 +1,4 @@
+extern crate balthajob as job;
 extern crate balthmessage as message;
 extern crate parity_wasm;
 extern crate wasmi;
@@ -13,6 +14,7 @@ use std::io;
 use std::io::prelude::*;
 use std::net::{TcpStream, ToSocketAddrs};
 
+use job::task::arguments::Arguments;
 use message::{Message, MessageReader};
 
 // ------------------------------------------------------------------
@@ -66,21 +68,21 @@ pub fn swim<A: ToSocketAddrs + Display>(addr: A) -> Result<(), Error> {
         let mut code: Vec<u8> = Vec::new();
         f.read_to_end(&mut code)?;
 
-        Message::Job(0, 0, code).send(&mut socket)?;
+        Message::Job(0, code).send(&mut socket)?;
 
         //let mut socket = socket.try_clone()?;
         Message::Idle(1).send(&mut socket)?;
         reader.for_each_until_error(|msg| match msg {
-            Message::Job(job_id, task_id, job) => {
+            Message::Job(job_id, job) => {
                 //TODO: use balthajob to represent jobs and tasks and execute them there.
                 println!("Pode received a job !");
                 //TODO: do not fail on job error
-                let res = wasm::exec_wasm(job);
+                let res = wasm::exec_wasm(job, Arguments::default());
                 if let Ok(res) = res {
-                    Message::ReturnValue(job_id, task_id, Ok(res)).send(&mut socket)?
+                    Message::ReturnValue(job_id, 0, Ok(res)).send(&mut socket)?
                 } else {
                     //TODO: return proper error
-                    Message::ReturnValue(job_id, task_id, Err(())).send(&mut socket)?
+                    Message::ReturnValue(job_id, 0, Err(())).send(&mut socket)?
                 }
 
                 Message::Idle(1).send(&mut socket)

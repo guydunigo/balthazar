@@ -7,4 +7,5 @@ authors = ["GONI Guillaume <gdn3@live.fr>"]
 parity-wasm = "0.32.0"
 wasmi = "0.4.0"
 
+balthajob = { path = "../balthajob" }
 balthmessage = { path = "../balthmessage" }

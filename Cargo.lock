@@ -21,6 +21,12 @@ dependencies = [
 [[package]]
 name = "balthajob"
 version = "0.1.0"
+dependencies = [
+ "parity-wasm 0.32.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "serde 1.0.79 (registry+https://github.com/rust-lang/crates.io-index)",
+ "serde_derive 1.0.79 (registry+https://github.com/rust-lang/crates.io-index)",
+ "wasmi 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
+]
 
 [[package]]
 name = "balthalib"
@@ -34,6 +40,7 @@ dependencies = [
 name = "balthapode"
 version = "0.1.0"
 dependencies = [
+ "balthajob 0.1.0",
  "balthmessage 0.1.0",
  "parity-wasm 0.32.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "wasmi 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -43,6 +50,7 @@ dependencies = [
 name = "balthmessage"
 version = "0.1.0"
 dependencies = [
+ "balthajob 0.1.0",
  "ron 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde 1.0.79 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde_derive 1.0.79 (registry+https://github.com/rust-lang/crates.io-index)",

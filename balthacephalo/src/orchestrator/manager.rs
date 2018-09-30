@@ -8,8 +8,10 @@ use std::thread;
 // TODO: replace TcpStream by Read + Write
 
 use job;
+use job::task::arguments::Arguments;
 use job::task::Task;
 use job::Job;
+// use job::task::arguments::{Arguments, ArgumentKind};
 use message;
 use message::{Message, MessageReader};
 
@@ -105,7 +107,7 @@ impl Manager {
                                     let mut task = task.lock().unwrap();
                                     // If the sending fails, we don't register the task.
                                     let send_res =
-                                        Message::Job(job.id, task.id, job.bytecode.clone())
+                                        Message::Job(job.id, job.bytecode.clone())
                                             .send(&mut stream)?;
                                     task.pode = Some(Arc::downgrade(&manager));
                                     send_res
@@ -124,11 +126,11 @@ impl Manager {
                     }
                     Ok(())
                 }
-                Message::Job(_, _, job) => {
+                Message::Job(_, job) => {
                     let mut jobs = jobs_rc.lock().unwrap();
                     let mut job =
-                        Job::new(Job::get_free_job_id(&jobs[..]).unwrap(), job, Vec::new());
-                    job.new_task(Vec::new());
+                        Job::new(Job::get_free_job_id(&jobs[..]).unwrap(), job);
+                    job.new_task(Arguments::default());
 
                     jobs.push(Arc::new(job));
                     Ok(())

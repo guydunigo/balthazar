@@ -1,7 +1,16 @@
+#![feature(int_to_from_bytes)]
+
+#[macro_use]
+extern crate serde_derive;
+
+extern crate wasmi;
+
 pub mod task;
 
 use std::sync::Arc;
 use std::sync::Mutex;
+
+type Arguments = task::arguments::Arguments;
 
 // TODO: id with clone ?
 #[derive(Debug, Clone)]
@@ -13,11 +22,11 @@ pub struct Job<T> {
 }
 
 impl<T> Job<T> {
-    pub fn new(id: usize, bytecode: Vec<u8>, mut tasks: Vec<task::Task<T>>) -> Job<T> {
+    pub fn new(id: usize, bytecode: Vec<u8>) -> Job<T> {
         Job {
             id,
             bytecode,
-            tasks: tasks.drain(..).map(|t| Arc::new(Mutex::new(t))).collect(),
+            tasks: Vec::new(),
             next_task_id: 0,
         }
     }
@@ -44,7 +53,7 @@ impl<T> Job<T> {
         res
     }
 
-    pub fn new_task(&mut self, args: Vec<u8>) {
+    pub fn new_task(&mut self, args: Arguments) {
         let task = task::Task::new(self.get_new_task_id(), args);
         self.tasks.push(Arc::new(Mutex::new(task)));
     }
