@@ -94,7 +94,8 @@ pub fn swim<A: ToSocketAddrs + Display>(addr: A) -> Result<(), Error> {
                     Some(job) => job.lock().unwrap().set_bytecode(bytecode),
                     None => {
                         let mut job = Job::new(job_id, bytecode);
-                        let mut new_lone_tasks = Vec::new();
+
+                        let mut new_lone_tasks = Vec::with_capacity(lone_tasks.len());
                         for t in lone_tasks.drain(..) {
                             if t.job_id == job_id {
                                 job.push_task(t.task);
@@ -103,6 +104,7 @@ pub fn swim<A: ToSocketAddrs + Display>(addr: A) -> Result<(), Error> {
                             }
                         }
                         lone_tasks = new_lone_tasks;
+
                         jobs.lock().unwrap().push(Arc::new(Mutex::new(job)));
                     }
                 }
