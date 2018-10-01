@@ -16,6 +16,7 @@ use std::net::{TcpStream, ToSocketAddrs};
 use std::sync::Arc;
 use std::sync::Mutex;
 
+use job::task::arguments::Arguments;
 use job::task::{LoneTask, Task};
 use job::Job;
 use message::{Message, MessageReader};
@@ -77,75 +78,21 @@ pub fn swim<A: ToSocketAddrs + Display>(addr: A) -> Result<(), Error> {
             Message::Job(0, code).send(&mut *socket)?;
         }
 
-        {
-            let mut socket = socket.lock().unwrap();
-            Message::Idle(1).send(&mut *socket)?;
-        }
         reader.for_each_until_error(|msg| match msg {
             Message::Job(job_id, bytecode) => {
-                // TODO: multiple jobs having same id ?
-                // The use of `is_none` is due to `jobs` being borrowed...
-                let job_opt = match jobs
-                    .lock()
-                    .unwrap()
-                    .iter()
-                    .find(|j| j.lock().unwrap().id == job_id)
-                {
-                    Some(job) => Some(job.clone()),
-                    None => None,
-                };
-
-                match job_opt {
-                    // TODO: Useful ?
-                    Some(job) => job.lock().unwrap().set_bytecode(bytecode),
-                    None => {
-                        let mut job = Job::new(job_id, bytecode);
-
-                        let mut new_lone_tasks = Vec::with_capacity(lone_tasks.len());
-                        for t in lone_tasks.drain(..) {
-                            if t.job_id == job_id {
-                                job.push_task(t.task);
-                            } else {
-                                new_lone_tasks.push(t);
-                            }
-                        }
-                        lone_tasks = new_lone_tasks;
-
-                        jobs.lock().unwrap().push(Arc::new(Mutex::new(job)));
-                    }
-                }
-
-                Ok(())
+                let (new_lone_tasks, res) =
+                    register_job(jobs.clone(), &mut lone_tasks, job_id, bytecode);
+                lone_tasks = new_lone_tasks;
+                res
             }
-            Message::Task(job_id, task_id, args) => {
-                //TODO: use balthajob to represent jobs and tasks and execute them there.
-                //TODO: do not fail on job error
-                let job_opt = match jobs
-                    .lock()
-                    .unwrap()
-                    .iter()
-                    .find(|j| j.lock().unwrap().id == job_id)
-                {
-                    Some(job) => Some(job.clone()),
-                    None => None,
-                };
-
-                match job_opt {
-                    Some(job) => job.lock().unwrap().push_new_task(task_id, args),
-                    None => {
-                        let task = Task::new(task_id, args);
-                        lone_tasks.push(LoneTask { job_id, task });
-                        {
-                            let mut socket = socket.lock().unwrap();
-                            Message::RequestJob(job_id).send(&mut *socket)?;
-                        }
-                    }
-                }
-
-                println!("Task #{} for Job #{} saved.", task_id, job_id);
-
-                Ok(())
-            }
+            Message::Task(job_id, task_id, args) => register_task(
+                jobs.clone(),
+                &mut lone_tasks,
+                socket.clone(),
+                job_id,
+                task_id,
+                args,
+            ),
             _ => {
                 /*{
                     let mut socket = socket.lock().unwrap();
@@ -160,6 +107,83 @@ pub fn swim<A: ToSocketAddrs + Display>(addr: A) -> Result<(), Error> {
         Err(err) => Err(Error::from(err)),
         Ok(_) => Ok(()),
     }
+}
+
+fn register_job(
+    jobs: Arc<Mutex<Vec<Arc<Mutex<Job<bool>>>>>>,
+    lone_tasks: &mut Vec<LoneTask<bool>>,
+    job_id: usize,
+    bytecode: Vec<u8>,
+) -> (Vec<LoneTask<bool>>, Result<(), message::Error>) {
+    let mut new_lone_tasks = Vec::with_capacity(lone_tasks.len());
+
+    // TODO: multiple jobs having same id ?
+    // The use of `is_none` is due to `jobs` being borrowed...
+    let job_opt = match jobs
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|j| j.lock().unwrap().id == job_id)
+    {
+        Some(job) => Some(job.clone()),
+        None => None,
+    };
+
+    match job_opt {
+        // TODO: Useful ?
+        Some(job) => job.lock().unwrap().set_bytecode(bytecode),
+        None => {
+            let mut job = Job::new(job_id, bytecode);
+
+            for t in lone_tasks.drain(..) {
+                if t.job_id == job_id {
+                    job.push_task(t.task);
+                } else {
+                    new_lone_tasks.push(t);
+                }
+            }
+            jobs.lock().unwrap().push(Arc::new(Mutex::new(job)));
+        }
+    }
+
+    (new_lone_tasks, Ok(()))
+}
+
+fn register_task(
+    jobs: Arc<Mutex<Vec<Arc<Mutex<Job<bool>>>>>>,
+    lone_tasks: &mut Vec<LoneTask<bool>>,
+    socket: Arc<Mutex<TcpStream>>,
+    job_id: usize,
+    task_id: usize,
+    args: Arguments,
+) -> Result<(), message::Error> {
+    //TODO: use balthajob to represent jobs and tasks and execute them there.
+    //TODO: do not fail on job error
+    let job_opt = match jobs
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|j| j.lock().unwrap().id == job_id)
+    {
+        Some(job) => Some(job.clone()),
+        None => None,
+    };
+
+    match job_opt {
+        Some(job) => job.lock().unwrap().push_new_task(task_id, args),
+        None => {
+            let task = Task::new(task_id, args);
+            lone_tasks.push(LoneTask { job_id, task });
+            {
+                let mut socket = socket.lock().unwrap();
+                Message::RequestJob(job_id).send(&mut *socket)?;
+            }
+        }
+    }
+
+    println!("Task #{} for Job #{} saved.", task_id, job_id);
+
+    Ok(())
 }
 
 #[cfg(test)]
