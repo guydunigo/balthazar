@@ -117,23 +117,32 @@ pub fn swim<A: ToSocketAddrs + Display>(addr: A) -> Result<(), Error> {
         let jobs: Vec<Arc<Mutex<Job<bool>>>> = Vec::new();
         let jobs = Arc::new(Mutex::new(jobs));
 
-        orchestrator::start_orchestrator(jobs.clone(), socket.clone());
+        let rx = orchestrator::start_orchestrator(jobs.clone(), socket.clone());
 
         reader.for_each_until_error(|msg| match msg {
             Message::Job(job_id, bytecode) => {
                 let (new_lone_tasks, res) =
                     register_job(jobs.clone(), &mut lone_tasks, job_id, bytecode);
                 lone_tasks = new_lone_tasks;
+                rx.recv().unwrap();
                 res
             }
-            Message::Task(job_id, task_id, args) => register_task(
-                jobs.clone(),
-                &mut lone_tasks,
-                socket.clone(),
-                job_id,
-                task_id,
-                args,
-            ),
+            Message::Task(job_id, task_id, args) => {
+                let res = register_task(
+                    jobs.clone(),
+                    &mut lone_tasks,
+                    socket.clone(),
+                    job_id,
+                    task_id,
+                    args,
+                );
+                rx.recv().unwrap();
+                res
+            }
+            Message::NoJob => {
+                rx.recv().unwrap();
+                Ok(())
+            }
             _ => {
                 /*{
                     let mut socket = socket.lock().unwrap();

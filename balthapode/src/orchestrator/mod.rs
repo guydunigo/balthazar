@@ -1,5 +1,7 @@
 use std::io;
 use std::net::TcpStream;
+use std::sync::mpsc;
+use std::sync::mpsc::{Receiver, SyncSender};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -45,20 +47,27 @@ impl From<message::Error> for Error {
 pub fn start_orchestrator(
     jobs: Arc<Mutex<Vec<Arc<Mutex<Job<bool>>>>>>,
     cephalo: Arc<Mutex<TcpStream>>,
-) {
-    thread::spawn(move || orchestrate(jobs, cephalo));
+) -> Receiver<bool> {
+    let (tx, rx) = mpsc::sync_channel(0);
+    thread::spawn(move || orchestrate(jobs, cephalo, tx));
+    rx
 }
 
 pub fn orchestrate(
     jobs: Arc<Mutex<Vec<Arc<Mutex<Job<bool>>>>>>,
     cephalo: Arc<Mutex<TcpStream>>,
+    tx: SyncSender<bool>,
 ) -> Result<(), Error> {
+    let mut last_was_nojob = false;
+
     loop {
         let task_opt = {
             let jobs = jobs.lock().unwrap();
             job::get_available_task(&*jobs)
         };
         if let Some((job, task)) = task_opt {
+            last_was_nojob = false;
+
             let (task_id, args) = {
                 let task = task.lock().unwrap();
                 (task.id, task.args.clone())
@@ -91,9 +100,14 @@ pub fn orchestrate(
                 let mut cephalo = cephalo.lock().unwrap();
                 Message::Idle(NB_TASKS).send(&mut *cephalo)?;
             }
-            // TODO: How to wait for new jobs?
-            println!("Orchestrator sleeping...");
-            thread::sleep(Duration::from_millis(SLEEP_TIME_MS));
+
+            tx.send(true).unwrap();
+
+            if last_was_nojob {
+                println!("Orchestrator sleeping...");
+                thread::sleep(Duration::from_millis(SLEEP_TIME_MS));
+            }
+            last_was_nojob = true;
         }
     }
 }

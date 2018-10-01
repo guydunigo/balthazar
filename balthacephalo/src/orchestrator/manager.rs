@@ -100,32 +100,39 @@ impl Manager {
                     //      - Free the previous task
                     //      - Send again the previous task
                     //      - Send error
-                    for _ in 0..i {
-                        let mut jobs = jobs_rc.lock().unwrap();
-                        match job::get_available_task(&*jobs) {
-                            Some((job, task)) => {
-                                let send_res = {
-                                    let mut task = task.lock().unwrap();
-                                    // If the sending fails, we don't register the task.
-                                    let job_id = job.lock().unwrap().id;
-                                    let send_res =
-                                        Message::Task(job_id, task.id, task.args.clone())
-                                            .send(&mut stream)?;
-                                    task.pode = Some(Arc::downgrade(&manager));
+                    let is_available = {
+                        let manager = manager.lock().unwrap();
+                        manager.task.is_none()
+                    };
+
+                    if is_available {
+                        for _ in 0..i {
+                            let mut jobs = jobs_rc.lock().unwrap();
+                            match job::get_available_task(&*jobs) {
+                                Some((job, task)) => {
+                                    let send_res = {
+                                        let mut task = task.lock().unwrap();
+                                        // If the sending fails, we don't register the task.
+                                        let job_id = job.lock().unwrap().id;
+                                        let send_res =
+                                            Message::Task(job_id, task.id, task.args.clone())
+                                                .send(&mut stream)?;
+                                        task.pode = Some(Arc::downgrade(&manager));
+                                        send_res
+                                    };
+                                    {
+                                        let mut manager = manager.lock().unwrap();
+                                        manager.task = Some(task.clone());
+                                    }
                                     send_res
-                                };
-                                {
-                                    let mut manager = manager.lock().unwrap();
-                                    manager.task = Some(task.clone());
                                 }
-                                send_res
-                            }
-                            None => {
-                                Message::NoJob.send(&mut stream)?;
-                                break;
+                                None => {
+                                    Message::NoJob.send(&mut stream)?;
+                                    break;
+                                }
                             }
                         }
-                    }
+                    } // TODO: else send error ?
                     Ok(())
                 }
                 Message::RequestJob(job_id) => {
@@ -152,6 +159,7 @@ impl Manager {
 
                     Ok(())
                 }
+                // TODO: The pode who sends task should be the same as the one sending the job ?
                 Message::Task(job_id, _, args) => {
                     let mut jobs = jobs_rc.lock().unwrap();
                     let job = match jobs.iter().find(|j| j.lock().unwrap().id == job_id) {
