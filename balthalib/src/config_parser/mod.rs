@@ -39,6 +39,7 @@ pub fn parse_config(mut args: env::Args) -> Result<Config, ArgError> {
     let command = match &command[..] {
         "c" | "cephalo" => CephalopodeType::Cephalo,
         "p" | "pode" => CephalopodeType::Pode,
+        "i" | "inkpode" => CephalopodeType::InkPode,
         cmd => return Err(ArgError::UnknownCommand(cmd.to_string())),
     };
 

@@ -19,7 +19,7 @@ use std::sync::Mutex;
 use job::task::arguments::Arguments;
 use job::task::{LoneTask, Task};
 use job::Job;
-use message::{Message, MessageReader};
+use message::{de, Message, MessageReader};
 
 // ------------------------------------------------------------------
 // Errors
@@ -29,6 +29,9 @@ pub enum Error {
     FailedHandshake,
     IoError(io::Error),
     MessageError(message::Error),
+    DeserializeError(de::Error),
+    UnexpectedReply(Message),
+    NoReply,
 }
 
 impl From<io::Error> for Error {
@@ -43,9 +46,15 @@ impl From<message::Error> for Error {
     }
 }
 
+impl From<de::Error> for Error {
+    fn from(err: de::Error) -> Error {
+        Error::DeserializeError(err)
+    }
+}
+
 // ------------------------------------------------------------------
 
-pub fn swim<A: ToSocketAddrs + Display>(addr: A) -> Result<(), Error> {
+pub fn initialize_pode<A: ToSocketAddrs + Display>(addr: A) -> Result<(TcpStream, usize), Error> {
     let socket = TcpStream::connect(&addr)?;
     println!("Connected to : `{}`", addr);
 
@@ -59,6 +68,47 @@ pub fn swim<A: ToSocketAddrs + Display>(addr: A) -> Result<(), Error> {
     }?;
     println!("Handshake successful, received id : {}.", id);
 
+    Ok((socket, id))
+}
+
+pub fn fill<A: ToSocketAddrs + Display>(addr: A) -> Result<(), Error> {
+    let (mut socket, id) = initialize_pode(addr)?;
+
+    {
+        let mut f = File::open("main.wasm")?;
+        let mut code: Vec<u8> = Vec::new();
+        f.read_to_end(&mut code)?;
+
+        Message::Job(0, code).send(&mut socket)?;
+    }
+    let job_id = {
+        let mut reader = MessageReader::new(id, socket.try_clone()?);
+        match reader.next() {
+            Some(Ok(Message::JobRegisteredAt(job_id))) => job_id,
+            Some(Ok(msg)) => return Err(Error::UnexpectedReply(msg)),
+            Some(Err(err)) => return Err(Error::from(err)),
+            None => return Err(Error::NoReply),
+        }
+    };
+    {
+        let mut f = File::open("args_list.ron")?;
+        let mut args_list_txt: Vec<u8> = Vec::new();
+        f.read_to_end(&mut args_list_txt)?;
+
+        // Deserialize args_list
+        let mut args_list: Vec<Arguments> = de::from_bytes(&args_list_txt[..])?;
+
+        for args in args_list.drain(..) {
+            Message::Task(job_id, 0, args).send(&mut socket)?;
+        }
+    }
+
+    Ok(())
+}
+
+pub fn swim<A: ToSocketAddrs + Display>(addr: A) -> Result<(), Error> {
+    let (socket, id) = initialize_pode(addr)?;
+
     let mut reader = MessageReader::new(id, socket.try_clone()?);
     let result = {
         let mut socket = Arc::new(Mutex::new(socket));
@@ -68,15 +118,6 @@ pub fn swim<A: ToSocketAddrs + Display>(addr: A) -> Result<(), Error> {
         let jobs = Arc::new(Mutex::new(jobs));
 
         orchestrator::start_orchestrator(jobs.clone(), socket.clone());
-
-        let mut f = File::open("main.wasm")?;
-        let mut code: Vec<u8> = Vec::new();
-        f.read_to_end(&mut code)?;
-
-        {
-            let mut socket = socket.lock().unwrap();
-            Message::Job(0, code).send(&mut *socket)?;
-        }
 
         reader.for_each_until_error(|msg| match msg {
             Message::Job(job_id, bytecode) => {

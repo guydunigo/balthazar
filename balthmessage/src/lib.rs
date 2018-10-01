@@ -68,7 +68,8 @@ pub enum Message {
     Idle(usize),
     RequestJob(usize),
     InvalidJobId(usize),
-    Job(usize, Vec<u8>),           // TODO: Job ids?
+    Job(usize, Vec<u8>), // TODO: Job ids?
+    JobRegisteredAt(usize),
     Task(usize, usize, Arguments), // TODO: Real type
     // TODO: or tasks?
     ReturnValue(usize, usize, Result<Arguments, ()>), // TODO: proper error

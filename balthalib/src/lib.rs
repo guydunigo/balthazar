@@ -43,6 +43,7 @@ impl From<config_parser::ArgError> for Error {
 pub enum CephalopodeType {
     Cephalo,
     Pode,
+    InkPode,
 }
 
 #[cfg(test)]

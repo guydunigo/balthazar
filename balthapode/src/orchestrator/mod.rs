@@ -11,7 +11,7 @@ use message;
 use message::Message;
 
 const SLEEP_TIME_MS: u64 = 1000;
-const NB_TASKS: usize = 4;
+const NB_TASKS: usize = 1;
 
 // ------------------------------------------------------------------
 

@@ -11,6 +11,7 @@ fn main() -> Result<(), balthalib::Error> {
     match config.command {
         CephalopodeType::Cephalo => cephalo::swim(config.addr)?,
         CephalopodeType::Pode => pode::swim(config.addr)?,
+        CephalopodeType::InkPode => pode::fill(config.addr)?,
     };
 
     Ok(())

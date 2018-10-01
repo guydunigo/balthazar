@@ -140,11 +140,27 @@ impl Manager {
                 }
                 Message::Job(_, job) => {
                     let mut jobs = jobs_rc.lock().unwrap();
-                    let mut job =
-                        Job::new(Job::get_free_job_id(&jobs[..]).unwrap(), job);
-                    job.new_task(Arguments::default());
 
+                    let new_job_id = Job::get_free_job_id(&jobs[..]).unwrap();
+
+                    let mut job =
+                        Job::new(new_job_id, job);
+                    job.new_task(Arguments::default());
                     jobs.push(Arc::new(Mutex::new(job)));
+
+                    Message::JobRegisteredAt(new_job_id).send(&mut stream)?;
+
+                    Ok(())
+                }
+                Message::Task(job_id, _, args) => {
+                    let mut jobs = jobs_rc.lock().unwrap();
+                    let job = match jobs.iter().find(|j| j.lock().unwrap().id == job_id) {
+                        Some(job) => job.clone(),
+                        None => return Ok(()), // TODO: Error unknown id.
+                    };
+
+                    job.lock().unwrap().new_task(args);
+
                     Ok(())
                 }
                 Message::ReturnValue(_, _, value) => {
