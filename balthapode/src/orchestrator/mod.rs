@@ -12,7 +12,7 @@ use job::Job;
 use message;
 use message::Message;
 
-const SLEEP_TIME_MS: u64 = 1000;
+const SLEEP_TIME_MS: u64 = 100;
 const NB_TASKS: usize = 1;
 
 // ------------------------------------------------------------------
@@ -59,6 +59,8 @@ pub fn orchestrate(
     tx: SyncSender<bool>,
 ) -> Result<(), Error> {
     let mut last_was_nojob = false;
+    // The wasm interpreter takes time to initialize, so we cache the "instance" for later use :
+    let mut job_instances: Vec<(usize, wasm::ModuleRef)> = Vec::new();
 
     loop {
         let task_opt = {
@@ -78,7 +80,27 @@ pub fn orchestrate(
                 (job.id, job.bytecode.clone())
             };
 
-            let res = wasm::exec_wasm(&bytecode[..], &args);
+            // This little gymnastic is done to be able to cache job_instances.
+            // TODO: There is probably a much cleaner way... :/
+            let res = {
+                let instance_opt = match job_instances.iter().find(|(id, _)| id == &job_id) {
+                    Some((_, instance_opt)) => Some(instance_opt),
+                    None => None,
+                };
+
+                wasm::exec_wasm(&bytecode[..], &args, instance_opt)
+            };
+
+            let res = match res {
+                Ok((res, instance)) => {
+                    if let Some(instance) = instance {
+                        job_instances.push((job_id, instance));
+                    }
+                    Ok(res)
+                }
+                Err(err) => Err(err),
+            };
+
             println!(
                 "Executed Task #{} for Job #{} : `{:?}`",
                 task_id, job_id, res

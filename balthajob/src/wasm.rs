@@ -1,3 +1,4 @@
+pub use wasmi::ModuleRef;
 use wasmi::{
     Error as InterpreterError, Externals, FuncInstance, FuncRef, ImportsBuilder, Module,
     ModuleImportResolver, ModuleInstance, RuntimeArgs, RuntimeValue, Signature, Trap,
@@ -31,11 +32,23 @@ impl From<FromUtf8Error> for Error {
     }
 }
 
-struct Runtime {
-    txt: Vec<u8>,
+struct Runtime<'a> {
+    input: &'a [u8],
+    input_counter: usize,
+    output: Vec<u8>,
 }
 
-impl Externals for Runtime {
+impl<'a> Runtime<'a> {
+    pub fn new(input: &'a [u8]) -> Self {
+        Runtime {
+            input,
+            input_counter: 0,
+            output: Vec::new(),
+        }
+    }
+}
+
+impl<'a> Externals for Runtime<'a> {
     fn invoke_index(
         &mut self,
         index: usize,
@@ -55,15 +68,30 @@ impl Externals for Runtime {
                 print!("hash: 0x");
                 args_vec.iter().for_each(|byte| print!("{:x}", byte));
                 println!("");
+
+                Ok(None)
             }
             1 => {
                 let byte: u8 = args.nth_checked(0).unwrap();
-                self.txt.push(byte);
-            }
-            _ => return Err(Trap::new(wasmi::TrapKind::UnexpectedSignature)),
-        }
+                self.output.push(byte);
 
-        Ok(None)
+                Ok(None)
+            }
+            2 => {
+                let byte = if self.input_counter < self.input.len() {
+                    let byte = self.input[self.input_counter];
+
+                    self.input_counter += 1;
+                    byte
+                } else {
+                    0
+                };
+
+                Ok(Some(RuntimeValue::from(byte)))
+            }
+            3 => Ok(Some(RuntimeValue::from(self.input.len() as u64))),
+            _ => Err(Trap::new(wasmi::TrapKind::UnexpectedSignature)),
+        }
     }
 }
 
@@ -80,7 +108,9 @@ impl<'a> ModuleImportResolver for RuntimeModuleImportResolver {
             // TODO: manually do the signature?
             // TODO: dynamically fetch the index?
             "return_256bits" => Ok(FuncInstance::alloc_host(signature.clone(), 0)),
-            "push_char" => Ok(FuncInstance::alloc_host(signature.clone(), 1)),
+            "push_byte" => Ok(FuncInstance::alloc_host(signature.clone(), 1)),
+            "get_byte" => Ok(FuncInstance::alloc_host(signature.clone(), 2)),
+            "get_bytes_len" => Ok(FuncInstance::alloc_host(signature.clone(), 3)),
             _ => Err(InterpreterError::Function(format!(
                 "host module doesn't export function with name {}",
                 field_name
@@ -104,20 +134,36 @@ pub fn _get_functions_list(bytecode: Vec<u8>) {
     }
 }
 
-// TODO: Use arguments
-pub fn exec_wasm(bytecode: &[u8], args: &Arguments) -> Result<Arguments, Error> {
-    let module = Module::from_buffer(bytecode)?;
+pub fn exec_wasm(
+    bytecode: &[u8],
+    args: &Arguments,
+    instance: Option<&ModuleRef>,
+) -> Result<(Arguments, Option<ModuleRef>), Error> {
+    let mut runtime = Runtime::new(&args.bytes[..]);
 
     let args: Vec<RuntimeValue> = args.args.iter().map(|a| a.to_runtime_value()).collect();
 
-    let resolver = RuntimeModuleImportResolver;
-    let imports = ImportsBuilder::new().with_resolver("env", &resolver);
-    let instance = ModuleInstance::new(&module, &imports)?.assert_no_start();
+    // This little gymnastic is done to be able to cache job_instances.
+    // TODO: There is probably a much cleaner way... :/
+    let res = match instance {
+        None => {
+            let module = Module::from_buffer(bytecode)?;
+            let resolver = RuntimeModuleImportResolver;
+            let imports = ImportsBuilder::new().with_resolver("env", &resolver);
+            let instance = ModuleInstance::new(&module, &imports)?.assert_no_start();
 
-    let mut runtime = Runtime { txt: Vec::new() };
-    let res = instance.invoke_export("start", &args[..], &mut runtime)?;
+            (
+                instance.invoke_export("start", &args[..], &mut runtime)?,
+                Some(instance),
+            )
+        }
+        Some(instance) => (
+            instance.invoke_export("start", &args[..], &mut runtime)?,
+            None,
+        ),
+    };
 
-    let return_value = if let Some(res) = res {
+    let return_value = if let (Some(res), _) = res {
         match res {
             RuntimeValue::I32(res) => println!("Return value: {}", res),
             RuntimeValue::I64(res) => println!("Return value: {}", res),
@@ -131,11 +177,12 @@ pub fn exec_wasm(bytecode: &[u8], args: &Arguments) -> Result<Arguments, Error> 
 
     println!(
         "Returned text: '{}'",
-        String::from_utf8_lossy(runtime.txt.as_slice())
+        String::from_utf8_lossy(runtime.output.as_slice())
     );
 
-    let ret_args = Arguments::new(return_value.as_slice(), runtime.txt.as_slice());
-    Ok(ret_args)
+    let ret_args = Arguments::new(return_value.as_slice(), runtime.output.as_slice());
+    let instance = res.1;
+    Ok((ret_args, instance))
 }
 
 #[cfg(test)]
