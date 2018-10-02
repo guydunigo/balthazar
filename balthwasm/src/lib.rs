@@ -1,19 +1,39 @@
+#[macro_use]
+extern crate serde_derive;
+
+extern crate ron;
+extern crate serde;
 extern crate sha3;
+
+use ron::ser;
 
 use sha3::{Digest, Sha3_256};
 
 extern "C" {
-    fn push_char(s: u8);
-    fn return_256bits(s: [u8; 32]);
+    fn push_byte(s: u8);
+    fn get_byte() -> u8;
+    fn get_bytes_len() -> u64;
+}
+
+#[derive(Serialize)]
+struct ReturnValue {
+    bytes: Vec<u8>,
+    hash: [u8; 32],
 }
 
 #[no_mangle]
-pub extern "C" fn start() -> u32 {
-    let res = add(3, 2);
+pub extern "C" fn start() {
+    let mut input = Vec::new();
+
+    unsafe {
+        let bytes_len = get_bytes_len() as u32;
+        for _ in 0..bytes_len {
+            input.push(get_byte());
+        }
+    }
 
     let mut hasher = Sha3_256::default();
-    //hasher.input(format!("{}", res).as_bytes());
-    hasher.input(b"test");
+    hasher.input(&input[..]);
 
     let hash = hasher.result();
 
@@ -23,18 +43,15 @@ pub extern "C" fn start() -> u32 {
         array_hash[i] = hash[i];
     }
 
+    let retval = ReturnValue {
+        bytes: input,
+        hash: array_hash,
+    };
+    let ron_retval = ser::to_string(&retval).unwrap();
     unsafe {
-        return_256bits(array_hash);
-        let string = String::from("test");
-        string
+        ron_retval
             .into_bytes()
             .iter()
-            .for_each(|c| push_char(c.clone()));
+            .for_each(|c| push_byte(c.clone()));
     }
-
-    res
-}
-
-fn add(x: u32, y: u32) -> u32 {
-    x + y
 }
