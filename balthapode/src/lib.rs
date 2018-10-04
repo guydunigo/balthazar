@@ -137,6 +137,7 @@ pub fn swim<A: ToSocketAddrs + Display>(addr: A) -> Result<(), Error> {
                     task_id,
                     args,
                 );
+                // TODO: If the job was requested, do not release the lock...
                 rx.recv().unwrap();
                 res
             }

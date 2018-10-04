@@ -93,17 +93,17 @@ impl Message {
 
         match self {
             Message::Job(job_id, _) => {
-                println!("{} : Sending Job #{} of {} bytes.", pode_id, job_id, len)
+                println!("{} : sending Job #{} of {} bytes.", pode_id, job_id, len)
             }
             Message::Task(job_id, task_id, _) => println!(
-                "{} : Sending Task #{} for Job #{} of {} bytes.",
+                "{} : sending Task #{} for Job #{} of {} bytes.",
                 pode_id, task_id, job_id, len
             ),
             Message::ReturnValue(job_id, task_id, _) => println!(
-                "{} : Sending result for Task #{} for Job #{} of {} bytes.",
+                "{} : sending result for Task #{} for Job #{} of {} bytes.",
                 pode_id, task_id, job_id, len
             ),
-            _ => println!("{} : Sending `{}` of {} bytes.", pode_id, msg_str, len),
+            _ => println!("{} : sending `{}` of {} bytes.", pode_id, msg_str, len),
         }
 
         if len >= MESSAGE_SIZE_LIMIT as usize {
