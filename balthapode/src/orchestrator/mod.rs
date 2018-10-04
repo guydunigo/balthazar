@@ -45,15 +45,17 @@ impl From<message::Error> for Error {
 // ------------------------------------------------------------------
 
 pub fn start_orchestrator(
+    pode_id: usize,
     jobs: Arc<Mutex<Vec<Arc<Mutex<Job<bool>>>>>>,
     cephalo: Arc<Mutex<TcpStream>>,
 ) -> Receiver<bool> {
     let (tx, rx) = mpsc::sync_channel(0);
-    thread::spawn(move || orchestrate(jobs, cephalo, tx));
+    thread::spawn(move || orchestrate(pode_id, jobs, cephalo, tx));
     rx
 }
 
 pub fn orchestrate(
+    pode_id: usize,
     jobs: Arc<Mutex<Vec<Arc<Mutex<Job<bool>>>>>>,
     cephalo: Arc<Mutex<TcpStream>>,
     tx: SyncSender<bool>,
@@ -102,8 +104,8 @@ pub fn orchestrate(
             };
 
             println!(
-                "Executed Task #{} for Job #{} : `{:?}`",
-                task_id, job_id, res
+                "{} : Executed Task #{} for Job #{}",
+                pode_id, task_id, job_id
             );
 
             //TODO: return proper error
@@ -115,18 +117,18 @@ pub fn orchestrate(
 
             {
                 let mut cephalo = cephalo.lock().unwrap();
-                Message::ReturnValue(job_id, task_id, res).send(&mut *cephalo)?;
+                Message::ReturnValue(job_id, task_id, res).send(pode_id, &mut *cephalo)?;
             }
         } else {
             {
                 let mut cephalo = cephalo.lock().unwrap();
-                Message::Idle(NB_TASKS).send(&mut *cephalo)?;
+                Message::Idle(NB_TASKS).send(pode_id, &mut *cephalo)?;
             }
 
             tx.send(true).unwrap();
 
             if last_was_nojob {
-                println!("Orchestrator sleeping...");
+                println!("{} : Orchestrator sleeping...", pode_id);
                 thread::sleep(Duration::from_millis(SLEEP_TIME_MS));
             }
             last_was_nojob = true;

@@ -79,7 +79,7 @@ pub enum Message {
 }
 
 impl Message {
-    pub fn send<W: Write>(&self, writer: &mut W) -> Result<(), Error> {
+    pub fn send<W: Write>(&self, pode_id: usize, writer: &mut W) -> Result<(), Error> {
         // This prevents spending time to convert the task... :
         // TODO: same with Task ?
         if let Message::Job(_, bytecode) = self {
@@ -91,11 +91,19 @@ impl Message {
         let msg_str = ser::to_string(self)?;
         let len = msg_str.len();
 
-        // TODO: same with Task ?
-        if let Message::Job(job_id, _) = self {
-            println!("sending Job #{} of {} bytes.", job_id, len);
-        } else {
-            println!("sending `{}` of {} bytes.", msg_str, len);
+        match self {
+            Message::Job(job_id, _) => {
+                println!("{} : Sending Job #{} of {} bytes.", pode_id, job_id, len)
+            }
+            Message::Task(job_id, task_id, _) => println!(
+                "{} : Sending Task #{} for Job #{} of {} bytes.",
+                pode_id, task_id, job_id, len
+            ),
+            Message::ReturnValue(job_id, task_id, _) => println!(
+                "{} : Sending result for Task #{} for Job #{} of {} bytes.",
+                pode_id, task_id, job_id, len
+            ),
+            _ => println!("{} : Sending `{}` of {} bytes.", pode_id, msg_str, len),
         }
 
         if len >= MESSAGE_SIZE_LIMIT as usize {
@@ -184,7 +192,7 @@ impl<R: Read> Iterator for MessageReader<R> {
                 return Some(Err(Error::MessageTooBig(msg_size)));
             }
 
-            println!("{} : Receiving {} bytes...", self.id, msg_size);
+            // println!("{} : Receiving {} bytes...", self.id, msg_size);
 
             let mut buffer: Vec<u8> = Vec::new();
             buffer.resize_default(msg_size);
@@ -208,10 +216,19 @@ impl<R: Read> Iterator for MessageReader<R> {
             let res = match msg_res {
                 Ok(msg) => {
                     // TODO: same with Task ?
-                    if let Message::Job(job_id, _) = msg {
-                        println!("{} : received Job #{}.", self.id, job_id);
-                    } else {
-                        println!("{} : received `{:?}`.", self.id, msg);
+                    match msg {
+                        Message::Job(job_id, _) => {
+                            println!("{} : received Job #{}.", self.id, job_id)
+                        }
+                        Message::Task(job_id, task_id, _) => println!(
+                            "{} : received Task #{} for Job #{}.",
+                            self.id, task_id, job_id
+                        ),
+                        Message::ReturnValue(job_id, task_id, _) => println!(
+                            "{} : received result for Task #{} for Job #{}.",
+                            self.id, task_id, job_id
+                        ),
+                        _ => println!("{} : received `{:?}`.", self.id, msg),
                     }
                     self.reader = Some(reader);
                     Ok(msg)

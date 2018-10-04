@@ -59,30 +59,30 @@ pub fn initialize_pode<A: ToSocketAddrs + Display>(addr: A) -> Result<(TcpStream
     println!("Connected to : `{}`", addr);
 
     //TODO: as option
-    let id = {
+    let pode_id = {
         let mut init_reader = MessageReader::new(0, socket.try_clone()?);
         match init_reader.next() {
-            Some(Ok(Message::Connected(id))) => Ok(id),
+            Some(Ok(Message::Connected(pode_id))) => Ok(pode_id),
             _ => Err(Error::FailedHandshake),
         }
     }?;
-    println!("Handshake successful, received id : {}.", id);
+    println!("{} : Handshake successful.", pode_id);
 
-    Ok((socket, id))
+    Ok((socket, pode_id))
 }
 
 pub fn fill<A: ToSocketAddrs + Display>(addr: A) -> Result<(), Error> {
-    let (mut socket, id) = initialize_pode(addr)?;
+    let (mut socket, pode_id) = initialize_pode(addr)?;
 
     {
         let mut f = File::open("main.wasm")?;
         let mut code: Vec<u8> = Vec::new();
         f.read_to_end(&mut code)?;
 
-        Message::Job(0, code).send(&mut socket)?;
+        Message::Job(0, code).send(pode_id, &mut socket)?;
     }
     let job_id = {
-        let mut reader = MessageReader::new(id, socket.try_clone()?);
+        let mut reader = MessageReader::new(pode_id, socket.try_clone()?);
         match reader.next() {
             Some(Ok(Message::JobRegisteredAt(job_id))) => job_id,
             Some(Ok(msg)) => return Err(Error::UnexpectedReply(msg)),
@@ -99,7 +99,7 @@ pub fn fill<A: ToSocketAddrs + Display>(addr: A) -> Result<(), Error> {
         let mut args_list: Vec<Arguments> = de::from_bytes(&args_list_txt[..])?;
 
         for args in args_list.drain(..) {
-            Message::Task(job_id, 0, args).send(&mut socket)?;
+            Message::Task(job_id, 0, args).send(pode_id, &mut socket)?;
         }
     }
 
@@ -107,9 +107,9 @@ pub fn fill<A: ToSocketAddrs + Display>(addr: A) -> Result<(), Error> {
 }
 
 pub fn swim<A: ToSocketAddrs + Display>(addr: A) -> Result<(), Error> {
-    let (socket, id) = initialize_pode(addr)?;
+    let (socket, pode_id) = initialize_pode(addr)?;
 
-    let mut reader = MessageReader::new(id, socket.try_clone()?);
+    let mut reader = MessageReader::new(pode_id, socket.try_clone()?);
     let result = {
         let mut socket = Arc::new(Mutex::new(socket));
         let mut lone_tasks: Vec<LoneTask<bool>> = Vec::new();
@@ -117,7 +117,7 @@ pub fn swim<A: ToSocketAddrs + Display>(addr: A) -> Result<(), Error> {
         let jobs: Vec<Arc<Mutex<Job<bool>>>> = Vec::new();
         let jobs = Arc::new(Mutex::new(jobs));
 
-        let rx = orchestrator::start_orchestrator(jobs.clone(), socket.clone());
+        let rx = orchestrator::start_orchestrator(pode_id, jobs.clone(), socket.clone());
 
         reader.for_each_until_error(|msg| match msg {
             Message::Job(job_id, bytecode) => {
@@ -129,6 +129,7 @@ pub fn swim<A: ToSocketAddrs + Display>(addr: A) -> Result<(), Error> {
             }
             Message::Task(job_id, task_id, args) => {
                 let res = register_task(
+                    pode_id,
                     jobs.clone(),
                     &mut lone_tasks,
                     socket.clone(),
@@ -146,7 +147,7 @@ pub fn swim<A: ToSocketAddrs + Display>(addr: A) -> Result<(), Error> {
             _ => {
                 /*{
                     let mut socket = socket.lock().unwrap();
-                    Message::Disconnect.send(&mut *socket)
+                    Message::Disconnect.send(id, &mut *socket)
                 }*/
                 Ok(())
             }
@@ -200,6 +201,7 @@ fn register_job(
 }
 
 fn register_task(
+    pode_id: usize,
     jobs: Arc<Mutex<Vec<Arc<Mutex<Job<bool>>>>>>,
     lone_tasks: &mut Vec<LoneTask<bool>>,
     socket: Arc<Mutex<TcpStream>>,
@@ -226,12 +228,13 @@ fn register_task(
             lone_tasks.push(LoneTask { job_id, task });
             {
                 let mut socket = socket.lock().unwrap();
-                Message::RequestJob(job_id).send(&mut *socket)?;
+                // TODO: If no answer, ask later ?
+                Message::RequestJob(job_id).send(pode_id, &mut *socket)?;
             }
         }
     }
 
-    println!("Task #{} for Job #{} saved.", task_id, job_id);
+    println!("{} : Task #{} for Job #{} saved.", pode_id, task_id, job_id);
 
     Ok(())
 }

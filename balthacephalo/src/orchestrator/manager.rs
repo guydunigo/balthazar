@@ -85,13 +85,13 @@ impl Manager {
         orch_tx: mpsc::Sender<Message>,
         jobs_rc: Arc<Mutex<Vec<Arc<Mutex<Job<Mutex<Manager>>>>>>>,
     ) -> Result<(), Error> {
-        let man_id = manager.lock().unwrap().id;
+        let pode_id = manager.lock().unwrap().id;
         let peer_addr = stream.peer_addr()?;
-        println!("New Pode {} at address : `{}`", man_id, peer_addr);
+        println!("New Pode {} at address : `{}`", pode_id, peer_addr);
 
-        Message::Connected(man_id).send(&mut stream)?;
+        Message::Connected(pode_id).send(pode_id, &mut stream)?;
 
-        let mut reader = MessageReader::new(man_id, stream.try_clone()?);
+        let mut reader = MessageReader::new(pode_id, stream.try_clone()?);
         let result = {
             let mut stream = stream.try_clone()?;
             reader.for_each_until_error(|msg| match msg {
@@ -116,7 +116,7 @@ impl Manager {
                                         let job_id = job.lock().unwrap().id;
                                         let send_res =
                                             Message::Task(job_id, task.id, task.args.clone())
-                                                .send(&mut stream)?;
+                                                .send(pode_id, &mut stream)?;
                                         task.pode = Some(Arc::downgrade(&manager));
                                         send_res
                                     };
@@ -127,7 +127,7 @@ impl Manager {
                                     send_res
                                 }
                                 None => {
-                                    Message::NoJob.send(&mut stream)?;
+                                    Message::NoJob.send(pode_id, &mut stream)?;
                                     break;
                                 }
                             }
@@ -143,7 +143,7 @@ impl Manager {
                             Message::Job(job_id, bytecode)
                         },
                         None => Message::InvalidJobId(job_id),
-                    }.send(&mut stream)
+                    }.send(pode_id, &mut stream)
                 }
                 Message::Job(_, job) => {
                     let mut jobs = jobs_rc.lock().unwrap();
@@ -155,7 +155,7 @@ impl Manager {
                     job.new_task(Arguments::default());
                     jobs.push(Arc::new(Mutex::new(job)));
 
-                    Message::JobRegisteredAt(new_job_id).send(&mut stream)?;
+                    Message::JobRegisteredAt(new_job_id).send(pode_id, &mut stream)?;
 
                     Ok(())
                 }
@@ -185,19 +185,21 @@ impl Manager {
                         manager.task = None;
                     } else {
                         // TODO: proper error handling ?
-                        println!("{} : The pode sent a return value but doesn't have a linked task, discarding...", man_id);
+                        println!("{} : The pode sent a return value but doesn't have a linked task, discarding...", pode_id);
                     }
                     Ok(())
                 }
-                _ => Message::Hello("Hey".to_string()).send(&mut stream),
+                _ => Message::Hello("Hey".to_string()).send(pode_id, &mut stream),
             })
         };
 
-        // println!("Manager {} : Disconnected, notifying orchestrator...", man_id);
+        // println!("Manager {} : Disconnected, notifying orchestrator...", pode_id);
         // TODO: Report errors ?
         // TODO: useful if already EOF ?
-        Message::Disconnect.send(&mut stream).unwrap_or_default();
-        orch_tx.send(Message::Disconnected(man_id))?;
+        Message::Disconnect
+            .send(pode_id, &mut stream)
+            .unwrap_or_default();
+        orch_tx.send(Message::Disconnected(pode_id))?;
 
         match result {
             Err(err) => Err(Error::from(err)),
