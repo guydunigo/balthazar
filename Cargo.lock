@@ -57,6 +57,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "balthnative"
+version = "0.1.0"
+dependencies = [
+ "balthajob 0.1.0",
+ "ron 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "serde 1.0.79 (registry+https://github.com/rust-lang/crates.io-index)",
+ "serde_derive 1.0.79 (registry+https://github.com/rust-lang/crates.io-index)",
+ "sha3 0.7.3 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
 name = "balthwasm"
 version = "0.1.0"
 dependencies = [

@@ -1,0 +1,13 @@
+[package]
+name = "balthnative"
+version = "0.1.0"
+authors = ["GONI Guillaume <gdn3@live.fr>"]
+edition = "2018"
+
+[dependencies]
+sha3 = "0.7.3"
+serde_derive = "1.0.78"
+serde = "1.0.78"
+ron = "0.4.0"
+
+balthajob = { path = "../balthajob" }

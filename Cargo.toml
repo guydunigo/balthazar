@@ -11,6 +11,7 @@ members = [
     "balthmessage",
     "balthwasm",
     "balthajob",
+    "balthnative",
 ]
 
 default-members = ["balthacli"]
