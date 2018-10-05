@@ -13,22 +13,22 @@ pub enum ArgumentKind {
 impl ArgumentKind {
     pub fn to_runtime_value(&self) -> RuntimeValue {
         match self {
-            ArgumentKind::I32(n) => RuntimeValue::I32(n.clone()),
-            ArgumentKind::I64(n) => RuntimeValue::I64(n.clone()),
-            ArgumentKind::F32(n) => RuntimeValue::decode_f32(n.clone()),
-            ArgumentKind::F64(n) => RuntimeValue::decode_f64(n.clone()),
+            ArgumentKind::I32(n) => RuntimeValue::I32(*n),
+            ArgumentKind::I64(n) => RuntimeValue::I64(*n),
+            ArgumentKind::F32(n) => RuntimeValue::decode_f32(*n),
+            ArgumentKind::F64(n) => RuntimeValue::decode_f64(*n),
         }
     }
 }
 
 impl From<i8> for ArgumentKind {
     fn from(val: i8) -> Self {
-        ArgumentKind::I32(val as i32)
+        ArgumentKind::I32(i32::from(val))
     }
 }
 impl From<i16> for ArgumentKind {
     fn from(val: i16) -> Self {
-        ArgumentKind::I32(val as i32)
+        ArgumentKind::I32(i32::from(val))
     }
 }
 impl From<i32> for ArgumentKind {
@@ -44,12 +44,12 @@ impl From<i64> for ArgumentKind {
 
 impl From<u8> for ArgumentKind {
     fn from(val: u8) -> Self {
-        ArgumentKind::I32(val as i32)
+        ArgumentKind::I32(i32::from(val))
     }
 }
 impl From<u16> for ArgumentKind {
     fn from(val: u16) -> Self {
-        ArgumentKind::I32(val as i32)
+        ArgumentKind::I32(i32::from(val))
     }
 }
 impl From<u32> for ArgumentKind {

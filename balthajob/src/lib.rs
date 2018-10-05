@@ -41,7 +41,11 @@ impl<T> Job<T> {
             if id >= usize::max_value() {
                 break None;
             // TODO: not very efficient...
-            } else if let Some(_) = list.iter().find(|job| job.lock().unwrap().id == id) {
+            } else if list
+                .iter()
+                .find(|job| job.lock().unwrap().id == id)
+                .is_some()
+            {
                 id += 1;
             } else {
                 break Some(id);
@@ -86,7 +90,7 @@ impl<T> Job<T> {
 // TODO: name?
 // TODO: what happens between the mutex unlock and the new lock ? return MutexGuard ?
 pub fn get_available_task<T>(
-    jobs: &Vec<Arc<Mutex<Job<T>>>>,
+    jobs: &[Arc<Mutex<Job<T>>>],
 ) -> Option<(Arc<Mutex<Job<T>>>, Arc<Mutex<task::Task<T>>>)> {
     jobs.iter()
         .map(|job| (job, job.lock().unwrap().get_available_task()))

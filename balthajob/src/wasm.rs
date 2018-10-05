@@ -67,7 +67,7 @@ impl<'a> Externals for Runtime<'a> {
 
                 print!("hash: 0x");
                 args_vec.iter().for_each(|byte| print!("{:x}", byte));
-                println!("");
+                println!();
 
                 Ok(None)
             }
@@ -119,9 +119,8 @@ impl<'a> ModuleImportResolver for RuntimeModuleImportResolver {
     }
 }
 
-pub fn _get_functions_list(bytecode: Vec<u8>) {
-    let module: parity_wasm::elements::Module =
-        parity_wasm::deserialize_buffer(&bytecode[..]).unwrap();
+pub fn _get_functions_list(bytecode: &[u8]) {
+    let module: parity_wasm::elements::Module = parity_wasm::deserialize_buffer(bytecode).unwrap();
     let module = module.parse_names().unwrap();
     let names_section = module.names_section().unwrap();
     if let parity_wasm::elements::NameSection::Function(names_section) = names_section {

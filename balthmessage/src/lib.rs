@@ -205,14 +205,14 @@ impl<R: Read> Iterator for MessageReader<R> {
                     Ok(n) => n,
                     Err(err) => return Some(Err(Error::from(err))),
                 };
-                if n <= 0 {
+                if n == 0 {
                     return None;
                 }
 
                 downloaded_size += n;
             }
 
-            let msg_res: de::Result<Message> = de::from_bytes(&mut buffer.as_slice());
+            let msg_res: de::Result<Message> = de::from_bytes(&buffer.as_slice());
             let res = match msg_res {
                 Ok(msg) => {
                     // TODO: same with Task ?
