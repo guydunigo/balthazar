@@ -1,14 +1,17 @@
 use std::io;
 use std::io::prelude::*;
 
+#[derive(Default)]
 pub struct MockStream {
     pub bytes: Vec<u8>,
 }
+
 impl MockStream {
     pub fn new() -> MockStream {
         MockStream { bytes: Vec::new() }
     }
 }
+
 impl Write for MockStream {
     fn write(&mut self, bytes: &[u8]) -> std::result::Result<usize, std::io::Error> {
         bytes.iter().for_each(|b| self.bytes.push(b.clone()));
@@ -18,6 +21,7 @@ impl Write for MockStream {
         unimplemented!();
     }
 }
+
 impl Read for MockStream {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let buf_len = buf.len();
