@@ -4,11 +4,15 @@ use wasmi::{
     ModuleImportResolver, ModuleInstance, RuntimeArgs, RuntimeValue, Signature, Trap,
 };
 
+use std::net::{TcpListener, TcpStream};
 use std::string::FromUtf8Error;
 
 use super::task::arguments::argument_kind::ArgumentKind;
 use super::task::arguments::Arguments;
 use super::*;
+
+const MAX_SOCKETS: i8 = 2;
+const MAX_LISTENERS: i8 = 2;
 
 //TODO: clean this mess!!!
 //TODO: unwrap to proper errors
@@ -36,14 +40,42 @@ struct Runtime<'a> {
     input: &'a [u8],
     input_counter: usize,
     output: Vec<u8>,
+    socks: Vec<Option<TcpStream>>,
+    listeners: Vec<Option<TcpListener>>,
 }
 
 impl<'a> Runtime<'a> {
     pub fn new(input: &'a [u8]) -> Self {
-        Runtime {
+        let mut r = Runtime {
             input,
             input_counter: 0,
             output: Vec::new(),
+            socks: Vec::with_capacity(MAX_SOCKETS as usize),
+            listeners: Vec::with_capacity(MAX_LISTENERS as usize),
+        };
+
+        for _ in 0..MAX_SOCKETS {
+            r.socks.push(None);
+        }
+        for _ in 0..MAX_LISTENERS {
+            r.listeners.push(None);
+        }
+
+        r
+    }
+    
+    pub fn find_sock_id(&self) -> i8 {
+        if let Some((id, _)) = self.socks.iter().enumerate().skip_while(|(_,s)| s.is_some()).next() {
+        id as i8
+        } else {
+            -1
+        }
+    }
+    pub fn find_listener_id(&self) -> i8 {
+        if let Some((id, _)) = self.listeners.iter().enumerate().skip_while(|(_,s)| s.is_some()).next() {
+        id as i8
+        } else {
+            -1
         }
     }
 }
@@ -90,6 +122,54 @@ impl<'a> Externals for Runtime<'a> {
                 Ok(Some(RuntimeValue::from(byte)))
             }
             3 => Ok(Some(RuntimeValue::from(self.input.len() as u64))),
+            // TODO: Well... This IS upgly... :
+            // TODO: Some actual error codes
+            4 => {
+                let port: u16 = args.nth(0);
+                let listener = TcpListener::bind(format!("localhost:{}", port));
+
+                if let Err(_) = listener {
+                    Ok(Some(RuntimeValue::from(-1)))
+                } else if self.listeners.len() >= MAX_LISTENERS as usize {
+                    Ok(Some(RuntimeValue::from(-2)))
+                } else if let Ok(listener) = listener {
+                    let id = self.find_listener_id();
+                    self.listeners[id as usize] = Some(listener);
+
+                    Ok(Some(RuntimeValue::from(id)))
+                } else {
+                    Ok(Some(RuntimeValue::from(-3)))
+                }
+            },
+            5 => {
+                let listener_id: i8 = args.nth(0);
+                let sock_id = self.find_sock_id();
+
+                let sock_id: i8 = if listener_id > MAX_LISTENERS || sock_id < 0 {
+                    -1
+                } else {
+                    let listener = &self.listeners[listener_id as usize];
+
+                    if let Some(listener) = listener {
+                        let opt = listener.accept();
+
+                        if let Ok((socket, _)) = opt {
+                            self.socks[sock_id as usize] = Some(socket);
+
+                            sock_id
+                        } else {
+                            -1
+                        }
+                    } else {
+                        -1
+                    }
+                };
+
+                Ok(Some(RuntimeValue::from(sock_id)))
+            },
+            6 => {
+
+            },
             _ => Err(Trap::new(wasmi::TrapKind::UnexpectedSignature)),
         }
     }
@@ -111,6 +191,13 @@ impl<'a> ModuleImportResolver for RuntimeModuleImportResolver {
             "push_byte" => Ok(FuncInstance::alloc_host(signature.clone(), 1)),
             "get_byte" => Ok(FuncInstance::alloc_host(signature.clone(), 2)),
             "get_bytes_len" => Ok(FuncInstance::alloc_host(signature.clone(), 3)),
+            "tcp_listen_init" => Ok(FuncInstance::alloc_host(signature.clone(), 4)),
+            "tcp_accept" => Ok(FuncInstance::alloc_host(signature.clone(), 5)),
+            "tcp_socket_addr_is_v6" => Ok(FuncInstance::alloc_host(signature.clone(), 6)),
+            "tcp_socket_addr_nth" => Ok(FuncInstance::alloc_host(signature.clone(), 7)),
+            "tcp_read_byte" => Ok(FuncInstance::alloc_host(signature.clone(), 8)),
+            "tcp_write_byte" => Ok(FuncInstance::alloc_host(signature.clone(), 9)),
+            "tcp_close" => Ok(FuncInstance::alloc_host(signature.clone(), 10)),
             _ => Err(InterpreterError::Function(format!(
                 "host module doesn't export function with name {}",
                 field_name
