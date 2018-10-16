@@ -99,8 +99,13 @@ impl<'a> Externals for Runtime<'a> {
         index: usize,
         args: RuntimeArgs,
     ) -> Result<Option<RuntimeValue>, Trap> {
-        println!("Executing function #{}", index);
+        // println!("Executing function #{}", index);
         match index {
+            99 => {
+                let n: i8 = args.nth(0);
+                println!("===> {}", n);
+                Ok(None)
+            }
             0 => {
                 let mut args_vec: Vec<u8> = Vec::with_capacity(32);
                 for i in 0..args.len() {
@@ -141,16 +146,18 @@ impl<'a> Externals for Runtime<'a> {
             4 => {
                 let port: u16 = args.nth(0);
                 let listener = TcpListener::bind(format!("localhost:{}", port));
+                let new_id = self.find_listener_id();
+
+                println!("Binding to port #{}", port);
 
                 if let Err(_) = listener {
                     Ok(Some(RuntimeValue::from(-1)))
-                } else if self.listeners.len() >= MAX_LISTENERS as usize {
+                } else if new_id < 0 {
                     Ok(Some(RuntimeValue::from(-2)))
                 } else if let Ok(listener) = listener {
-                    let id = self.find_listener_id();
-                    self.listeners[id as usize] = Some(listener);
+                    self.listeners[new_id as usize] = Some(listener);
 
-                    Ok(Some(RuntimeValue::from(id)))
+                    Ok(Some(RuntimeValue::from(new_id)))
                 } else {
                     Ok(Some(RuntimeValue::from(-3)))
                 }
@@ -158,6 +165,8 @@ impl<'a> Externals for Runtime<'a> {
             5 => {
                 let listener_id: i8 = args.nth(0);
                 let sock_id = self.find_sock_id();
+
+                println!("Waiting for connection on listener #{}", listener_id);
 
                 let sock_id: i8 = if listener_id > MAX_LISTENERS || sock_id < 0 {
                     -1
@@ -169,6 +178,10 @@ impl<'a> Externals for Runtime<'a> {
 
                         if let Ok((socket, _)) = opt {
                             self.socks[sock_id as usize] = Some(socket);
+                            println!(
+                                "New connection on listener #{} : socket #{}",
+                                listener_id, sock_id
+                            );
 
                             sock_id
                         } else {
@@ -292,6 +305,7 @@ impl<'a> Externals for Runtime<'a> {
                     let sock_opt = self.socks[sock_id as usize].take();
                     if let Some(sock) = sock_opt {
                         if sock.shutdown(Shutdown::Both).is_ok() {
+                            println!("Closed socket #{}", sock_id);
                             0
                         } else {
                             -1
@@ -316,10 +330,10 @@ impl<'a> ModuleImportResolver for RuntimeModuleImportResolver {
         field_name: &str,
         signature: &Signature,
     ) -> Result<FuncRef, InterpreterError> {
-        // println!("{} {:?}", field_name, signature);
         match field_name {
             // TODO: manually do the signature?
             // TODO: dynamically fetch the index?
+            "debug" => Ok(FuncInstance::alloc_host(signature.clone(), 99)),
             "return_256bits" => Ok(FuncInstance::alloc_host(signature.clone(), 0)),
             "push_byte" => Ok(FuncInstance::alloc_host(signature.clone(), 1)),
             "get_byte" => Ok(FuncInstance::alloc_host(signature.clone(), 2)),

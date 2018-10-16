@@ -12,7 +12,7 @@ use job::Job;
 use message;
 use message::Message;
 
-const SLEEP_TIME_MS: u64 = 100;
+const SLEEP_TIME_MS: u64 = 5000;
 const NB_TASKS: usize = 1;
 
 // ------------------------------------------------------------------
@@ -107,6 +107,8 @@ pub fn orchestrate(
                 "{} : Executed Task #{} for Job #{}",
                 pode_id, task_id, job_id
             );
+
+            println!("{:?}", res);
 
             //TODO: return proper error
             let res = match res {
