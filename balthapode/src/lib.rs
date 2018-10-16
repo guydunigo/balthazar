@@ -137,9 +137,15 @@ pub fn swim<A: ToSocketAddrs + Display>(addr: A) -> Result<(), Error> {
                     task_id,
                     args,
                 );
-                // TODO: If the job was requested, do not release the lock...
-                rx.recv().unwrap();
-                res
+                match res {
+                    Ok(job_was_requested) => {
+                        if !job_was_requested {
+                            rx.recv().unwrap();
+                        }
+                        Ok(())
+                    }
+                    Err(err) => Err(err),
+                }
             }
             Message::NoJob => {
                 rx.recv().unwrap();
@@ -209,7 +215,7 @@ fn register_task(
     job_id: usize,
     task_id: usize,
     args: Arguments,
-) -> Result<(), message::Error> {
+) -> Result<bool, message::Error> {
     //TODO: use balthajob to represent jobs and tasks and execute them there.
     //TODO: do not fail on job error
     let job_opt = match jobs
@@ -222,8 +228,11 @@ fn register_task(
         None => None,
     };
 
-    match job_opt {
-        Some(job) => job.lock().unwrap().push_new_task(task_id, args),
+    let job_was_requested = match job_opt {
+        Some(job) => {
+            job.lock().unwrap().push_new_task(task_id, args);
+            false
+        }
         None => {
             let task = Task::new(task_id, args);
             lone_tasks.push(LoneTask { job_id, task });
@@ -232,12 +241,14 @@ fn register_task(
                 // TODO: If no answer, ask later ?
                 Message::RequestJob(job_id).send(pode_id, &mut *socket)?;
             }
+
+            true
         }
-    }
+    };
 
     println!("{} : Task #{} for Job #{} saved.", pode_id, task_id, job_id);
 
-    Ok(())
+    Ok(job_was_requested)
 }
 
 #[cfg(test)]
