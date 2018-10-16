@@ -16,11 +16,11 @@ extern "C" {
     fn get_bytes_len() -> u64;
     fn tcp_listen_init(port: u16) -> i8;
     fn tcp_accept(listener_id: i8) -> i8;
-    fn tcp_get_socket_addr_is_v6(sock_id: i8) -> u8;
-    fn tcp_get_socket_addr_nth(sock_id: i8, nth: u8) -> u8;
+    fn tcp_get_socket_addr_is_v6(sock_id: i8) -> i8;
+    fn tcp_get_socket_addr_nth(sock_id: i8, nth: u8) -> i16;
     fn tcp_read_byte(sock_id: i8) -> i16;
     fn tcp_write_byte(sock_id: i8, byte: u8) -> i16;
-    fn tcp_close(sock_id: i8);
+    fn tcp_close(sock_id: i8) -> i8;
 }
 
 #[derive(Serialize)]
@@ -66,29 +66,33 @@ pub extern "C" fn start() {
     unsafe {
         let lsock_id = tcp_listen_init(2000);
         if lsock_id < 0 {
-            // error
+            // TODO: error
         }
 
         loop {
-            let addr = tcp_accept();
-            let csock_id = addr[0] as i8;
-            let is_ipv6 = addr[1] == 0;
+            // TODO: test for negative values
+            let csock_id = tcp_accept(lsock_id);
+            let is_ipv6 = tcp_get_socket_addr_is_v6(csock_id) == 1;
             let addr = if is_ipv6 {
                 let mut array: [u8; 16] = [0; 16];
                 for i in 0..16 {
-                    array[i] = addr[2+i];
+                    array[i] = tcp_get_socket_addr_nth(csock_id, i as u8) as u8;
                 }
                 IpAddr::V6(Ipv6Addr::from(array))
             } else {
                 let mut array: [u8; 4] = [0; 4];
                 for i in 0..4 {
-                    array[i] = addr[2+i];
+                    array[i] = tcp_get_socket_addr_nth(csock_id, i as u8) as u8;
                 }
                 IpAddr::V4(Ipv4Addr::from(array))
             };
 
             let str_addr = format!("{}", addr);
-            str_addr.into_bytes().iter().skip_while(|b| tcp_write_byte(csock_id, **b) >= 0).next();
+            str_addr
+                .into_bytes()
+                .iter()
+                .skip_while(|b| tcp_write_byte(csock_id, **b) >= 0)
+                .next();
 
             tcp_close(csock_id);
         }

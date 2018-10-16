@@ -4,7 +4,8 @@ use wasmi::{
     ModuleImportResolver, ModuleInstance, RuntimeArgs, RuntimeValue, Signature, Trap,
 };
 
-use std::net::{TcpListener, TcpStream};
+use std::io::{Read, Write};
+use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
 use std::string::FromUtf8Error;
 
 use super::task::arguments::argument_kind::ArgumentKind;
@@ -63,17 +64,29 @@ impl<'a> Runtime<'a> {
 
         r
     }
-    
+
     pub fn find_sock_id(&self) -> i8 {
-        if let Some((id, _)) = self.socks.iter().enumerate().skip_while(|(_,s)| s.is_some()).next() {
-        id as i8
+        if let Some((id, _)) = self
+            .socks
+            .iter()
+            .enumerate()
+            .skip_while(|(_, s)| s.is_some())
+            .next()
+        {
+            id as i8
         } else {
             -1
         }
     }
     pub fn find_listener_id(&self) -> i8 {
-        if let Some((id, _)) = self.listeners.iter().enumerate().skip_while(|(_,s)| s.is_some()).next() {
-        id as i8
+        if let Some((id, _)) = self
+            .listeners
+            .iter()
+            .enumerate()
+            .skip_while(|(_, s)| s.is_some())
+            .next()
+        {
+            id as i8
         } else {
             -1
         }
@@ -86,6 +99,7 @@ impl<'a> Externals for Runtime<'a> {
         index: usize,
         args: RuntimeArgs,
     ) -> Result<Option<RuntimeValue>, Trap> {
+        println!("Executing function #{}", index);
         match index {
             0 => {
                 let mut args_vec: Vec<u8> = Vec::with_capacity(32);
@@ -140,7 +154,7 @@ impl<'a> Externals for Runtime<'a> {
                 } else {
                     Ok(Some(RuntimeValue::from(-3)))
                 }
-            },
+            }
             5 => {
                 let listener_id: i8 = args.nth(0);
                 let sock_id = self.find_sock_id();
@@ -166,10 +180,129 @@ impl<'a> Externals for Runtime<'a> {
                 };
 
                 Ok(Some(RuntimeValue::from(sock_id)))
-            },
+            }
             6 => {
+                let sock_id: i8 = args.nth(0);
 
-            },
+                let res = if sock_id > MAX_SOCKETS {
+                    -1
+                } else {
+                    let sock_opt = &self.socks[sock_id as usize];
+                    if let Some(sock) = sock_opt {
+                        if let Ok(addr) = sock.peer_addr() {
+                            if addr.is_ipv6() {
+                                1
+                            } else {
+                                0
+                            }
+                        } else {
+                            -1
+                        }
+                    } else {
+                        -1
+                    }
+                };
+
+                Ok(Some(RuntimeValue::from(res)))
+            }
+            7 => {
+                let sock_id: i8 = args.nth(0);
+                // Check nth
+                let nth: u8 = args.nth(1);
+
+                let res: i16 = if sock_id > MAX_SOCKETS {
+                    -1
+                } else {
+                    let sock_opt = &self.socks[sock_id as usize];
+                    if let Some(sock) = sock_opt {
+                        if let Ok(addr) = sock.peer_addr() {
+                            match addr {
+                                SocketAddr::V4(addr) => addr.ip().octets()[nth as usize] as i16,
+                                SocketAddr::V6(addr) => addr.ip().octets()[nth as usize] as i16,
+                            }
+                        } else {
+                            -1
+                        }
+                    } else {
+                        -1
+                    }
+                };
+
+                Ok(Some(RuntimeValue::from(res)))
+            }
+            8 => {
+                let sock_id: i8 = args.nth(0);
+
+                let res: i16 = if sock_id > MAX_SOCKETS {
+                    -1
+                } else {
+                    let sock_opt = &mut self.socks[sock_id as usize];
+                    if let Some(sock) = sock_opt {
+                        let mut buf: [u8; 1] = [0];
+                        if let Ok(b) = sock.read(&mut buf[..]) {
+                            if b == 0 {
+                                (*sock_opt).take();
+                                -1
+                            } else {
+                                buf[0] as i16
+                            }
+                        } else {
+                            -1
+                        }
+                    } else {
+                        -1
+                    }
+                };
+
+                Ok(Some(RuntimeValue::from(res)))
+            }
+            9 => {
+                let sock_id: i8 = args.nth(0);
+                let byte: u8 = args.nth(1);
+
+                let res: i16 = if sock_id > MAX_SOCKETS {
+                    -1
+                } else {
+                    let sock_opt = &mut self.socks[sock_id as usize];
+                    if let Some(sock) = sock_opt {
+                        let buf: [u8; 1] = [byte];
+                        if let Ok(b) = sock.write(&buf[..]) {
+                            if b == 0 {
+                                (*sock_opt).take();
+                                -1
+                            } else {
+                                buf[0] as i16
+                            }
+                        } else {
+                            -1
+                        }
+                    } else {
+                        -1
+                    }
+                };
+
+                Ok(Some(RuntimeValue::from(res)))
+            }
+            10 => {
+                let sock_id: i8 = args.nth(0);
+
+                let res: i16 = if sock_id > MAX_SOCKETS {
+                    -1
+                } else {
+                    let sock_opt = self.socks[sock_id as usize].take();
+                    if let Some(sock) = sock_opt {
+                        if sock.shutdown(Shutdown::Both).is_ok() {
+                            0
+                        } else {
+                            -1
+                        }
+                    } else {
+                        -1
+                    }
+                };
+
+                Ok(Some(RuntimeValue::from(res)))
+            }
             _ => Err(Trap::new(wasmi::TrapKind::UnexpectedSignature)),
         }
     }
