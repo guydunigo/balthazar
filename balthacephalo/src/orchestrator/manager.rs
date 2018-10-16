@@ -9,7 +9,6 @@ use std::thread;
 // TODO: copy instead of clone?
 
 use job;
-use job::task::arguments::Arguments;
 use job::task::Task;
 use job::Job;
 // use job::task::arguments::{Arguments, ArgumentKind};
@@ -152,7 +151,6 @@ impl Manager {
 
                     let mut job =
                         Job::new(new_job_id, job);
-                    job.new_task(Arguments::default());
                     jobs.push(Arc::new(Mutex::new(job)));
 
                     Message::JobRegisteredAt(new_job_id).send(pode_id, &mut stream)?;
