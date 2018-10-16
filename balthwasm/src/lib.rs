@@ -32,44 +32,11 @@ struct ReturnValue {
 
 #[no_mangle]
 pub extern "C" fn start() {
-    let mut input = Vec::new();
-
-    unsafe {
-        let bytes_len = get_bytes_len() as u32;
-        for _ in 0..bytes_len {
-            input.push(get_byte());
-        }
-    }
-
-    let mut hasher = Sha3_256::default();
-    hasher.input(&input[..]);
-
-    let hash = hasher.result();
-
-    let mut array_hash: [u8; 32] = [0; 32];
-
-    for i in 0..32 {
-        array_hash[i] = hash[i];
-    }
-
-    let retval = ReturnValue {
-        bytes: input,
-        hash: array_hash,
-    };
-    let ron_retval = ser::to_string(&retval).unwrap();
-    unsafe {
-        ron_retval
-            .into_bytes()
-            .iter()
-            .for_each(|c| push_byte(c.clone()));
-    }
-
     unsafe {
         let lsock_id = tcp_listen_init(2000);
         debug(lsock_id);
         if lsock_id < 0 {
             // TODO: error
-
         }
 
         loop {
@@ -93,7 +60,14 @@ pub extern "C" fn start() {
             };
 
             let str_addr = format!("{}", addr);
-            str_addr
+
+            let mut hasher = Sha3_256::default();
+            hasher.input(&str_addr.into_bytes()[..]);
+
+            let hash = hasher.result();
+            let str_hash = format!("{:x}", hash);
+
+            str_hash
                 .into_bytes()
                 .iter()
                 .skip_while(|b| tcp_write_byte(csock_id, **b) >= 0)
