@@ -41,11 +41,7 @@ impl<T> Job<T> {
             if id >= usize::max_value() {
                 break None;
             // TODO: not very efficient...
-            } else if list
-                .iter()
-                .find(|job| job.lock().unwrap().id == id)
-                .is_some()
-            {
+            } else if list.iter().any(|job| job.lock().unwrap().id == id) {
                 id += 1;
             } else {
                 break Some(id);
@@ -101,7 +97,8 @@ pub fn get_available_task<T>(
             } else {
                 panic!("The task option shouldn't be None here.");
             }
-        }).next()
+        })
+        .next()
 }
 
 /*

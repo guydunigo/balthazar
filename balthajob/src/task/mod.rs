@@ -31,11 +31,12 @@ impl<T> Task<T> {
     }
 
     pub fn is_available(&self) -> bool {
-        self.result.is_none() && match &self.pode {
-            None => true,
-            // TODO: if weak is dead, set to None?
-            Some(p) => p.upgrade().is_none(),
-        }
+        self.result.is_none()
+            && match &self.pode {
+                None => true,
+                // TODO: if weak is dead, set to None?
+                Some(p) => p.upgrade().is_none(),
+            }
     }
 }
 

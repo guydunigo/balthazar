@@ -144,12 +144,14 @@ impl<R: Read> MessageReader<R> {
                 }
                 Ok(Message::Disconnected(_)) => false,
                 _ => true,
-            }).map(|msg_res| -> Result<(), Error> {
+            })
+            .map(|msg_res| -> Result<(), Error> {
                 match msg_res {
                     Ok(msg) => closure(msg),
                     Err(err) => Err(err),
                 }
-            }).skip_while(|result| result.is_ok())
+            })
+            .skip_while(|result| result.is_ok())
             .next();
 
         match res {

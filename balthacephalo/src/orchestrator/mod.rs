@@ -48,7 +48,7 @@ pub fn orchestrate(listener_rx: mpsc::Receiver<TcpStream>) -> Result<(), Error> 
     // TODO: Do I need to join the thread ? (possible problems with the mutex (use of a Weak ?) ?)
     match manager_creator_handle.join() {
         Err(_) => return Err(Error::ThreadPanicked),
-        Ok(Err(err)) => return Err(Error::from(err)),
+        Ok(Err(err)) => return Err(err),
         _ => (),
     };
 

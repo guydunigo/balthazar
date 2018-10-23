@@ -61,8 +61,8 @@ impl<'a> Externals for Runtime<'a> {
                     if let Ok(n) = args.nth_checked(i) {
                         args_vec.push(n);
                     } /*else {
-                        //TODO: return Err(Trap::new(TrapKind::Host())
-                    }*/
+                          //TODO: return Err(Trap::new(TrapKind::Host())
+                      }*/
                 }
 
                 print!("hash: 0x");
