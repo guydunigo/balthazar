@@ -1,4 +1,5 @@
 extern crate balthajob as job;
+extern crate balthernet as net;
 extern crate balthmessage as message;
 extern crate parity_wasm;
 extern crate wasmi;
@@ -20,6 +21,7 @@ use job::task::arguments::Arguments;
 use job::task::{LoneTask, Task};
 use job::Job;
 use message::{de, Message, MessageReader};
+use net::initialize_pode;
 
 // ------------------------------------------------------------------
 // Errors
@@ -28,6 +30,7 @@ use message::{de, Message, MessageReader};
 pub enum Error {
     FailedHandshake,
     IoError(io::Error),
+    NetError(net::Error),
     MessageError(message::Error),
     DeserializeError(de::Error),
     UnexpectedReply(Message),
@@ -37,6 +40,12 @@ pub enum Error {
 impl From<io::Error> for Error {
     fn from(err: io::Error) -> Error {
         Error::IoError(err)
+    }
+}
+
+impl From<net::Error> for Error {
+    fn from(err: net::Error) -> Error {
+        Error::NetError(err)
     }
 }
 
@@ -53,23 +62,6 @@ impl From<de::Error> for Error {
 }
 
 // ------------------------------------------------------------------
-
-pub fn initialize_pode<A: ToSocketAddrs + Display>(addr: A) -> Result<(TcpStream, usize), Error> {
-    let socket = TcpStream::connect(&addr)?;
-    println!("Connected to : `{}`", addr);
-
-    //TODO: as option
-    let pode_id = {
-        let mut init_reader = MessageReader::new(0, socket.try_clone()?);
-        match init_reader.next() {
-            Some(Ok(Message::Connected(pode_id))) => Ok(pode_id),
-            _ => Err(Error::FailedHandshake),
-        }
-    }?;
-    println!("{} : Handshake successful.", pode_id);
-
-    Ok((socket, pode_id))
-}
 
 pub fn fill<A: ToSocketAddrs + Display>(addr: A) -> Result<(), Error> {
     let (mut socket, pode_id) = initialize_pode(addr)?;

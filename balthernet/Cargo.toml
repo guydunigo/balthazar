@@ -1,9 +1,8 @@
 [package]
-name = "balthacephalo"
+name = "balthernet"
 version = "0.1.0"
 authors = ["GONI Guillaume <gdn3@live.fr>"]
+edition = "2018"
 
 [dependencies]
 balthmessage = { path = "../balthmessage" }
-balthajob = { path = "../balthajob" }
-balthernet = { path = "../balthernet" }

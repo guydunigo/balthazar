@@ -1,7 +1,7 @@
 extern crate balthajob as job;
+extern crate balthernet as net;
 extern crate balthmessage as message;
 
-mod listener;
 mod orchestrator;
 
 use std::convert::From;
@@ -11,21 +11,16 @@ use std::net::ToSocketAddrs;
 use std::sync::mpsc;
 use std::thread;
 
+use net::listener;
+
 // ------------------------------------------------------------------
 // Errors
 
 #[derive(Debug)]
 pub enum Error {
-    ListenerError(listener::Error),
     OrchestratorError(orchestrator::Error),
     IoError(io::Error),
     ThreadPanicked,
-}
-
-impl From<listener::Error> for Error {
-    fn from(err: listener::Error) -> Error {
-        Error::ListenerError(err)
-    }
 }
 
 impl From<io::Error> for Error {

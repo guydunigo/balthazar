@@ -9,3 +9,4 @@ wasmi = "0.4.0"
 
 balthajob = { path = "../balthajob" }
 balthmessage = { path = "../balthmessage" }
+balthernet = { path = "../balthernet" }
