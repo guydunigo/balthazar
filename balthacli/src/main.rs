@@ -3,7 +3,7 @@ extern crate balthalib;
 
 use std::env;
 
-use balthalib::{cephalo, config_parser, pode, CephalopodeType, net};
+use balthalib::{cephalo, config_parser, net, pode, CephalopodeType};
 
 fn main() -> Result<(), balthalib::Error> {
     let config = config_parser::parse_config(env::args())?;

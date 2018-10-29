@@ -1,11 +1,11 @@
 extern crate balthmessage as message;
 
 use std::fmt::Display;
+use std::fs::File;
 use std::io;
 use std::net::{AddrParseError, SocketAddr, TcpStream, ToSocketAddrs};
 use std::thread;
 use std::thread::JoinHandle;
-use std::fs::File;
 
 use balthmessage::{Message, MessageReader};
 
@@ -120,13 +120,14 @@ pub fn connect_peers(local_addr: &SocketAddr, addrs: &[SocketAddr]) -> Vec<Resul
         .iter()
         .filter(|addr| *addr != local_addr)
         .map(|addr| connect_peer_async(addr.clone()))
+        // TODO: the threads should live longer (managers) ?
         .map(|handle| {
-                match handle.join() {
-                    Ok(Ok(res)) => Ok(res),
-                    Ok(err) => err,
-                    // TODO: better error?
-                    Err(_) => Err(Error::ConnectThreadPanicked),
-                }
+            match handle.join() {
+                Ok(Ok(res)) => Ok(res),
+                Ok(err) => err,
+                // TODO: better error?
+                Err(_) => Err(Error::ConnectThreadPanicked),
+            }
         })
         .collect();
 
@@ -141,14 +142,17 @@ pub fn swim(addr: SocketAddr) -> Result<(), Error> {
     let reader = File::open("./peers.ron")?;
     let addrs: Vec<String> = message::de::from_reader(reader).unwrap();
 
-    let parsed_addrs: Vec<SocketAddr> = addrs.iter().map(|addr| parse_socket_addr(addr))
+    let parsed_addrs: Vec<SocketAddr> = addrs
+        .iter()
+        .map(|addr| parse_socket_addr(addr))
         .filter_map(|addr| match addr {
             Ok(addr) => Some(addr),
             Err(err) => {
                 println!("{:?}", err);
                 None
-            },
-        }).collect();
+            }
+        })
+        .collect();
 
     let peers = connect_peers(&addr, &parsed_addrs[..]);
     Ok(())

@@ -1,7 +1,7 @@
 mod config;
 
-use std::env;
 use net;
+use std::env;
 
 pub use self::config::Config;
 use super::CephalopodeType;
