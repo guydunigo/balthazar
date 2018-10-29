@@ -1,9 +1,7 @@
 mod config;
 
-use std::convert::From;
 use std::env;
-use std::io;
-use std::net::ToSocketAddrs;
+use net;
 
 pub use self::config::Config;
 use super::CephalopodeType;
@@ -16,14 +14,7 @@ pub enum ArgError {
     NoCommand,
     NoAddress,
     UnknownCommand(String),
-    InvalidAddress(io::Error),
-    CouldNotResolveAddress(String), // TODO: Figure out when this error actually happens
-}
-
-impl From<io::Error> for ArgError {
-    fn from(err: io::Error) -> ArgError {
-        ArgError::InvalidAddress(err)
-    }
+    InvalidAddress(net::Error),
 }
 
 // ------------------------------------------------------------------
@@ -44,14 +35,14 @@ pub fn parse_config(mut args: env::Args) -> Result<Config, ArgError> {
         cmd => return Err(ArgError::UnknownCommand(cmd.to_string())),
     };
 
-    let mut addr_iter = match args.next() {
-        Some(addr) => addr.to_socket_addrs()?,
+    let addr_res = match args.next() {
+        Some(addr) => net::parse_socket_addr(addr),
         None => return Err(ArgError::NoAddress),
     };
 
-    let addr = match addr_iter.next() {
-        Some(addr) => addr,
-        None => return Err(ArgError::CouldNotResolveAddress("Invalid given address.".to_string())),
+    let addr = match addr_res {
+        Ok(addr) => addr,
+        Err(err) => return Err(ArgError::InvalidAddress(err)),
     };
 
     Ok(Config { command, addr })

@@ -5,6 +5,7 @@ use std::io;
 use std::net::{AddrParseError, SocketAddr, TcpStream, ToSocketAddrs};
 use std::thread;
 use std::thread::JoinHandle;
+use std::fs::File;
 
 use balthmessage::{Message, MessageReader};
 
@@ -21,6 +22,8 @@ pub enum Error {
     ListenerError(listener::Error),
     ConnectThreadPanicked,
     AddrParseError(AddrParseError),
+    InvalidAddress(String, io::Error),
+    CouldNotResolveAddress(String), // TODO: Figure out when this error actually happens
 }
 
 impl From<message::Error> for Error {
@@ -68,6 +71,20 @@ pub fn initialize_pode<A: ToSocketAddrs + Display>(addr: A) -> Result<(TcpStream
 
 // ------------------------------------------------------------------
 
+pub fn parse_socket_addr<A: ToSocketAddrs + Display>(addr: A) -> Result<SocketAddr, Error> {
+    let addr_opt = match addr.to_socket_addrs() {
+        Ok(mut addr_iter) => addr_iter.next(),
+        Err(err) => return Err(Error::InvalidAddress(format!("{}", addr), err)),
+    };
+
+    match addr_opt {
+        Some(addr) => Ok(addr),
+        None => Err(Error::CouldNotResolveAddress(format!("{}", addr))),
+    }
+}
+
+// ------------------------------------------------------------------
+
 #[derive(Debug)]
 pub struct Peer {
     pub pid: usize,
@@ -98,26 +115,18 @@ pub fn connect_peer_async(addr: SocketAddr) -> JoinHandle<Result<Peer, Error>> {
     thread::spawn(move || connect_peer(addr))
 }
 
-pub fn connect_peers(local_addr: SocketAddr, addrs: &[String]) -> Vec<Result<Peer, Error>> {
+pub fn connect_peers(local_addr: &SocketAddr, addrs: &[SocketAddr]) -> Vec<Result<Peer, Error>> {
     let v: Vec<Result<Peer, Error>> = addrs
         .iter()
-        .map(|addr| {
-            let socket_addr: Result<SocketAddr, AddrParseError> = addr.parse();
-            match socket_addr {
-                Ok(addr) => Ok(connect_peer_async(addr.clone())),
-                Err(err) => Err(Error::from(err)),
-            }
-        })
-        .map(|handle_res| {
-            match handle_res {
-                Ok(handle) => match handle.join() {
+        .filter(|addr| *addr != local_addr)
+        .map(|addr| connect_peer_async(addr.clone()))
+        .map(|handle| {
+                match handle.join() {
                     Ok(Ok(res)) => Ok(res),
                     Ok(err) => err,
                     // TODO: better error?
                     Err(_) => Err(Error::ConnectThreadPanicked),
-                },
-                Err(err) => Err(err),
-            }
+                }
         })
         .collect();
 
@@ -129,6 +138,19 @@ pub fn connect_peers(local_addr: SocketAddr, addrs: &[String]) -> Vec<Result<Pee
 }
 
 pub fn swim(addr: SocketAddr) -> Result<(), Error> {
+    let reader = File::open("./peers.ron")?;
+    let addrs: Vec<String> = message::de::from_reader(reader).unwrap();
+
+    let parsed_addrs: Vec<SocketAddr> = addrs.iter().map(|addr| parse_socket_addr(addr))
+        .filter_map(|addr| match addr {
+            Ok(addr) => Some(addr),
+            Err(err) => {
+                println!("{:?}", err);
+                None
+            },
+        }).collect();
+
+    let peers = connect_peers(&addr, &parsed_addrs[..]);
     Ok(())
 }
 
