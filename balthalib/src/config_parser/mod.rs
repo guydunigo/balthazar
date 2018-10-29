@@ -17,7 +17,7 @@ pub enum ArgError {
     NoAddress,
     UnknownCommand(String),
     InvalidAddress(io::Error),
-    CouldNotResolveAddress(&'static str), // TODO: Figure out when this error actually happens
+    CouldNotResolveAddress(String), // TODO: Figure out when this error actually happens
 }
 
 impl From<io::Error> for ArgError {
@@ -40,6 +40,7 @@ pub fn parse_config(mut args: env::Args) -> Result<Config, ArgError> {
         "c" | "cephalo" => CephalopodeType::Cephalo,
         "p" | "pode" => CephalopodeType::Pode,
         "i" | "inkpode" => CephalopodeType::InkPode,
+        "n" | "netTest" => CephalopodeType::NetTest,
         cmd => return Err(ArgError::UnknownCommand(cmd.to_string())),
     };
 
@@ -50,7 +51,7 @@ pub fn parse_config(mut args: env::Args) -> Result<Config, ArgError> {
 
     let addr = match addr_iter.next() {
         Some(addr) => addr,
-        None => return Err(ArgError::CouldNotResolveAddress("Invalid given address.")),
+        None => return Err(ArgError::CouldNotResolveAddress("Invalid given address.".to_string())),
     };
 
     Ok(Config { command, addr })

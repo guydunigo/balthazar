@@ -35,6 +35,7 @@ version = "0.1.0"
 dependencies = [
  "balthacephalo 0.1.0",
  "balthapode 0.1.0",
+ "balthernet 0.1.0",
 ]
 
 [[package]]

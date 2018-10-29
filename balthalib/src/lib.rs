@@ -1,5 +1,6 @@
 pub extern crate balthacephalo as cephalo;
 pub extern crate balthapode as pode;
+pub extern crate balthernet as net;
 
 pub mod config_parser;
 
@@ -13,6 +14,7 @@ pub enum Error {
     CephaloError(cephalo::Error),
     PodeError(pode::Error),
     ArgError(config_parser::ArgError),
+    NetError(net::Error),
 }
 
 impl From<cephalo::Error> for Error {
@@ -33,6 +35,12 @@ impl From<config_parser::ArgError> for Error {
     }
 }
 
+impl From<net::Error> for Error {
+    fn from(err: net::Error) -> Error {
+        Error::NetError(err)
+    }
+}
+
 // ------------------------------------------------------------------
 
 // pub trait Mollusque {
@@ -44,6 +52,7 @@ pub enum CephalopodeType {
     Cephalo,
     Pode,
     InkPode,
+    NetTest,
 }
 
 #[cfg(test)]
