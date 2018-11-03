@@ -1,5 +1,5 @@
 use tokio::codec::Framed;
-use tokio::net::TcpStream;
+use tokio::net::{TcpListener, TcpStream};
 use tokio::prelude::*;
 use tokio::runtime::Runtime;
 use tokio::timer::{Delay, Interval};
@@ -78,7 +78,7 @@ pub fn swim(local_addr: SocketAddr) -> Result<(), Error> {
         .filter_map(|addr| match addr {
             Ok(addr) => Some(addr),
             Err(err) => {
-                println!("{:?}", err);
+                eprintln!("{:?}", err);
                 None
             }
         })
@@ -86,6 +86,7 @@ pub fn swim(local_addr: SocketAddr) -> Result<(), Error> {
         .for_each(|addr| {
             let peer_future =
                 Interval::new(Instant::now(), Duration::from_secs(CONNECTION_INTERVAL))
+                    // TODO: Is it good to wait ? (Can it block the task or is it automigically asynced ?)
                     .map(move |_| TcpStream::connect(&addr).wait())
                     .inspect(move |res| {
                         if let Err(err) = res {
@@ -104,12 +105,19 @@ pub fn swim(local_addr: SocketAddr) -> Result<(), Error> {
 
                             let pid = 0;
 
-                            let manager = framed_sock.take(1).for_each(|msg| {
-                                println!("{} : received a message !", pid);
-                                Ok(())
-                            });
+                            let manager = framed_sock
+                                .for_each(move |msg| {
+                                    println!("{} : received a message !", pid);
+                                    Ok(())
+                                })
+                                .map_err(move |err| {
+                                    eprintln!(
+                                        "{} : error when receiving a message : {:?}.",
+                                        pid, err
+                                    )
+                                });
 
-                            task::spawn(manager);
+                            tokio::spawn(manager);
 
                             // TODO: maybe send `Peer { socket, pid, addr }` to another thread...
                             Ok(())
@@ -117,17 +125,48 @@ pub fn swim(local_addr: SocketAddr) -> Result<(), Error> {
                             unreachable!();
                         }
                     })
-                    .map_err(|err| eprintln!("Could not connect : {:?}", err))
-                    // TODO: Well, ... this is dirty... :(
+                    .map_err(|_| unreachable!())
+                    // TODO: Well, ... this is dirty :( ... (or, is it ?)
                     .into_future()
                     .map(|(elm, _)| elm.unwrap())
                     .map_err(|(err, _)| err);
 
             runtime.spawn(peer_future);
         });
-    /*.for_each(|peer_future| {
-        runtime.spawn(peer_future);
-    });*/
+
+    let listener = TcpListener::bind(&local_addr)?;
+    let listener_future = listener
+        .incoming()
+        .for_each(|socket| {
+            println!("Asked for connection : `{}`", socket.peer_addr()?);
+
+            let framed_sock = Framed::new(socket.try_clone()?, MessageCodec::new());
+
+            let pid = 0;
+
+            let manager = framed_sock
+                .for_each(move |msg| {
+                    println!("{} : received a message !", pid);
+
+                    let framed_sock = Framed::new(socket.try_clone()?, MessageCodec::new());
+
+                    // TODO: Is it good to wait ? (Can it block the task or is it automigically asynced ?)
+                    framed_sock
+                        .send(Message::Hello("salut!".to_string()))
+                        .wait()?;
+                    Ok(())
+                })
+                .map_err(move |err| {
+                    eprintln!("{} : error when receiving a message : {:?}.", pid, err)
+                });
+
+            tokio::spawn(manager);
+
+            Ok(())
+        })
+        .map_err(|err| eprintln!("{:?}", err));
+
+    runtime.spawn(listener_future);
 
     runtime
         .shutdown_on_idle()
