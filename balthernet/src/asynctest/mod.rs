@@ -2,6 +2,9 @@ use tokio::codec::Framed;
 use tokio::net::TcpStream;
 use tokio::prelude::*;
 use tokio::runtime::Runtime;
+use tokio::timer::{Delay, Interval};
+
+use std::time::{Duration, Instant};
 
 use balthmessage::Message;
 
@@ -12,6 +15,9 @@ use super::*;
 
 pub mod message_codec;
 type MessageCodec = message_codec::MessageCodec;
+
+/// Interval between connections tries in seconds
+const CONNECTION_INTERVAL: u64 = 10;
 
 #[derive(Debug)]
 pub struct Peer {
@@ -78,25 +84,44 @@ pub fn swim(local_addr: SocketAddr) -> Result<(), Error> {
         })
         .filter(|addr| *addr != local_addr)
         .for_each(|addr| {
-            let peer_future = TcpStream::connect(&addr)
-                .and_then(move |socket| {
-                    println!("Connected to : `{}`", addr);
+            let peer_future =
+                Interval::new(Instant::now(), Duration::from_secs(CONNECTION_INTERVAL))
+                    .map(move |_| TcpStream::connect(&addr).wait())
+                    .inspect(move |res| {
+                        if let Err(err) = res {
+                            eprintln!(
+                                "Error connecting to `{}` : `{:?}`, retrying in {} seconds...",
+                                addr, err, CONNECTION_INTERVAL
+                            );
+                        }
+                    })
+                    .skip_while(|res| if let Ok(_) = res { Ok(false) } else { Ok(true) })
+                    .and_then(move |socket| {
+                        if let Ok(socket) = socket {
+                            println!("Connected to : `{}`", addr);
 
-                    let framed_sock = Framed::new(socket, MessageCodec::new());
+                            let framed_sock = Framed::new(socket, MessageCodec::new());
 
-                    let pid = 0;
+                            let pid = 0;
 
-                    let manager = framed_sock.take(1).for_each(|msg| {
-                        println!("{} : received a message !", pid);
-                        Ok(())
-                    });
+                            let manager = framed_sock.take(1).for_each(|msg| {
+                                println!("{} : received a message !", pid);
+                                Ok(())
+                            });
 
-                    task::spawn(manager);
+                            task::spawn(manager);
 
-                    // TODO: maybe send `Peer { socket, pid, addr }` to another thread...
-                    Ok(())
-                })
-                .map_err(|err| eprintln!("Could not connect : {:?}", err));
+                            // TODO: maybe send `Peer { socket, pid, addr }` to another thread...
+                            Ok(())
+                        } else {
+                            unreachable!();
+                        }
+                    })
+                    .map_err(|err| eprintln!("Could not connect : {:?}", err))
+                    // TODO: Well, ... this is dirty... :(
+                    .into_future()
+                    .map(|(elm, _)| elm.unwrap())
+                    .map_err(|(err, _)| err);
 
             runtime.spawn(peer_future);
         });
