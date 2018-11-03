@@ -12,7 +12,7 @@ fn main() -> Result<(), balthalib::Error> {
         CephalopodeType::Cephalo => cephalo::swim(config.addr)?,
         CephalopodeType::Pode => pode::swim(config.addr)?,
         CephalopodeType::InkPode => pode::fill(config.addr)?,
-        CephalopodeType::NetTest => net::swim(config.addr)?,
+        CephalopodeType::NetTest => net::asynctest::swim(config.addr)?,
     };
 
     Ok(())

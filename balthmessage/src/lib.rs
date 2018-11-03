@@ -60,6 +60,7 @@ impl From<de::Error> for Error {
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug)]
 pub enum Message {
     Hello(String),
+    Connect(usize),
     Connected(usize),
     // TODO: Useful to annouce deconnection ?
     Disconnect,
@@ -201,18 +202,10 @@ impl<R: Read> Iterator for MessageReader<R> {
 
             // Loops until it has the full message:
             // TODO: use read_exact ?
-            let mut downloaded_size = 0;
-            while downloaded_size < buffer.len() {
-                let n = match reader.read(&mut buffer[downloaded_size..]) {
-                    Ok(n) => n,
-                    Err(err) => return Some(Err(Error::from(err))),
-                };
-                if n == 0 {
-                    return None;
-                }
-
-                downloaded_size += n;
-            }
+            match reader.read_exact(&mut buffer) {
+                Ok(n) => n,
+                Err(err) => return Some(Err(Error::from(err))),
+            };
 
             let msg_res: de::Result<Message> = de::from_bytes(&buffer.as_slice());
             let res = match msg_res {
