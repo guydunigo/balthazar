@@ -86,50 +86,48 @@ pub fn swim(local_addr: SocketAddr) -> Result<(), Error> {
         .for_each(|addr| {
             let peer_future =
                 Interval::new(Instant::now(), Duration::from_secs(CONNECTION_INTERVAL))
-                    // TODO: Is it good to wait ? (Can it block the task or is it automigically asynced ?)
-                    .map(move |_| TcpStream::connect(&addr).wait())
-                    .inspect(move |res| {
-                        if let Err(err) = res {
-                            eprintln!(
-                                "Error connecting to `{}` : `{:?}`, retrying in {} seconds...",
-                                addr, err, CONNECTION_INTERVAL
-                            );
-                        }
+                    // TODO: Or don't stop retrying, do some connection check ?
+                    .map_err(|err| Error::from(err))
+                    .and_then(move |_| TcpStream::connect(&addr).map_err(|err| Error::from(err)))
+                    .inspect_err(move |err| {
+                        eprintln!(
+                            "Error connecting to `{}` : `{:?}`, retrying in {} seconds...",
+                            addr, err, CONNECTION_INTERVAL
+                        );
                     })
-                    .skip_while(|res| if let Ok(_) = res { Ok(false) } else { Ok(true) })
+                    .take(1)
                     .and_then(move |socket| {
-                        if let Ok(socket) = socket {
-                            println!("Connected to : `{}`", addr);
+                        println!("Connected to : `{}`", addr);
 
-                            let framed_sock = Framed::new(socket, MessageCodec::new());
+                        let send_msg =
+                            Framed::new(socket.try_clone().unwrap(), MessageCodec::new())
+                                .send(Message::Hello("salut!".to_string()))
+                                .map(|_| println!("sent"))
+                                .map_err(|err| eprintln!("{:?}", err));
 
-                            let pid = 0;
+                        let framed_sock = Framed::new(socket, MessageCodec::new());
 
-                            let manager = framed_sock
-                                .for_each(move |msg| {
-                                    println!("{} : received a message !", pid);
-                                    Ok(())
-                                })
-                                .map_err(move |err| {
-                                    eprintln!(
-                                        "{} : error when receiving a message : {:?}.",
-                                        pid, err
-                                    )
-                                });
+                        let pid = 0;
 
-                            tokio::spawn(manager);
+                        let manager = framed_sock
+                            .for_each(move |_| {
+                                println!("{} : received a message !", pid);
+                                Ok(())
+                            })
+                            .map_err(move |err| {
+                                eprintln!("{} : error when receiving a message : {:?}.", pid, err)
+                            });
 
-                            // TODO: maybe send `Peer { socket, pid, addr }` to another thread...
-                            Ok(())
-                        } else {
-                            unreachable!();
-                        }
+                        tokio::spawn(manager);
+                        tokio::spawn(send_msg);
+
+                        // TODO: maybe send `Peer { socket, pid, addr }` to another thread...
+                        Ok(())
                     })
-                    .map_err(|_| unreachable!())
                     // TODO: Well, ... this is dirty :( ... (or, is it ?)
                     .into_future()
                     .map(|(elm, _)| elm.unwrap())
-                    .map_err(|(err, _)| err);
+                    .map_err(|_| ());
 
             runtime.spawn(peer_future);
         });

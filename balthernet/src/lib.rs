@@ -32,6 +32,7 @@ pub enum Error {
     InvalidAddress(String, io::Error),
     CouldNotResolveAddress(String), // TODO: Figure out when this error actually happens
     TokioRuntimeError,
+    TokioTimerError(tokio::timer::Error),
 }
 
 impl From<message::Error> for Error {
@@ -55,6 +56,12 @@ impl From<listener::Error> for Error {
 impl From<AddrParseError> for Error {
     fn from(err: AddrParseError) -> Error {
         Error::AddrParseError(err)
+    }
+}
+
+impl From<tokio::timer::Error> for Error {
+    fn from(err: tokio::timer::Error) -> Error {
+        Error::TokioTimerError(err)
     }
 }
 
