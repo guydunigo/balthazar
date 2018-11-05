@@ -2,14 +2,16 @@ use tokio::codec::Framed;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::prelude::*;
 use tokio::runtime::Runtime;
-use tokio::timer::{Delay, Interval};
+use tokio::timer::Interval;
 
 use std::time::{Duration, Instant};
 
 use balthmessage::Message;
 
+use std::collections::HashMap;
 use std::fs::File;
 use std::net::SocketAddr;
+use std::sync::{Arc, Mutex};
 
 use super::*;
 
@@ -27,48 +29,14 @@ pub struct Peer {
 }
 
 // TODO: personnal PID (possibly public key)
-// TODO: no lifetime ?
-pub fn connect_peer<'a>(addr: &'a SocketAddr) -> impl Future<Item = (), Error = ()> + 'a {
-    TcpStream::connect(addr)
-        .and_then(move |socket| {
-            println!("Connected to : `{}`", addr);
-
-            let framed_sock = Framed::new(socket, MessageCodec::new());
-
-            /*
-            // TODO: process to check in case of collision and to assign pid?
-            // TODO: proper number (random ?)
-            let proposed_pid = 0;
-            let future = framed_sock.send(Message::Connect(proposed_pid)).and_then(|framed| {
-                framed_sock.take(1).for_each(|msg| {
-                    if let Message::Connected(received_pid) = msg {
-            
-                    } else {
-                        Err(Error::FailedHandshake)
-                    }
-                })
-            });
-            println!("{} : Handshake successful.", pid);
-            */
-            let pid = 0;
-
-            let manager = framed_sock.take(1).for_each(|msg| {
-                println!("{} : received a message !", pid);
-                Ok(())
-            });
-
-            task::spawn(manager);
-
-            // TODO: maybe send `Peer { socket, pid, addr }` to another thread...
-            Ok(())
-        })
-        .map_err(|err| eprintln!("Could not connect : {:?}", err))
-}
-
 // TODO: subfunctions
 pub fn swim(local_addr: SocketAddr) -> Result<(), Error> {
     let reader = File::open("./peers.ron")?;
     let addrs: Vec<String> = ron::de::from_reader(reader).unwrap();
+
+    // TODO: beware of deadlocking a peer ?
+    let peers: HashMap<SocketAddr, TcpStream> = HashMap::new();
+    let peers = Arc::new(Mutex::new(peers));
 
     let mut runtime = Runtime::new()?;
 
@@ -84,22 +52,51 @@ pub fn swim(local_addr: SocketAddr) -> Result<(), Error> {
         })
         .filter(|addr| *addr != local_addr)
         .for_each(|addr| {
+            let peers = peers.clone();
+
             let peer_future =
                 Interval::new(Instant::now(), Duration::from_secs(CONNECTION_INTERVAL))
                     // TODO: Or don't stop retrying, do some connection check ?
                     .map_err(|err| Error::from(err))
-                    .and_then(move |_| TcpStream::connect(&addr).map_err(|err| Error::from(err)))
+                    .and_then(move |_| {
+                        let is_already_connected = {
+                            // TODO: unwrap?
+                            match peers.lock().unwrap().get(&addr) {
+                                None => None,
+                                Some(socket) => Some(socket.try_clone().unwrap()),
+                            }
+                        };
+
+                        if let Some(_) = is_already_connected {
+                            // TODO: For health check and reconnection trial (potential collision with normal messages) ?
+                            // TODO: can also use some "last time a message was sent..." to test if necessary, ...
+                            unimplemented!();
+                        } else {
+                            let addr_clone = addr.clone();
+                            let peers = peers.clone();
+
+                            TcpStream::connect(&addr)
+                                .inspect(move |socket| {
+                                    // TODO: unwrap? and take care of option ?
+                                    peers
+                                        .lock()
+                                        .unwrap()
+                                        .insert(addr_clone, socket.try_clone().unwrap());
+                                })
+                                .map_err(|err| Error::from(err))
+                        }
+                    })
                     .inspect_err(move |err| {
                         eprintln!(
                             "Error connecting to `{}` : `{:?}`, retrying in {} seconds...",
                             addr, err, CONNECTION_INTERVAL
                         );
                     })
-                    .take(1)
                     .and_then(move |socket| {
                         println!("Connected to : `{}`", addr);
 
                         let send_msg =
+                            // TODO: unwrap?
                             Framed::new(socket.try_clone().unwrap(), MessageCodec::new())
                                 .send(Message::Hello("salut!".to_string()))
                                 .map(|_| println!("sent"))
@@ -125,9 +122,10 @@ pub fn swim(local_addr: SocketAddr) -> Result<(), Error> {
                         Ok(())
                     })
                     // TODO: Well, ... this is dirty :( ... (or, is it ?)
-                    .into_future()
-                    .map(|(elm, _)| elm.unwrap())
-                    .map_err(|_| ());
+                    // TODO: It is not usable in the end, as it stops the intervals after one
+                    // trial...
+                    .for_each(|_| Ok(()))
+                    .map_err(|err| eprintln!("Interval error: {:?}", err));
 
             runtime.spawn(peer_future);
         });
@@ -143,7 +141,7 @@ pub fn swim(local_addr: SocketAddr) -> Result<(), Error> {
             let pid = 0;
 
             let manager = framed_sock
-                .for_each(move |msg| {
+                .for_each(move |_| {
                     println!("{} : received a message !", pid);
 
                     let framed_sock = Framed::new(socket.try_clone()?, MessageCodec::new());

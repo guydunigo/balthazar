@@ -2,14 +2,13 @@
 
 extern crate ron;
 extern crate tokio;
-#[macro_use]
-extern crate futures;
+// #[macro_use]
 extern crate bytes;
+extern crate futures;
 
 extern crate balthmessage as message;
 
 use std::fmt::Display;
-use std::fs::File;
 use std::io;
 use std::net::{AddrParseError, SocketAddr, TcpStream, ToSocketAddrs};
 

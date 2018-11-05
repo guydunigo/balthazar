@@ -1,9 +1,7 @@
 use bytes::{BufMut, BytesMut};
 use ron::{de, ser};
 use tokio::codec::{Decoder, Encoder};
-use tokio::io;
 
-use balthmessage as message;
 use balthmessage::{Error, Message};
 
 // TODO: As parameters...
