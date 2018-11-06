@@ -9,6 +9,7 @@ const MESSAGE_SIZE_LIMIT: usize = 2 << 20;
 // TODO: Is there a window between JOB_SIZE_LIMIT converted and MESSAGE_SIZE_LIMIT?
 const JOB_SIZE_LIMIT: usize = MESSAGE_SIZE_LIMIT >> 2;
 
+#[derive(Default)]
 pub struct MessageCodec {
     msg_size: Option<usize>,
 }
@@ -24,7 +25,7 @@ impl Decoder for MessageCodec {
     type Error = Error;
 
     fn decode(&mut self, buf: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        if let None = self.msg_size {
+        if self.msg_size.is_none() {
             if buf.len() >= 4 {
                 let size_buf = buf.split_to(4);
                 let size_array = [size_buf[0], size_buf[1], size_buf[2], size_buf[3]];

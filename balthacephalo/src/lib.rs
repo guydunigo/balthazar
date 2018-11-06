@@ -41,7 +41,7 @@ impl From<orchestrator::Error> for Error {
 pub fn swim<A: 'static + ToSocketAddrs + Display + Send>(listen_addr: A) -> Result<(), Error> {
     let (tx, rx) = mpsc::channel();
 
-    thread::spawn(move || -> Result<(), listener::Error> { listener::listen(listen_addr, tx) });
+    thread::spawn(move || -> Result<(), listener::Error> { listener::listen(listen_addr, &tx) });
 
     orchestrator::orchestrate(rx)?;
 

@@ -7,7 +7,6 @@ use tokio::timer::Interval;
 use balthmessage::Message;
 
 use std::boxed::Box;
-use std::collections::HashMap;
 use std::fs::File;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
@@ -21,81 +20,163 @@ type MessageCodec = message_codec::MessageCodec;
 /// Interval between connections tries in seconds
 const CONNECTION_INTERVAL: u64 = 10;
 
-type PeersMap = Arc<Mutex<HashMap<SocketAddr, TcpStream>>>;
+// TODO: beware of deadlocking a peer ?
+// TODO: async lock?
+// type PeersMap = Arc<Mutex<HashMap<SocketAddr, TcpStream>>>;
+type PeerArcMut = Arc<Mutex<Peer>>;
+
+#[derive(Debug)]
+pub enum PingStatus {
+    PingSent(Instant),
+    PongReceived(Instant),
+    NoPingYet,
+}
+
+impl PingStatus {
+    pub fn new() -> Self {
+        PingStatus::NoPingYet
+    }
+
+    pub fn is_ping_sent(&self) -> bool {
+        if let PingStatus::PingSent(_) = self {
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn ping(&mut self) {
+        *self = PingStatus::PingSent(Instant::now());
+    }
+
+    pub fn pong(&mut self) {
+        *self = PingStatus::PongReceived(Instant::now());
+    }
+}
 
 #[derive(Debug)]
 pub struct Peer {
     pub pid: usize,
-    pub addr: SocketAddr, // TODO: Usefull as it can be aquired from socket ?
-    pub socket: TcpStream,
+    pub addr: SocketAddr,
+    pub socket: Option<TcpStream>,
+    pub ping_status: PingStatus,
 }
 
-fn connect_to_peer(peers: PeersMap, addr: SocketAddr) -> impl Future<Item = (), Error = Error> {
+impl Peer {
+    pub fn new(addr: SocketAddr) -> Self {
+        Peer {
+            // TODO: do something with pid...
+            pid: 0,
+            addr,
+            socket: None,
+            ping_status: PingStatus::new(),
+        }
+    }
+
+    pub fn remove_socket(&mut self) {
+        self.socket = None;
+        self.ping_status = PingStatus::NoPingYet;
+    }
+
+    pub fn is_already_connected(&self) -> bool {
+        self.socket.is_some()
+    }
+
+    pub fn is_ping_sent(&self) -> bool {
+        self.ping_status.is_ping_sent()
+    }
+
+    pub fn ping(&mut self) {
+        self.ping_status.ping()
+    }
+
+    pub fn pong(&mut self) {
+        self.ping_status.pong()
+    }
+}
+
+fn connect_to_peer(peer: PeerArcMut) -> impl Future<Item = (), Error = Error> {
+    // TODO: unwrap?
+    let addr = peer.lock().unwrap().addr;
+    let peer2 = peer.clone();
+
     TcpStream::connect(&addr)
         .inspect(move |socket| {
-            // TODO: unwrap? and take care of option ?
-            // TODO: async lock?
-            peers
-                .lock()
-                .unwrap()
-                .insert(addr, socket.try_clone().unwrap());
+            // TODO: unwrap?
+            peer.lock().unwrap().socket = Some(socket.try_clone().unwrap());
+            println!("Connected to : `{}`", addr);
         })
         // TODO: Move to separate function
         .and_then(move |socket| {
-            println!("Connected to : `{}`", addr);
-
-            let send_msg =
             // TODO: unwrap?
-            Framed::new(socket.try_clone().unwrap(), MessageCodec::new())
-            .send(Message::Hello("salut!".to_string()))
-            .map(|_| println!("sent"))
-            .map_err(|err| eprintln!("{:?}", err));
+            let socket2 = socket.try_clone().unwrap();
 
             let framed_sock = Framed::new(socket, MessageCodec::new());
 
-            let pid = 0;
-
             let manager = framed_sock
-                .for_each(move |_| {
-                    println!("{} : received a message !", pid);
+                .for_each(move |msg| {
+                    match msg {
+                        /*
+                        Message::Ping => {
+                            let framed_sock = Framed::new(socket2, MessageCodec::new());
+                            framed_sock.send(Message::Pong).map(|_| ()).map_err(|err| eprintln!("{} : Could no send `Pong` : {:?}", addr, err));
+                        },
+                        */
+                        Message::Pong => {
+                            // TODO: unwrap?
+                            peer2.lock().unwrap().pong();
+                            println!("{} : received Pong ! It is alive !!!", addr);
+                        }
+                        _ => println!("{} : received a message !", addr),
+                    }
                     Ok(())
                 })
                 .map_err(move |err| {
-                    eprintln!("{} : error when receiving a message : {:?}.", pid, err)
+                    eprintln!("{} : error when receiving a message : {:?}.", addr, err)
                 });
 
-            tokio::spawn(send_msg);
             tokio::spawn(manager);
 
-            // TODO: maybe send `Peer { socket, pid, addr }` to another thread...
             Ok(())
         })
-        .map_err(|err| Error::from(err))
+        .map_err(Error::from)
 }
 
 // TODO: is it needed to use a `Pong`, or does the TCP socket returns an error if broken connection?
-//       also, waiting for the `Pong` at several places migth cause some messages being lost?
-fn ping_peer(
-    peers: PeersMap,
-    socket: TcpStream,
-    addr: SocketAddr,
-) -> impl Future<Item = (), Error = Error> {
-    let addr2 = addr.clone();
+fn ping_peer(peer: PeerArcMut) -> impl Future<Item = (), Error = Error> {
+    let peer2 = peer.clone();
+
+    let (addr, socket) = {
+        let peer = peer.lock().unwrap();
+
+        let socket = if let Some(socket) = &peer.socket {
+            // TODO: unwrap?
+            socket.try_clone().unwrap()
+        } else {
+            panic!("Peer has no Socket, can't Ping !");
+        };
+
+        (peer.addr, socket)
+    };
+
     Framed::new(socket, MessageCodec::new())
         .send(Message::Ping)
         // TODO: is this map useful ?
-        .map(|_| ())
+        .map(move |_| {
+            // TODO: unwrap?
+            peer.lock().unwrap().ping();
+        })
         .map_err(move |err| {
             eprintln!("Ping failed for : `{}`", addr);
             Error::from(err)
         })
         .or_else(move |_| {
             // TODO: diagnose and reconnect if necessary...
-            println!("Triggering reconnection for `{}`...", addr2);
+            println!("Triggering reconnection for `{}`...", addr);
 
             // TODO: different way to reconnect ?
             // TODO: unwrap?
-            peers.lock().unwrap().remove(&addr2);
+            peer2.lock().unwrap().remove_socket();
 
             Ok(())
         })
@@ -107,15 +188,11 @@ pub fn swim(local_addr: SocketAddr) -> Result<(), Error> {
     let reader = File::open("./peers.ron")?;
     let addrs: Vec<String> = ron::de::from_reader(reader).unwrap();
 
-    // TODO: beware of deadlocking a peer ?
-    let peers = HashMap::new();
-    let peers: PeersMap = Arc::new(Mutex::new(peers));
-
     let mut runtime = Runtime::new()?;
 
     addrs
         .iter()
-        .map(|addr| parse_socket_addr(addr))
+        .map(parse_socket_addr)
         .filter_map(|addr| match addr {
             Ok(addr) => Some(addr),
             Err(err) => {
@@ -125,30 +202,22 @@ pub fn swim(local_addr: SocketAddr) -> Result<(), Error> {
         })
         .filter(|addr| *addr != local_addr)
         .for_each(|addr| {
-            let peers = peers.clone();
-            let addr = addr.clone();
+            let peer = Arc::new(Mutex::new(Peer::new(addr)));
 
             let peer_future =
                 Interval::new(Instant::now(), Duration::from_secs(CONNECTION_INTERVAL))
-                    .map_err(|err| Error::from(err))
+                    .map_err(Error::from)
                     .and_then(move |_| -> Box<Future<Item = (), Error = Error> + Send> {
-                        let is_already_connected = {
-                            // TODO: unwrap?
-                            // TODO: async lock?
-                            match peers.lock().unwrap().get(&addr) {
-                                None => None,
-                                Some(socket) => Some(socket.try_clone().unwrap()),
-                            }
-                        };
+                        // TODO: unwrap?
+                        let is_already_connected = peer.lock().unwrap().is_already_connected();
 
-                        if let Some(socket) = is_already_connected {
-                            // TODO: For health check and reconnection trial (potential collision with normal messages) ?
+                        if is_already_connected {
                             // TODO: can also use some "last time a message was sent..." to test if necessary, ...
                             // TODO: If a ping is pending, prevent sending another one ?
-                            let future = ping_peer(peers.clone(), socket, addr);
+                            let future = ping_peer(peer.clone());
                             Box::new(future)
                         } else {
-                            let future = connect_to_peer(peers.clone(), addr);
+                            let future = connect_to_peer(peer.clone());
                             Box::new(future)
                         }
                     })
@@ -175,17 +244,15 @@ pub fn swim(local_addr: SocketAddr) -> Result<(), Error> {
             let pid = 0;
 
             let manager = framed_sock
-                .for_each(move |_| {
+                .and_then(move |_| {
                     println!("{} : received a message !", pid);
 
-                    let framed_sock = Framed::new(socket.try_clone()?, MessageCodec::new());
+                    // TODO: unwrap?
+                    let framed_sock = Framed::new(socket.try_clone().unwrap(), MessageCodec::new());
 
-                    // TODO: Is it good to wait ? (Can it block the task or is it automigically asynced ?)
-                    framed_sock
-                        .send(Message::Hello("salut!".to_string()))
-                        .wait()?;
-                    Ok(())
+                    framed_sock.send(Message::Hello("salut!".to_string()))
                 })
+                .for_each(|_| Ok(()))
                 .map_err(move |err| {
                     eprintln!("{} : error when receiving a message : {:?}.", pid, err)
                 });

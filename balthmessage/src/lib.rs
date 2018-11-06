@@ -77,7 +77,9 @@ pub enum Message {
     // External(E) // TODO: generic type
     NoJob,
     TestBig(Vec<u8>),
-    Ping,
+    // TODO: Ping/Pong with Instants ? (latency, ...)
+    Ping, // (Instant),
+    Pong, // (Instant),
 }
 
 impl Message {

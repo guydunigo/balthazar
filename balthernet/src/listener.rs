@@ -30,7 +30,7 @@ impl From<io::Error> for Error {
 // TODO: channel to communicate orders like shutdown ?
 pub fn listen<A: ToSocketAddrs + Display>(
     listen_addr: A,
-    tx: Sender<TcpStream>,
+    tx: &Sender<TcpStream>,
 ) -> Result<(), Error> {
     // TODO: Look at different errors
     let listener = TcpListener::bind(&listen_addr)?;
