@@ -121,7 +121,7 @@ fn connect_to_peer(peer: PeerArcMut) -> impl Future<Item = (), Error = Error> {
                                 // TODO: unwrap?
                                 socket.try_clone().unwrap()
                             } else {
-                                panic!("Peer object inconsistent : a message was received, but `peer.socket` is `None`.");
+                                panic!("Inconsistent Peer object : a message was received, but `peer.socket` is `None`.");
                             };
 
                             (peer.addr, socket)
@@ -135,7 +135,7 @@ fn connect_to_peer(peer: PeerArcMut) -> impl Future<Item = (), Error = Error> {
                     Message::Pong => {
                         // TODO: unwrap?
                         peer2.lock().unwrap().pong();
-                        println!("{} : received Pong ! It is alive !!!", addr);
+                        // println!("{} : received Pong ! It is alive !!!", addr);
                     }
                     _ => println!("{} : received a message !", addr),
                 }
@@ -216,6 +216,7 @@ pub fn swim(local_addr: SocketAddr) -> Result<(), Error> {
 
             let peer_future =
                 Interval::new(Instant::now(), Duration::from_secs(CONNECTION_INTERVAL))
+                    .inspect_err(|err| eprintln!("Interval error: {:?}", err))
                     .map_err(Error::from)
                     .and_then(move |_| -> Box<Future<Item = (), Error = Error> + Send> {
                         // TODO: unwrap?
@@ -227,18 +228,21 @@ pub fn swim(local_addr: SocketAddr) -> Result<(), Error> {
                             let future = ping_peer(peer.clone());
                             Box::new(future)
                         } else {
-                            let future = connect_to_peer(peer.clone());
+                            let future = connect_to_peer(peer.clone())
+                                .map_err(move |err| {
+                                    eprintln!(
+                                "Error connecting to `{}` : `{:?}`, retrying in {} seconds...",
+                                addr, err, CONNECTION_INTERVAL
+                            );
+                                    Error::from(err)
+                                })
+                                // Discarding errors to avoid fusing the Stream:
+                                .or_else(|_| Ok(()));
                             Box::new(future)
                         }
                     })
-                    .inspect_err(move |err| {
-                        eprintln!(
-                            "Error connecting to `{}` : `{:?}`, retrying in {} seconds...",
-                            addr, err, CONNECTION_INTERVAL
-                        );
-                    })
                     .for_each(|_| Ok(()))
-                    .map_err(|err| eprintln!("Interval error: {:?}", err));
+                    .map_err(|_| ());
 
             runtime.spawn(peer_future);
         });
