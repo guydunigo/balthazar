@@ -106,40 +106,50 @@ fn connect_to_peer(peer: PeerArcMut) -> impl Future<Item = (), Error = Error> {
             peer.lock().unwrap().socket = Some(socket.try_clone().unwrap());
             println!("Connected to : `{}`", addr);
         })
-        // TODO: Move to separate function
-        .and_then(move |socket| {
-            // TODO: unwrap?
-            let socket2 = socket.try_clone().unwrap();
+    // TODO: Move to separate function
+    .and_then(move |socket| {
+        let framed_sock = Framed::new(socket, MessageCodec::new());
 
-            let framed_sock = Framed::new(socket, MessageCodec::new());
+        let manager = framed_sock
+            .for_each(move |msg| {
+                match msg {
+                    Message::Ping => {
+                        // TODO: unwrap?
+                        let (addr, socket) = {
+                            let peer = peer2.lock().unwrap();
+                            let socket = if let Some(socket) = &peer.socket {
+                                // TODO: unwrap?
+                                socket.try_clone().unwrap()
+                            } else {
+                                panic!("Peer object inconsistent : a message was received, but `peer.socket` is `None`.");
+                            };
 
-            let manager = framed_sock
-                .for_each(move |msg| {
-                    match msg {
-                        /*
-                        Message::Ping => {
-                            let framed_sock = Framed::new(socket2, MessageCodec::new());
-                            framed_sock.send(Message::Pong).map(|_| ()).map_err(|err| eprintln!("{} : Could no send `Pong` : {:?}", addr, err));
-                        },
-                        */
-                        Message::Pong => {
-                            // TODO: unwrap?
-                            peer2.lock().unwrap().pong();
-                            println!("{} : received Pong ! It is alive !!!", addr);
-                        }
-                        _ => println!("{} : received a message !", addr),
+                            (peer.addr, socket)
+                        };
+
+                        let framed_sock = Framed::new(socket, MessageCodec::new());
+                        let send_future = framed_sock.send(Message::Pong).map(|_| ()).map_err(move |err| eprintln!("{} : Could no send `Pong` : {:?}", addr, err));
+
+                        tokio::spawn(send_future);
+                    },
+                    Message::Pong => {
+                        // TODO: unwrap?
+                        peer2.lock().unwrap().pong();
+                        println!("{} : received Pong ! It is alive !!!", addr);
                     }
-                    Ok(())
-                })
-                .map_err(move |err| {
-                    eprintln!("{} : error when receiving a message : {:?}.", addr, err)
-                });
+                    _ => println!("{} : received a message !", addr),
+                }
+                Ok(())
+            })
+        .map_err(move |err| {
+            eprintln!("{} : error when receiving a message : {:?}.", addr, err)
+        });
 
-            tokio::spawn(manager);
+        tokio::spawn(manager);
 
-            Ok(())
-        })
-        .map_err(Error::from)
+        Ok(())
+    })
+    .map_err(Error::from)
 }
 
 // TODO: is it needed to use a `Pong`, or does the TCP socket returns an error if broken connection?
@@ -237,24 +247,34 @@ pub fn swim(local_addr: SocketAddr) -> Result<(), Error> {
     let listener_future = listener
         .incoming()
         .for_each(|socket| {
-            println!("Asked for connection : `{}`", socket.peer_addr()?);
+            let addr = socket.peer_addr()?;
+            println!("Asked for connection : `{}`", addr);
 
             let framed_sock = Framed::new(socket.try_clone()?, MessageCodec::new());
 
-            let pid = 0;
-
             let manager = framed_sock
-                .and_then(move |_| {
-                    println!("{} : received a message !", pid);
-
+                .for_each(move |msg| {
                     // TODO: unwrap?
-                    let framed_sock = Framed::new(socket.try_clone().unwrap(), MessageCodec::new());
+                    let socket = socket.try_clone().unwrap();
+                    match msg {
+                        Message::Ping => {
+                            let framed_sock = Framed::new(socket, MessageCodec::new());
+                            let send_future =
+                                framed_sock
+                                    .send(Message::Pong)
+                                    .map(|_| ())
+                                    .map_err(move |err| {
+                                        eprintln!("{} : Could no send `Pong` : {:?}", addr, err)
+                                    });
 
-                    framed_sock.send(Message::Hello("salut!".to_string()))
+                            tokio::spawn(send_future);
+                        }
+                        _ => println!("{} : received a message !", addr),
+                    }
+                    Ok(())
                 })
-                .for_each(|_| Ok(()))
                 .map_err(move |err| {
-                    eprintln!("{} : error when receiving a message : {:?}.", pid, err)
+                    eprintln!("{} : error when receiving a message : {:?}.", addr, err)
                 });
 
             tokio::spawn(manager);
