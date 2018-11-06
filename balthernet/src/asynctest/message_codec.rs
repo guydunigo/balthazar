@@ -57,6 +57,7 @@ impl Decoder for MessageCodec {
                     Message::ReturnValue(job_id, task_id, _) => {
                         println!("received result for Task #{} for Job #{}.", task_id, job_id)
                     }
+                    Message::Ping | Message::Pong => (),
                     _ => println!("received `{:?}`.", msg),
                 }
 
@@ -109,6 +110,7 @@ impl Encoder for MessageCodec {
                 "sending result for Task #{} for Job #{} of {} bytes.",
                 task_id, job_id, len
             ),
+            Message::Ping | Message::Pong => (),
             _ => println!("sending `{}` of {} bytes.", msg_str, len),
         }
 
