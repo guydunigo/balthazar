@@ -11,13 +11,13 @@ use std::time::{Duration, Instant};
 
 // TODO: local Error
 use super::peer::*;
-use super::{Error, MessageCodec};
+use super::Error;
 use balthmessage as message;
 
 /// Interval between connections tries in seconds
 const CONNECTION_INTERVAL: u64 = 10;
 
-pub fn for_each_message(
+fn for_each_message_connecting(
     addr: SocketAddr,
     peer: PeerArcMut,
     peers: PeersMapArcMut,
@@ -36,7 +36,7 @@ pub fn for_each_message(
                 if let Some(_) = peers.lock().unwrap().get(&pid) {
                     // TODO: check that there can be a connectAck, cancel listener
                     // procedure if necessary...
-                    unimplemented!("There is already a peer in peers");
+                    unimplemented!("Client : There is already a peer in peers");
                 } else {
                     peers.lock().unwrap().insert(*pid, peer.clone());
                 }
@@ -55,7 +55,7 @@ pub fn for_each_message(
             _ => unimplemented!(),
         },
         PeerState::Connected => for_each_message_connected(addr, peer, msg)?,
-        PeerState::NotConnected => panic!("Inconsistent Peer object : a message was received, but `peer.state` is `PeerState::NotConnected`."),
+        PeerState::NotConnected => panic!("Client : Inconsistent Peer object : a message was received, but `peer.state` is `PeerState::NotConnected`."),
     }
     Ok(())
 }
@@ -81,7 +81,7 @@ fn connect_to_peer(
 
             let manager = framed_sock
                 .for_each(move |msg| {
-                    for_each_message(
+                    for_each_message_connecting(
                         addr,
                         peer.clone(),
                         peers.clone(),
@@ -90,7 +90,10 @@ fn connect_to_peer(
                     )
                 })
                 .map_err(move |err| {
-                    eprintln!("{} : error when receiving a message : {:?}.", addr, err)
+                    eprintln!(
+                        "Client : {} : error when receiving a message : {:?}.",
+                        addr, err
+                    )
                 });
 
             tokio::spawn(manager);
@@ -110,7 +113,7 @@ fn ping_peer(peer: PeerArcMut) -> impl Future<Item = (), Error = Error> {
             // TODO: unwrap?
             socket.try_clone().unwrap()
         } else {
-            panic!("Peer has no Socket, can't Ping !");
+            panic!("Client : Peer has no Socket, can't Ping !");
         };
 
         (peer.addr, socket)
@@ -124,12 +127,12 @@ fn ping_peer(peer: PeerArcMut) -> impl Future<Item = (), Error = Error> {
             peer.lock().unwrap().ping();
         })
         .map_err(move |err| {
-            eprintln!("Ping failed for : `{}`", addr);
+            eprintln!("Client : Ping failed for : `{}`", addr);
             Error::from(err)
         })
         .or_else(move |_| {
             // TODO: diagnose and reconnect if necessary...
-            println!("Triggering reconnection for `{}`...", addr);
+            println!("Client : Triggering reconnection for `{}`...", addr);
 
             // TODO: different way to reconnect ?
             // TODO: unwrap?
@@ -147,7 +150,7 @@ pub fn connect(
     let peer = Arc::new(Mutex::new(Peer::new(addr)));
 
     Interval::new(Instant::now(), Duration::from_secs(CONNECTION_INTERVAL))
-        .inspect_err(|err| eprintln!("Interval error: {:?}", err))
+        .inspect_err(|err| eprintln!("Client : Interval error: {:?}", err))
         .map_err(Error::from)
         .and_then(move |_| -> Box<Future<Item = (), Error = Error> + Send> {
             // TODO: unwrap?
@@ -164,7 +167,7 @@ pub fn connect(
                     let future = connect_to_peer(pid, peer.clone(), peers.clone())
                         .map_err(move |err| {
                             eprintln!(
-                                "Error connecting to `{}` : `{:?}`, retrying in {} seconds...",
+                                "Client : Error connecting to `{}` : `{:?}`, retrying in {} seconds...",
                                 addr, err, CONNECTION_INTERVAL
                             );
                             Error::from(err)

@@ -49,7 +49,7 @@ fn cancel_connection(socket: TcpStream) {
 
 // TODO: rename everything everywhere with {peer,local}_{pid,vote,...}
 // TODO: properly define the algorithm here
-pub fn for_each_message_connecting(
+fn for_each_message_connecting(
     _local_pid: Pid,
     peers: PeersMapArcMut,
     peer_opt: PeerArcMutOpt,

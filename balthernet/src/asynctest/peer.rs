@@ -96,6 +96,7 @@ pub struct Peer {
 }
 
 impl Peer {
+    // TODO: Use pid in constuctor
     pub fn new(addr: SocketAddr) -> Self {
         Peer {
             // TODO: do something with pid...
@@ -249,7 +250,7 @@ pub fn for_each_message_connected(
     match msg {
         Message::Ping => {
             // TODO: unwrap?
-            let (addr, socket) = {
+            let socket = {
                 let peer = peer.lock().unwrap();
                 let socket = if let Some(socket) = &peer.socket {
                     // TODO: unwrap?
@@ -258,7 +259,7 @@ pub fn for_each_message_connected(
                     panic!("Inconsistent Peer object : a message was received, but `peer.socket` is `None` (and `peer.state` is `PeerState::Connected`).");
                 };
 
-                (peer.addr, socket)
+                socket
             };
 
             send_message_and_spawn(socket, Message::Ping);
