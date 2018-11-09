@@ -1,6 +1,6 @@
 use rand::random;
 use tokio::codec::Framed;
-use tokio::net::{TcpListener, TcpStream};
+use tokio::net::TcpStream;
 use tokio::prelude::*;
 use tokio::runtime::Runtime;
 use tokio::timer::Interval;
@@ -16,145 +16,15 @@ use std::time::{Duration, Instant};
 
 use super::*;
 
-pub mod message_codec;
-type MessageCodec = message_codec::MessageCodec;
-
-type Pid = u32;
-type RandVote = u32;
+mod message_codec;
+use self::message_codec::MessageCodec;
+mod peer;
+use self::peer::*;
+mod client;
+mod listener;
 
 /// Interval between connections tries in seconds
 const CONNECTION_INTERVAL: u64 = 10;
-
-// TODO: beware of deadlocking a peer ?
-// TODO: async lock?
-type PeerArcMut = Arc<Mutex<Peer>>;
-type PeersMapArcMut = Arc<Mutex<HashMap<Pid, PeerArcMut>>>;
-
-#[derive(Debug)]
-pub enum PingStatus {
-    PingSent(Instant),
-    PongReceived(Instant),
-    NoPingYet,
-}
-
-impl PingStatus {
-    pub fn new() -> Self {
-        PingStatus::NoPingYet
-    }
-
-    pub fn is_ping_sent(&self) -> bool {
-        if let PingStatus::PingSent(_) = self {
-            true
-        } else {
-            false
-        }
-    }
-
-    pub fn ping(&mut self) {
-        *self = PingStatus::PingSent(Instant::now());
-    }
-
-    pub fn pong(&mut self) {
-        *self = PingStatus::PongReceived(Instant::now());
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum PeerState {
-    // TODO: ping uses this values?
-    NotConnected,
-    Connecting(RandVote),
-    Connected,
-}
-
-#[derive(Debug)]
-pub struct Peer {
-    pid: Option<Pid>,
-    pub addr: SocketAddr,
-    pub socket: Option<TcpStream>,
-    pub ping_status: PingStatus,
-    // TODO: remove this todo if connection is done
-    pub state: PeerState,
-    pub client_connecting: bool,
-    pub listener_connecting: bool,
-}
-
-impl Peer {
-    pub fn new(addr: SocketAddr) -> Self {
-        Peer {
-            // TODO: do something with pid...
-            pid: None,
-            addr,
-            socket: None,
-            ping_status: PingStatus::new(),
-            // TODO: remove this todo if connection is done
-            state: PeerState::NotConnected,
-            client_connecting: false,
-            listener_connecting: false,
-        }
-    }
-
-    pub fn remove_socket(&mut self) {
-        self.socket = None;
-        self.ping_status = PingStatus::NoPingYet;
-    }
-
-    pub fn is_already_connected(&self) -> bool {
-        if let PeerState::Connected = self.state {
-            true
-        } else {
-            false
-        }
-    }
-
-    pub fn is_ping_sent(&self) -> bool {
-        self.ping_status.is_ping_sent()
-    }
-
-    pub fn ping(&mut self) {
-        self.ping_status.ping()
-    }
-
-    pub fn pong(&mut self) {
-        self.ping_status.pong()
-    }
-
-    pub fn client_connect(&mut self, vote: RandVote) {
-        self.client_connecting = true;
-        self.state = PeerState::Connecting(vote);
-    }
-
-    // TODO: return Result ?
-    pub fn client_connected(&mut self, socket: TcpStream) {
-        if let Some(pid) = self.pid {
-            self.client_connecting = false;
-            self.state = PeerState::Connected;
-            self.socket = Some(socket);
-
-            println!("Connected to : `{}`", pid);
-        } else {
-            eprintln!("Received `Message::ConnectAck` but pid is missing.");
-        }
-    }
-
-    pub fn client_cancel_connection(&mut self) {
-        self.state = PeerState::NotConnected;
-        self.client_connecting = false;
-        self.socket = None;
-    }
-
-    // TODO: return Result ?
-    pub fn set_pid(&mut self, pid: Pid) {
-        if let Some(present_pid) = self.pid {
-            eprintln!(
-                "Attempting to write pid `{}`, but pid is already set `{}`.",
-                pid, present_pid
-            );
-        } else {
-            self.pid = Some(pid);
-        }
-    }
-}
 
 fn connect_to_peer(
     pid: Pid,
@@ -365,45 +235,8 @@ pub fn swim(local_addr: SocketAddr) -> Result<(), Error> {
             runtime.spawn(peer_future);
         });
 
-    let listener = TcpListener::bind(&local_addr)?;
-    let listener_future = listener
-        .incoming()
-        .for_each(|socket| {
-            let addr = socket.peer_addr()?;
-            println!("Asked for connection : `{}`", addr);
-
-            let framed_sock = Framed::new(socket.try_clone()?, MessageCodec::new());
-
-            let manager = framed_sock
-                .for_each(move |msg| {
-                    // TODO: unwrap?
-                    let socket = socket.try_clone().unwrap();
-                    match msg {
-                        Message::Ping => {
-                            let framed_sock = Framed::new(socket, MessageCodec::new());
-                            let send_future =
-                                framed_sock
-                                    .send(Message::Pong)
-                                    .map(|_| ())
-                                    .map_err(move |err| {
-                                        eprintln!("{} : Could no send `Pong` : {:?}", addr, err)
-                                    });
-
-                            tokio::spawn(send_future);
-                        }
-                        _ => println!("{} : received a message !", addr),
-                    }
-                    Ok(())
-                })
-                .map_err(move |err| {
-                    eprintln!("{} : error when receiving a message : {:?}.", addr, err)
-                });
-
-            tokio::spawn(manager);
-
-            Ok(())
-        })
-        .map_err(|err| eprintln!("{:?}", err));
+    let listener = listener::bind(&local_addr)?;
+    let listener_future = listener::listen(listener);
 
     runtime.spawn(listener_future);
 
