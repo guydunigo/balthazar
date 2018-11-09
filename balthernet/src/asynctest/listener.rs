@@ -1,4 +1,3 @@
-use tokio::codec::Framed;
 use tokio::io;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::prelude::*;
@@ -8,7 +7,7 @@ use std::sync::{Arc, Mutex};
 
 // TODO: local Error
 use super::peer::*;
-use super::{Error, MessageCodec};
+use super::Error;
 use balthmessage::Message;
 
 type PeerArcMutOpt = Arc<Mutex<Option<PeerArcMut>>>;
@@ -26,11 +25,7 @@ fn handle_vote(socket: TcpStream, peer: &mut Peer, local_vote: ConnVote, peer_vo
 }
 
 fn cancel_connection(socket: TcpStream) {
-    // TODO: unwrap?
-    let framed_sock = Framed::new(socket, MessageCodec::new());
-
-    let future = framed_sock
-        .send(Message::ConnectCancel)
+    let future = send_message(socket, Message::ConnectCancel)
         .map_err(Error::from)
         .and_then(|framed_sock| {
             framed_sock
@@ -139,10 +134,7 @@ pub fn for_each_message_connecting(
                     peers.insert(*peer_pid, peer);
                 }
             }
-            _ => eprintln!(
-                "{} : received a message but it was not `Connect(pid,vote)`.",
-                addr
-            ),
+            _ => eprintln!("Listener : received a message but it was not `Connect(pid,vote)`."),
         }
     }
     Ok(())
@@ -162,33 +154,39 @@ pub fn listen(
         .for_each(move |socket| {
             let peers = peers.clone();
             let addr = socket.peer_addr()?;
-            println!("Asked for connection : `{}`", addr);
+            println!("Listener : Asked for connection : `{}`", addr);
 
-            // TODO: use full peer ?
             let peer = Arc::new(Mutex::new(None));
 
-            let framed_sock = Framed::new(socket.try_clone()?, MessageCodec::new());
+            let send_future =
+                send_message(socket.try_clone()?, Message::ConnectReceived(local_pid))
+                    .and_then(move |framed_sock| {
+                        let manager = framed_sock
+                            .map_err(Error::from)
+                            .for_each(move |msg| {
+                                for_each_message_connecting(
+                                    local_pid,
+                                    peers.clone(),
+                                    peer.clone(),
+                                    addr,
+                                    // TODO: unwrap?
+                                    socket.try_clone().unwrap(),
+                                    &msg,
+                                )
+                            })
+                            .map_err(move |err| {
+                                eprintln!("Listener : error when receiving a message : {:?}.", err)
+                            });
 
-            // TODO: unwrap?
-            let manager = framed_sock
-                .map_err(Error::from)
-                .for_each(move |msg| {
-                    for_each_message_connecting(
-                        local_pid,
-                        peers.clone(),
-                        peer.clone(),
-                        addr,
-                        socket.try_clone()?,
-                        &msg,
-                    )
-                })
-                .map_err(move |err| {
-                    eprintln!("{} : error when receiving a message : {:?}.", addr, err)
-                });
+                        tokio::spawn(manager);
 
-            tokio::spawn(manager);
+                        Ok(())
+                    })
+                    .map_err(|_| ());
+
+            tokio::spawn(send_future);
 
             Ok(())
         })
-        .map_err(|err| eprintln!("{:?}", err))
+        .map_err(|err| eprintln!("Listener : {:?}", err))
 }

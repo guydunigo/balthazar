@@ -73,14 +73,9 @@ fn connect_to_peer(
     TcpStream::connect(&addr)
         .map_err(Error::from)
         .and_then(move |socket| {
-            let framed_sock = Framed::new(socket, MessageCodec::new());
-
             // TODO: unwrap?
             let local_vote = peer2.lock().unwrap().client_to_connecting();
-
-            framed_sock
-                .send(Message::Connect(pid, local_vote))
-                .map_err(Error::from)
+            send_message(socket, Message::Connect(pid, local_vote))
         })
         .and_then(move |framed_sock| {
             let socket = framed_sock.get_ref().try_clone().unwrap();
@@ -122,10 +117,10 @@ fn ping_peer(peer: PeerArcMut) -> impl Future<Item = (), Error = Error> {
         (peer.addr, socket)
     };
 
-    Framed::new(socket, MessageCodec::new())
-        .send(Message::Ping)
+    send_message(socket, Message::Ping)
         // TODO: is this map useful ?
         .map(move |_| {
+            // TODO: send_message in ping ?
             // TODO: unwrap?
             peer.lock().unwrap().ping();
         })
@@ -139,7 +134,7 @@ fn ping_peer(peer: PeerArcMut) -> impl Future<Item = (), Error = Error> {
 
             // TODO: different way to reconnect ?
             // TODO: unwrap?
-            peer2.lock().unwrap().remove_socket();
+            peer2.lock().unwrap().disconnect();
 
             Ok(())
         })

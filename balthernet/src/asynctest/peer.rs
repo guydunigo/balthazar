@@ -24,6 +24,25 @@ fn vote() -> ConnVote {
     random()
 }
 
+/// Don't forget to spawn that...
+pub fn send_message(
+    socket: TcpStream,
+    msg: Message,
+) -> impl Future<Item = Framed<TcpStream, MessageCodec>, Error = Error> {
+    // TODO: unwrap?
+    let framed_sock = Framed::new(socket, MessageCodec::new());
+
+    framed_sock.send(msg).map_err(move |err| {
+        eprintln!("Error when sending message : `{:?}`.", err);
+        Error::from(err)
+    })
+}
+
+pub fn send_message_and_spawn(socket: TcpStream, msg: Message) {
+    let future = send_message(socket, msg).map(|_| ()).map_err(|_| ());
+    tokio::spawn(future);
+}
+
 #[derive(Debug)]
 pub enum PingStatus {
     PingSent(Instant),
@@ -63,6 +82,7 @@ pub enum PeerState {
 
 #[derive(Debug)]
 pub struct Peer {
+    // TODO: no `pub` ?
     pid: Option<Pid>,
     pub addr: SocketAddr,
     pub socket: Option<TcpStream>,
@@ -86,11 +106,6 @@ impl Peer {
             client_connecting: false,
             listener_connecting: false,
         }
-    }
-
-    pub fn remove_socket(&mut self) {
-        self.socket = None;
-        self.ping_status = PingStatus::NoPingYet;
     }
 
     pub fn is_connected(&self) -> bool {
@@ -186,6 +201,13 @@ impl Peer {
         }
     }
 
+    pub fn disconnect(&mut self) {
+        self.socket = None;
+        self.ping_status = PingStatus::NoPingYet;
+        self.state = PeerState::NotConnected;
+        // TODO: disconnect message ?
+    }
+
     // TODO: return Result ?
     pub fn set_pid(&mut self, pid: Pid) {
         if let Some(present_pid) = self.pid {
@@ -198,7 +220,6 @@ impl Peer {
         }
     }
 
-    // TODO: method sendmsg ?
     /// Don't forget to spawn that...
     pub fn send(
         &mut self,
@@ -206,12 +227,7 @@ impl Peer {
     ) -> impl Future<Item = Framed<TcpStream, MessageCodec>, Error = Error> {
         if let Some(socket) = &self.socket {
             // TODO: unwrap?
-            let framed_sock = Framed::new(socket.try_clone().unwrap(), MessageCodec::new());
-
-            framed_sock.send(msg).map_err(move |err| {
-                eprintln!("Error when sending message : `{:?}`.", err);
-                Error::from(err)
-            })
+            send_message(socket.try_clone().unwrap(), msg)
         } else {
             panic!("Can't send `{:?}`, no socket present!", msg);
         }
@@ -243,13 +259,7 @@ pub fn for_each_message_connected(
                 (peer.addr, socket)
             };
 
-            let framed_sock = Framed::new(socket, MessageCodec::new());
-            let send_future = framed_sock
-                .send(Message::Pong)
-                .map(|_| ())
-                .map_err(move |err| eprintln!("{} : Could no send `Pong` : {:?}", addr, err));
-
-            tokio::spawn(send_future);
+            send_message_and_spawn(socket, Message::Ping);
         }
         Message::Pong => {
             // TODO: unwrap?
