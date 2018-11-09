@@ -5,6 +5,7 @@ extern crate tokio;
 // #[macro_use]
 extern crate bytes;
 extern crate futures;
+extern crate rand;
 
 extern crate balthmessage as message;
 

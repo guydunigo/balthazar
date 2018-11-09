@@ -60,7 +60,11 @@ impl From<de::Error> for Error {
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug)]
 pub enum Message {
     Hello(String),
-    Connect(usize),
+    // TODO: use `type Pid` and `type RandVote`
+    Connect(u32, u32),
+    ConnectReceived(u32),
+    ConnectAck,
+    ConnectCancel,
     Connected(usize),
     // TODO: Useful to annouce deconnection ?
     Disconnect,
