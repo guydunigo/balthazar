@@ -1,12 +1,29 @@
 use tokio::codec::Framed;
 use tokio::io;
-use tokio::net::TcpListener;
+use tokio::net::{TcpListener, TcpStream};
 use tokio::prelude::*;
 
 use std::net::SocketAddr;
 
-use super::MessageCodec;
+// TODO: local Error
+use super::{Error, MessageCodec};
 use balthmessage::Message;
+
+pub fn for_each_message(addr: SocketAddr, socket: TcpStream, msg: &Message) -> Result<(), Error> {
+    match msg {
+        Message::Ping => {
+            let framed_sock = Framed::new(socket, MessageCodec::new());
+            let send_future = framed_sock
+                .send(Message::Pong)
+                .map(|_| ())
+                .map_err(move |err| eprintln!("{} : Could no send `Pong` : {:?}", addr, err));
+
+            tokio::spawn(send_future);
+        }
+        _ => println!("{} : received a message !", addr),
+    }
+    Ok(())
+}
 
 pub fn bind(local_addr: &SocketAddr) -> Result<TcpListener, io::Error> {
     TcpListener::bind(local_addr)
@@ -21,27 +38,10 @@ pub fn listen(listener: TcpListener) -> impl Future<Item = (), Error = ()> {
 
             let framed_sock = Framed::new(socket.try_clone()?, MessageCodec::new());
 
+            // TODO: unwrap?
             let manager = framed_sock
-                .for_each(move |msg| {
-                    // TODO: unwrap?
-                    let socket = socket.try_clone().unwrap();
-                    match msg {
-                        Message::Ping => {
-                            let framed_sock = Framed::new(socket, MessageCodec::new());
-                            let send_future =
-                                framed_sock
-                                    .send(Message::Pong)
-                                    .map(|_| ())
-                                    .map_err(move |err| {
-                                        eprintln!("{} : Could no send `Pong` : {:?}", addr, err)
-                                    });
-
-                            tokio::spawn(send_future);
-                        }
-                        _ => println!("{} : received a message !", addr),
-                    }
-                    Ok(())
-                })
+                .map_err(Error::from)
+                .for_each(move |msg| for_each_message(addr, socket.try_clone().unwrap(), &msg))
                 .map_err(move |err| {
                     eprintln!("{} : error when receiving a message : {:?}.", addr, err)
                 });
