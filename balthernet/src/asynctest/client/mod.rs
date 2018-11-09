@@ -1,4 +1,3 @@
-use tokio::codec::Framed;
 use tokio::net::TcpStream;
 use tokio::prelude::*;
 use tokio::timer::Interval;

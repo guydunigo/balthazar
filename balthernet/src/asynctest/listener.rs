@@ -14,11 +14,14 @@ type PeerArcMutOpt = Arc<Mutex<Option<PeerArcMut>>>;
 
 fn handle_vote(socket: TcpStream, peer: &mut Peer, local_vote: ConnVote, peer_vote: ConnVote) {
     if local_vote < peer_vote {
+        println!("Listener : Vote : peer won, cancelling connection...");
         peer.listener_connection_cancel();
     // TODO: stop the loop...
     } else if local_vote > peer_vote {
+        println!("Listener : Vote : peer lost, validating connection...");
         peer.listener_connection_ack(socket);
     } else {
+        println!("Listener : Vote : Equality, sending new vote...");
         let new_local_vote = peer.listener_to_connecting();
         peer.send_and_spawn(Message::Vote(new_local_vote));
     }

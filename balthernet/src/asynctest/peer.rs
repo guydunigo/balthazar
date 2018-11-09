@@ -89,7 +89,9 @@ pub struct Peer {
     pub ping_status: PingStatus,
     // TODO: remove this todo if connection is done
     pub state: PeerState,
+    // TODO: set to false when client socket error
     pub client_connecting: bool,
+    // TODO: set to false when listener socket error...
     pub listener_connecting: bool,
 }
 
