@@ -1,17 +1,28 @@
+use rand::random;
+use tokio::codec::Framed;
 use tokio::net::TcpStream;
+use tokio::prelude::*;
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
+use super::{Error, MessageCodec};
+use balthmessage as message;
+use balthmessage::Message;
+
 pub type Pid = u32;
-pub type RandVote = u32;
+pub type ConnVote = u32;
 
 // TODO: beware of deadlocking a peer ?
 // TODO: async lock?
 pub type PeerArcMut = Arc<Mutex<Peer>>;
 pub type PeersMapArcMut = Arc<Mutex<HashMap<Pid, PeerArcMut>>>;
+
+fn vote() -> ConnVote {
+    random()
+}
 
 #[derive(Debug)]
 pub enum PingStatus {
@@ -46,7 +57,7 @@ impl PingStatus {
 pub enum PeerState {
     // TODO: ping uses this values?
     NotConnected,
-    Connecting(RandVote),
+    Connecting(ConnVote),
     Connected,
 }
 
@@ -101,29 +112,78 @@ impl Peer {
     pub fn pong(&mut self) {
         self.ping_status.pong()
     }
+    pub fn to_connecting(&mut self) -> ConnVote {
+        let local_vote = vote();
+        self.state = PeerState::Connecting(local_vote);
+        local_vote
+    }
 
-    pub fn client_connect(&mut self, vote: RandVote) {
+    pub fn listener_to_connecting(&mut self) -> ConnVote {
+        self.listener_connecting = true;
+        self.to_connecting()
+    }
+
+    pub fn client_to_connecting(&mut self) -> ConnVote {
         self.client_connecting = true;
-        self.state = PeerState::Connecting(vote);
+        self.to_connecting()
     }
 
     // TODO: return Result ?
-    pub fn client_connected(&mut self, socket: TcpStream) {
+    pub fn connected(&mut self, socket: TcpStream) -> Result<(), Error> {
         if let Some(pid) = self.pid {
+            // TODO: other checks ?
+            self.listener_connecting = false;
             self.client_connecting = false;
             self.state = PeerState::Connected;
             self.socket = Some(socket);
 
+            // TODO: make sure this is the last ref to socket?
+            // TODO: start listening thread...
             println!("Connected to : `{}`", pid);
+
+            Ok(())
         } else {
-            eprintln!("Received `Message::ConnectAck` but pid is missing.");
+            Err(Error::PidMissing)
         }
     }
 
-    pub fn client_cancel_connection(&mut self) {
-        self.state = PeerState::NotConnected;
+    // TODO: too close names ? `{listener,client}_connection` ?
+    pub fn client_connection_acked(&mut self, socket: TcpStream) {
+        match self.connected(socket) {
+            Ok(()) => (),
+            Err(Error::PidMissing) => {
+                eprintln!("Received `Message::ConnectAck` but pid is missing.")
+            }
+            _ => unimplemented!(),
+        }
+    }
+
+    pub fn listener_connection_ack(&mut self, socket: TcpStream) {
+        match self.connected(socket) {
+            Ok(()) => (),
+            Err(Error::PidMissing) => {
+                eprintln!("Can't send `Message::ConnectAck` : pid is missing.")
+            }
+            _ => unimplemented!(),
+        }
+        self.send_and_spawn(Message::ConnectAck);
+    }
+
+    pub fn client_connection_cancelled(&mut self) {
         self.client_connecting = false;
-        self.socket = None;
+
+        if !self.listener_connecting {
+            self.state = PeerState::NotConnected;
+        }
+    }
+
+    pub fn listener_connection_cancel(&mut self) {
+        self.listener_connecting = false;
+        self.send_and_spawn(Message::ConnectCancel);
+
+        if !self.client_connecting {
+            self.state = PeerState::NotConnected;
+        }
     }
 
     // TODO: return Result ?
@@ -137,4 +197,67 @@ impl Peer {
             self.pid = Some(pid);
         }
     }
+
+    // TODO: method sendmsg ?
+    /// Don't forget to spawn that...
+    pub fn send(
+        &mut self,
+        msg: Message,
+    ) -> impl Future<Item = Framed<TcpStream, MessageCodec>, Error = Error> {
+        if let Some(socket) = &self.socket {
+            // TODO: unwrap?
+            let framed_sock = Framed::new(socket.try_clone().unwrap(), MessageCodec::new());
+
+            framed_sock.send(msg).map_err(move |err| {
+                eprintln!("Error when sending message : `{:?}`.", err);
+                Error::from(err)
+            })
+        } else {
+            panic!("Can't send `{:?}`, no socket present!", msg);
+        }
+    }
+
+    pub fn send_and_spawn(&mut self, msg: Message) {
+        let future = self.send(msg).map(|_| ()).map_err(|_| ());
+        tokio::spawn(future);
+    }
+}
+
+pub fn for_each_message_connected(
+    addr: SocketAddr,
+    peer: PeerArcMut,
+    msg: &Message,
+) -> Result<(), message::Error> {
+    match msg {
+        Message::Ping => {
+            // TODO: unwrap?
+            let (addr, socket) = {
+                let peer = peer.lock().unwrap();
+                let socket = if let Some(socket) = &peer.socket {
+                    // TODO: unwrap?
+                    socket.try_clone().unwrap()
+                } else {
+                    panic!("Inconsistent Peer object : a message was received, but `peer.socket` is `None` (and `peer.state` is `PeerState::Connected`).");
+                };
+
+                (peer.addr, socket)
+            };
+
+            let framed_sock = Framed::new(socket, MessageCodec::new());
+            let send_future = framed_sock
+                .send(Message::Pong)
+                .map(|_| ())
+                .map_err(move |err| eprintln!("{} : Could no send `Pong` : {:?}", addr, err));
+
+            tokio::spawn(send_future);
+        }
+        Message::Pong => {
+            // TODO: unwrap?
+            peer.lock().unwrap().pong();
+            // println!("{} : received Pong ! It is alive !!!", addr);
+        }
+        _ => println!("{} : received a message (but won't do anything ;) !", addr),
+    }
+
+    Ok(())
 }

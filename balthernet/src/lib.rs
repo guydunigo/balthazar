@@ -33,6 +33,7 @@ pub enum Error {
     CouldNotResolveAddress(String), // TODO: Figure out when this error actually happens
     TokioRuntimeError,
     TokioTimerError(tokio::timer::Error),
+    PidMissing,
 }
 
 impl From<message::Error> for Error {

@@ -1,4 +1,3 @@
-use rand::random;
 use tokio::codec::Framed;
 use tokio::net::TcpStream;
 use tokio::prelude::*;
@@ -29,7 +28,7 @@ pub fn for_each_message(
     let state = peer.lock().unwrap().state;
 
     match state {
-        PeerState::Connecting(_) => match msg {
+        PeerState::Connecting(_) => match msg { // TODO: lock for the whole block ?
             Message::ConnectReceived(pid) => {
                 peer.lock().unwrap().set_pid(*pid);
 
@@ -47,42 +46,16 @@ pub fn for_each_message(
                 // TODO: unwrap?
                 let mut peer = peer.lock().unwrap();
                 // TODO: cloning twice the socket ?
-                peer.client_connected(socket.try_clone().unwrap());
+                peer.client_connection_acked(socket.try_clone().unwrap());
             },
             Message::ConnectCancel => {
-                peer.lock().unwrap().client_cancel_connection();
+                peer.lock().unwrap().client_connection_cancelled();
                 // TODO: kill this loop...
                 unimplemented!();
             },
             _ => unimplemented!(),
         },
-        PeerState::Connected => match msg {
-            Message::Ping => {
-                // TODO: unwrap?
-                let (addr, socket) = {
-                    let peer = peer.lock().unwrap();
-                    let socket = if let Some(socket) = &peer.socket {
-                        // TODO: unwrap?
-                        socket.try_clone().unwrap()
-                    } else {
-                        panic!("Inconsistent Peer object : a message was received, but `peer.socket` is `None` (and `peer.state` is `PeerState::Connected`).");
-                    };
-
-                    (peer.addr, socket)
-                };
-
-                let framed_sock = Framed::new(socket, MessageCodec::new());
-                let send_future = framed_sock.send(Message::Pong).map(|_| ()).map_err(move |err| eprintln!("{} : Could no send `Pong` : {:?}", addr, err));
-
-                tokio::spawn(send_future);
-            },
-            Message::Pong => {
-                // TODO: unwrap?
-                peer.lock().unwrap().pong();
-                // println!("{} : received Pong ! It is alive !!!", addr);
-            }
-            _ => println!("{} : received a message (no action linked) !", addr),
-        },
+        PeerState::Connected => for_each_message_connected(addr, peer, msg)?,
         PeerState::NotConnected => panic!("Inconsistent Peer object : a message was received, but `peer.state` is `PeerState::NotConnected`."),
     }
     Ok(())
@@ -101,25 +74,26 @@ fn connect_to_peer(
         .map_err(Error::from)
         .and_then(move |socket| {
             let framed_sock = Framed::new(socket, MessageCodec::new());
-            let vote: RandVote = random();
 
-            {
-                // TODO: unwrap?
-                let mut peer = peer2.lock().unwrap();
-                peer.client_connect(vote);
-            }
+            // TODO: unwrap?
+            let local_vote = peer2.lock().unwrap().client_to_connecting();
 
             framed_sock
-                .send(Message::Connect(pid, vote))
+                .send(Message::Connect(pid, local_vote))
                 .map_err(Error::from)
         })
-        // TODO: Move to separate function
         .and_then(move |framed_sock| {
             let socket = framed_sock.get_ref().try_clone().unwrap();
 
             let manager = framed_sock
                 .for_each(move |msg| {
-                    for_each_message(addr, peer.clone(), peers.clone(), socket.try_clone().unwrap(), &msg)
+                    for_each_message(
+                        addr,
+                        peer.clone(),
+                        peers.clone(),
+                        socket.try_clone().unwrap(),
+                        &msg,
+                    )
                 })
                 .map_err(move |err| {
                     eprintln!("{} : error when receiving a message : {:?}.", addr, err)

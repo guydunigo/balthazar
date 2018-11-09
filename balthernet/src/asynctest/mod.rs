@@ -24,8 +24,8 @@ pub fn swim(local_addr: SocketAddr) -> Result<(), Error> {
 
     // TODO: actual pid
     // create pid:
-    let pid: Pid = random();
-    println!("Using pid : {}", pid);
+    let local_pid: Pid = random();
+    println!("Using pid : {}", local_pid);
 
     let mut runtime = Runtime::new()?;
 
@@ -43,12 +43,12 @@ pub fn swim(local_addr: SocketAddr) -> Result<(), Error> {
         })
         .filter(|addr| *addr != local_addr)
         .for_each(|addr| {
-            let client_future = client::connect(pid, addr, peers.clone());
+            let client_future = client::connect(local_pid, addr, peers.clone());
             runtime.spawn(client_future);
         });
 
     let listener = listener::bind(&local_addr)?;
-    let listener_future = listener::listen(listener);
+    let listener_future = listener::listen(local_pid, peers, listener);
     runtime.spawn(listener_future);
 
     runtime
