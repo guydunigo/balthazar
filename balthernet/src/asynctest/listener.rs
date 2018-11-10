@@ -59,7 +59,14 @@ fn for_each_message_connecting(
                     }
                 } else {
                     peer.listener_connection_ack(socket);
+                    // End the message listening loop :
+                    return Err(Error::ConnectionEnded);
                 }
+            }
+            PeerState::Connected => {
+                println!("Listener : `peer.state` is `Connected`, stopping connecting loop.");
+                // End the message listening loop :
+                return Err(Error::ConnectionEnded);
             }
             _ => panic!(
                 "Listener : `peer.state` shouldn't be `{:?}` when `peer_opt` is `Some(peer)`.",
@@ -91,11 +98,15 @@ fn for_each_message_connecting(
                             // TODO: check if same id ?
                             peer.set_pid(*peer_pid);
                             peer.listener_connection_ack(socket);
+                            // End the message listening loop :
+                            return Err(Error::ConnectionEnded);
                         }
-                        // TODO: kill this loop... (is closing the socket sufficient for stopping the loop ?)
+                        // TODO: is closing the socket sufficient for stopping the loop ?
                         PeerState::Connected => {
                             eprintln!("Listener : Someone tried to connect with pid `{}` but it is already connected (`state` is `Connected`). Cancelling...", peer_pid);
                             cancel_connection(socket);
+                            // End the message listening loop :
+                            return Err(Error::ConnectionCancelled);
                         }
                         PeerState::Connecting(local_vote) => {
                             // TODO: kill this loop... (is closing the socket sufficient for stopping the loop ?)
@@ -158,8 +169,13 @@ pub fn listen(
                                     &msg,
                                 )
                             })
-                            .map_err(move |err| {
-                                eprintln!("Listener : error when receiving a message : {:?}.", err)
+                            .map_err(move |err| match err {
+                                // TODO: println anyway ?
+                                Error::ConnectionCancelled | Error::ConnectionEnded => (),
+                                _ => eprintln!(
+                                    "Listener : error when receiving a message : {:?}.",
+                                    err
+                                ),
                             });
 
                         tokio::spawn(manager);

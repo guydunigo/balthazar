@@ -68,6 +68,14 @@ fn for_each_message_connecting(
                     _ => eprintln!("Client : {} : received a message but it was not `ConnectAck`, `ConnectCancel` or `Vote(vote)`.", peer_addr),
                 }
             }
+            PeerState::Connected => {
+                println!(
+                    "Client : {} : `peer.state` is `Connected`, stopping connecting loop.",
+                    peer_addr
+                );
+                // End the message listening loop :
+                return Err(Error::ConnectionEnded);
+            }
             _ => panic!(
                 "Client : {} : `peer.state` shouldn't be `{:?}` when `peer_opt` is `Some(peer)`.",
                 peer_addr, state
@@ -104,14 +112,17 @@ fn for_each_message_connecting(
                         }
                         PeerState::Connected => {
                             peer.client_connection_cancel();
+                            // End the message listening loop :
+                            return Err(Error::ConnectionCancelled);
                         }
                         PeerState::Connecting(_) => {
                             if peer.client_connecting {
-                                panic!("Client : {} : Peer inconsistency or double connection tasks `peer.state` is already `Connecting(vote)`.", peer_addr);
+                                panic!("Client : {} : Peer inconsistency or double connection tasks : `peer.state` is already `Connecting(vote)`.", peer_addr);
+                            // TODO: do something ? like return close loop, ...
                             } else if peer.listener_connecting {
                                 unimplemented!("Can we arrive here ? (it would mean that listener is waiting for a vote but client was cancelled).");
                             } else {
-                                panic!("Client : {} : Peer inconsistency : `state` is `Connecting` but `listener_connecting` and `client_connecting` are both false.", peer_addr);
+                                panic!("Client : {} : Peer inconsistency : `peer.state` is `Connecting` but `listener_connecting` and `client_connecting` are both false.", peer_addr);
                             }
                         }
                     }
@@ -163,11 +174,13 @@ fn connect_to_peer(
                         &msg,
                     )
                 })
-                .map_err(move |err| {
-                    eprintln!(
+                .map_err(move |err| match err {
+                    // TODO: println anyway ?
+                    Error::ConnectionCancelled | Error::ConnectionEnded => (),
+                    _ => eprintln!(
                         "Client : {} : error when receiving a message : {:?}.",
                         peer_addr, err
-                    )
+                    ),
                 });
 
             tokio::spawn(manager);
@@ -182,7 +195,7 @@ fn ping_peer(peer: PeerArcMut) -> impl Future<Item = (), Error = Error> {
 
     let (addr, socket) = {
         let peer = peer.lock().unwrap();
-
+        // TODO: check if connected ?
         let socket = if let Some(socket) = &peer.socket {
             // TODO: unwrap?
             socket.try_clone().unwrap()

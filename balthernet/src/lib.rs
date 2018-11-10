@@ -33,6 +33,8 @@ pub enum Error {
     CouldNotResolveAddress(String), // TODO: Figure out when this error actually happens
     TokioRuntimeError,
     TokioTimerError(tokio::timer::Error),
+    ConnectionEnded,
+    ConnectionCancelled,
     PidMissing,
 }
 
