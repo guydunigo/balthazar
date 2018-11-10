@@ -2,15 +2,13 @@ use tokio::io;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::prelude::*;
 
-use std::net::{Shutdown, SocketAddr};
+use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
 // TODO: local Error
 use super::peer::*;
 use super::Error;
 use balthmessage::Message;
-
-type PeerArcMutOpt = Arc<Mutex<Option<PeerArcMut>>>;
 
 fn handle_vote(socket: TcpStream, peer: &mut Peer, local_vote: ConnVote, peer_vote: ConnVote) {
     if local_vote < peer_vote {
@@ -27,33 +25,13 @@ fn handle_vote(socket: TcpStream, peer: &mut Peer, local_vote: ConnVote, peer_vo
     }
 }
 
-fn cancel_connection(socket: TcpStream) {
-    let future = send_message(socket, Message::ConnectCancel)
-        .map_err(Error::from)
-        .and_then(|framed_sock| {
-            framed_sock
-                .get_ref()
-                .shutdown(Shutdown::Both)
-                .map_err(Error::from)
-        })
-        .map(|_| ())
-        .map_err(|err| {
-            eprintln!(
-                "Listener : Error when sending message `ConnectCancel` : `{:?}`.",
-                err
-            )
-        });
-
-    tokio::spawn(future);
-}
-
 // TODO: rename everything everywhere with {peer,local}_{pid,vote,...}
 // TODO: properly define the algorithm here
 fn for_each_message_connecting(
     _local_pid: Pid,
     peers: PeersMapArcMut,
     peer_opt: PeerArcMutOpt,
-    addr: SocketAddr,
+    peer_addr: SocketAddr,
     socket: TcpStream,
     msg: &Message,
 ) -> Result<(), Error> {
@@ -82,12 +60,15 @@ fn for_each_message_connecting(
                     peer.listener_connection_ack(socket);
                 }
             }
-            _ => panic!("Listener : `peer.state` shouldn't be `{:?}` when `peer_opt` is `Some()`."),
+            _ => panic!(
+                "Listener : `peer.state` shouldn't be `{:?}` when `peer_opt` is `Some(peer)`.",
+                state
+            ),
         }
     } else {
         println!("Listener : `peer_opt` is `None`.");
         match msg {
-            Message::Connect(peer_pid, peer_vote) => {
+            Message::Connect(peer_pid) => {
                 // TODO: lock for the whole block
                 let peer_from_peers = {
                     let peers = peers.lock().unwrap();
@@ -118,9 +99,7 @@ fn for_each_message_connecting(
                             // TODO: kill this loop... (is closing the socket sufficient for stopping the loop ?)
                             if peer.listener_connecting {
                                 eprintln!("Listener : Someone tried to connect with pid `{}` but it is in connection with a listener (`state` is `Connected` and `listener_connecting` is `true`). Cancelling...", peer_pid);
-                            } else if peer.client_connecting {
-                                handle_vote(socket, &mut *peer, local_vote, *peer_vote);
-                            } else {
+                            } else if !peer.client_connecting {
                                 panic!("Listener : Peer inconsistency : `state` is `Connecting` but `listener_connecting` and `client_connecting` are both false.");
                             }
                         }
@@ -128,11 +107,10 @@ fn for_each_message_connecting(
                 } else {
                     let mut peers = peers.lock().unwrap();
 
-                    let mut peer = Peer::new(addr);
-                    peer.set_pid(*peer_pid);
+                    let mut peer = Peer::new(*peer_pid, peer_addr);
                     peer.listener_connection_ack(socket);
 
-                    let peer = Arc::new(Mutex::new(Peer::new(addr)));
+                    let peer = Arc::new(Mutex::new(peer));
                     *(peer_opt.lock().unwrap()) = Some(peer.clone());
                     peers.insert(*peer_pid, peer);
                 }
@@ -156,8 +134,8 @@ pub fn listen(
         .incoming()
         .for_each(move |socket| {
             let peers = peers.clone();
-            let addr = socket.peer_addr()?;
-            println!("Listener : Asked for connection : `{}`", addr);
+            let peer_addr = socket.peer_addr()?;
+            println!("Listener : Asked for connection : `{}`", peer_addr);
 
             let peer = Arc::new(Mutex::new(None));
 
@@ -171,7 +149,7 @@ pub fn listen(
                                     local_pid,
                                     peers.clone(),
                                     peer.clone(),
-                                    addr,
+                                    peer_addr,
                                     // TODO: unwrap?
                                     socket.try_clone().unwrap(),
                                     &msg,

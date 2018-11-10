@@ -4,7 +4,7 @@ use tokio::net::TcpStream;
 use tokio::prelude::*;
 
 use std::collections::HashMap;
-use std::net::SocketAddr;
+use std::net::{Shutdown, SocketAddr};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -19,6 +19,7 @@ pub type ConnVote = u32;
 // TODO: async lock?
 pub type PeerArcMut = Arc<Mutex<Peer>>;
 pub type PeersMapArcMut = Arc<Mutex<HashMap<Pid, PeerArcMut>>>;
+pub type PeerArcMutOpt = Arc<Mutex<Option<PeerArcMut>>>;
 
 fn vote() -> ConnVote {
     random()
@@ -40,6 +41,26 @@ pub fn send_message(
 
 pub fn send_message_and_spawn(socket: TcpStream, msg: Message) {
     let future = send_message(socket, msg).map(|_| ()).map_err(|_| ());
+    tokio::spawn(future);
+}
+
+pub fn cancel_connection(socket: TcpStream) {
+    let future = send_message(socket, Message::ConnectCancel)
+        .map_err(Error::from)
+        .and_then(|framed_sock| {
+            framed_sock
+                .get_ref()
+                .shutdown(Shutdown::Both)
+                .map_err(Error::from)
+        })
+        .map(|_| ())
+        .map_err(|err| {
+            eprintln!(
+                "Listener : Error when sending message `ConnectCancel` : `{:?}`.",
+                err
+            )
+        });
+
     tokio::spawn(future);
 }
 
@@ -77,12 +98,14 @@ pub enum PeerState {
     // TODO: ping uses this values?
     NotConnected,
     Connecting(ConnVote),
+    // TODO: Connected(TcpStream)
     Connected,
 }
 
 #[derive(Debug)]
 pub struct Peer {
     // TODO: no `pub` ?
+    // pid as option ?
     pid: Option<Pid>,
     pub addr: SocketAddr,
     pub socket: Option<TcpStream>,
@@ -97,10 +120,10 @@ pub struct Peer {
 
 impl Peer {
     // TODO: Use pid in constuctor
-    pub fn new(addr: SocketAddr) -> Self {
+    pub fn new(peer_pid: Pid, addr: SocketAddr) -> Self {
         Peer {
             // TODO: do something with pid...
-            pid: None,
+            pid: Some(peer_pid),
             addr,
             socket: None,
             ping_status: PingStatus::new(),
@@ -189,6 +212,15 @@ impl Peer {
 
     pub fn client_connection_cancelled(&mut self) {
         self.client_connecting = false;
+
+        if !self.listener_connecting {
+            self.state = PeerState::NotConnected;
+        }
+    }
+
+    pub fn client_connection_cancel(&mut self) {
+        self.client_connecting = false;
+        self.send_and_spawn(Message::ConnectCancel);
 
         if !self.listener_connecting {
             self.state = PeerState::NotConnected;

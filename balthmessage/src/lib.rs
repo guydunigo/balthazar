@@ -61,7 +61,7 @@ impl From<de::Error> for Error {
 pub enum Message {
     Hello(String),
     // TODO: use `type Pid` and `type ConnVote`
-    Connect(u32, u32),
+    Connect(u32),
     // TODO: rename ?
     ConnectReceived(u32),
     Vote(u32),
