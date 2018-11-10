@@ -36,7 +36,8 @@ fn for_each_message_connecting(
     msg: &Message,
 ) -> Result<(), Error> {
     // TODO: lock for the whole block?
-    if let Some(peer) = peer_opt.lock().unwrap().clone() {
+    let mut peer_opt = peer_opt.lock().unwrap();
+    if let Some(ref peer) = *peer_opt {
         println!("Listener : `peer_opt` is `Some()`.");
 
         // TODO: keep lock ?
@@ -79,7 +80,8 @@ fn for_each_message_connecting(
                 };
 
                 if let Some(peer_from_peers) = peer_from_peers {
-                    *(peer_opt.lock().unwrap()) = Some(peer_from_peers.clone());
+                    println!("Listener : {} : Peer is in peers.", peer_addr);
+                    *peer_opt = Some(peer_from_peers.clone());
 
                     let mut peer = peer_from_peers.lock().unwrap();
 
@@ -106,12 +108,13 @@ fn for_each_message_connecting(
                     }
                 } else {
                     let mut peers = peers.lock().unwrap();
+                    println!("Client : {} : Peer is not in peers.", peer_addr);
 
                     let mut peer = Peer::new(*peer_pid, peer_addr);
                     peer.listener_connection_ack(socket);
 
                     let peer = Arc::new(Mutex::new(peer));
-                    *(peer_opt.lock().unwrap()) = Some(peer.clone());
+                    *peer_opt = Some(peer.clone());
                     peers.insert(*peer_pid, peer);
                 }
             }
