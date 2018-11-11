@@ -8,7 +8,7 @@ edition = "2018"
 crate-type = ["cdylib"]
 
 [dependencies]
-sha3 = "0.7.3"
-serde_derive = "1.0.78"
-serde = "1.0.78"
+sha3 = "0.8.0"
+serde_derive = "1.0.80"
+serde = "1.0.80"
 ron = "0.4.0"
