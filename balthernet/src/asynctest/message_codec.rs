@@ -50,15 +50,15 @@ impl Decoder for MessageCodec {
 
                 // TODO: same with Task ?
                 match msg {
-                    Message::Job(job_id, _) => println!("received Job #{}.", job_id),
+                    Message::Job(job_id, _) => println!("-- Received : Job #{}.", job_id),
                     Message::Task(job_id, task_id, _) => {
-                        println!("received Task #{} for Job #{}.", task_id, job_id)
+                        println!("-- Received : Task #{} for Job #{}.", task_id, job_id)
                     }
                     Message::ReturnValue(job_id, task_id, _) => {
-                        println!("received result for Task #{} for Job #{}.", task_id, job_id)
+                        println!("-- Received | result for Task #{} for Job #{}.", task_id, job_id)
                     }
                     Message::Ping | Message::Pong => (),
-                    _ => println!("received `{:?}`.", msg),
+                    _ => println!("-- Received : `{:?}`.", msg),
                 }
 
                 Ok(Some(msg))
@@ -101,17 +101,17 @@ impl Encoder for MessageCodec {
         let len = msg_str.len();
 
         match message {
-            Message::Job(job_id, _) => println!("sending Job #{} of {} bytes.", job_id, len),
+            Message::Job(job_id, _) => println!("-- Sending Job #{} of {} bytes.", job_id, len),
             Message::Task(job_id, task_id, _) => println!(
-                "sending Task #{} for Job #{} of {} bytes.",
+                "-- Sending Task #{} for Job #{} of {} bytes.",
                 task_id, job_id, len
             ),
             Message::ReturnValue(job_id, task_id, _) => println!(
-                "sending result for Task #{} for Job #{} of {} bytes.",
+                "-- Sending result for Task #{} for Job #{} of {} bytes.",
                 task_id, job_id, len
             ),
             Message::Ping | Message::Pong => (),
-            _ => println!("sending `{}` of {} bytes.", msg_str, len),
+            _ => println!("-- Sending : `{}` of {} bytes.", msg_str, len),
         }
 
         if len >= MESSAGE_SIZE_LIMIT as usize {

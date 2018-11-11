@@ -66,7 +66,7 @@ fn for_each_message_connecting(
             }
             PeerState::Connected(_) => {
                 println!(
-                    "Client : {} : `peer.state` is `Connected`, stopping connecting loop.",
+                    "Client : {} : `peer.state` is `Connected`, stopping connection loop.",
                     peer_addr
                 );
                 // End the message listening loop :

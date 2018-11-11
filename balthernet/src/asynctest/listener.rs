@@ -70,11 +70,11 @@ fn for_each_message_connecting(
                 }
             }
             PeerState::Connected(_) => {
-                println!("Listener : `peer.state` is `Connected`, stopping connecting loop.");
+                println!("Listener : `peer.state` is `Connected`, stopping connection loop.");
                 // End the message listening loop :
                 return Err(Error::ConnectionEnded);
             }
-            _ => panic!(
+            _ => eprintln!(
                 "Listener : `peer.state` shouldn't be `{:?}` when `peer_opt` is `Some(peer)`.",
                 peer_locked.state
             ),

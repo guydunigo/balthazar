@@ -159,6 +159,14 @@ impl Peer {
         }
     }
 
+    pub fn is_connecting(&self) -> bool {
+        if let PeerState::Connecting(_) = self.state {
+            true
+        } else {
+            false
+        }
+    }
+
     pub fn _is_ping_sent(&self) -> bool {
         self.ping_status.is_ping_sent()
     }
@@ -228,7 +236,7 @@ impl Peer {
     pub fn client_connection_cancelled(&mut self) {
         self.client_connecting = false;
 
-        if !self.listener_connecting {
+        if !self.listener_connecting && self.is_connecting() {
             self.state = PeerState::NotConnected;
         }
     }
@@ -242,7 +250,7 @@ impl Peer {
         self.listener_connecting = false;
         send_message_and_spawn(socket, Message::ConnectCancel);
 
-        if !self.client_connecting {
+        if !self.client_connecting && self.is_connecting() {
             self.state = PeerState::NotConnected;
         }
     }
