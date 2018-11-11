@@ -36,6 +36,7 @@ pub enum Error {
     ConnectionEnded,
     ConnectionCancelled,
     PingSendError,
+    PeerNotInConnectedState(String),
 }
 
 impl From<message::Error> for Error {

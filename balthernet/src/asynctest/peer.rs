@@ -167,6 +167,10 @@ impl Peer {
         self.ping_status.is_ping_sent()
     }
 
+    pub fn peer_pid(&self) -> Pid {
+        self.peer_pid
+    }
+
     pub fn ping(&mut self) {
         self.ping_status.ping()
     }
@@ -257,34 +261,22 @@ impl Peer {
         // TODO: disconnect message ?
     }
 
-    // TODO: return Result ?
-    pub fn set_pid(&mut self, pid: Pid) {
-        unimplemented!();
-        /*
-        if let Some(present_pid) = self.peer_pid {
-            eprintln!(
-                "Attempting to write pid `{}`, but pid is already set `{}`.",
-                pid, present_pid
-            );
-        } else {
-            self.peer_pid = Some(pid);
-        }
-        */
-    }
-
     /// Don't forget to spawn that...
     pub fn send(
         &mut self,
         msg: Message,
-    ) -> impl Future<Item = Framed<TcpStream, MessageCodec>, Error = Error> {
+    ) -> Box<Future<Item = Framed<TcpStream, MessageCodec>, Error = Error> + Send> {
         if let PeerState::Connected(socket) = &self.state {
             // TODO: unwrap?
-            send_message(socket.try_clone().unwrap(), msg)
+            Box::new(send_message(socket.try_clone().unwrap(), msg))
         } else {
-            panic!(
+            eprintln!(
                 "Can't send `{:?}`, `peer.state` not in `Connected(socket)` !",
                 msg
             );
+            Box::new(future::err(Error::PeerNotInConnectedState(
+                "Can't send message `{:?}`.".to_string(),
+            )))
         }
     }
 
@@ -343,7 +335,10 @@ fn for_each_message(peer: PeerArcMut, msg: &Message) -> Result<(), Error> {
                     // TODO: unwrap?
                     socket.try_clone().unwrap()
                 } else {
-                    panic!("Manager : {} : Inconsistent Peer object : a message was received, but `peer.state` is not `Connected(socket)`.", peer.addr);
+                    eprintln!("Manager : {} : Inconsistent Peer object : a message was received, but `peer.state` is not `Connected(socket)`.", peer.addr);
+                    return Err(Error::PeerNotInConnectedState(
+                        "Inconsistent Peer object : a message was received.".to_string(),
+                    ));
                 };
 
                 socket

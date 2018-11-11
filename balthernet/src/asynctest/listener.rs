@@ -106,8 +106,11 @@ fn for_each_message_connecting(
                     println!("Listener : `peer.state` is `{:?}`.", peer.state);
                     match peer.state {
                         PeerState::NotConnected => {
-                            // TODO: check if same id ?
-                            peer.set_pid(*peer_pid);
+                            if peer.peer_pid() != *peer_pid {
+                                eprintln!("Client : {} : Received a `peer_id` that differs from the already known `peer.peer_pid` : `peer_id=={}`, `peer.peer_id=={}`.", peer.addr, peer_pid, peer.peer_pid());
+                                // TODO: return error and cancel connection ?
+                            }
+
                             peer.listener_connection_ack(peer_from_peers.clone(), socket);
                             // End the message listening loop :
                             return Err(Error::ConnectionEnded);
@@ -119,10 +122,11 @@ fn for_each_message_connecting(
                             // End the message listening loop :
                             return Err(Error::ConnectionCancelled);
                         }
-                        PeerState::Connecting(local_vote) => {
-                            // TODO: kill this loop... (is closing the socket sufficient for stopping the loop ?)
+                        PeerState::Connecting(_local_vote) => {
                             if peer.listener_connecting {
                                 eprintln!("Listener : Someone tried to connect with pid `{}` but it is in connection with a listener (`state` is `Connected` and `listener_connecting` is `true`). Cancelling...", peer_pid);
+                                cancel_connection(socket);
+                                return Err(Error::ConnectionCancelled);
                             } else if !peer.client_connecting {
                                 panic!("Listener : Peer inconsistency : `state` is `Connecting` but `listener_connecting` and `client_connecting` are both false.");
                             }

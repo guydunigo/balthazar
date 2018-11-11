@@ -47,12 +47,16 @@ fn for_each_message_connecting(
                         if !peer_locked.listener_connecting {
                             peer_locked.client_connection_acked(peer.clone(), socket);
                         } else {
+                            // TODO: find a way to check that listener cancelled, ... oneshot?
                             unimplemented!();
                         }
                     },
                     Message::ConnectCancel => {
-                        // TODO: close socket
-                        unimplemented!();
+                        let mut peer_locked = peer.lock().unwrap();
+                        // TODO: close socket and stop loop
+                        peer_locked.client_connection_cancel();
+                        // End the message listening loop :
+                        return Err(Error::ConnectionCancelled);
                     },
                     Message::Vote(_peer_vote) => {
                         let peer = peer.lock().unwrap();
@@ -111,8 +115,11 @@ fn for_each_message_connecting(
                     );
                     match peer.state {
                         PeerState::NotConnected => {
-                            // TODO: check if same id ?
-                            peer.set_pid(*peer_pid);
+                            if peer.peer_pid() != *peer_pid {
+                                eprintln!("Client : {} : Received a `peer_id` that differs from the already known `peer.peer_pid` : `peer_id=={}`, `peer.peer_id=={}`.", peer.addr, peer_pid, peer.peer_pid());
+                                // TODO: return error and cancel connection ?
+                            }
+
                             vote(&mut peer, socket);
                         }
                         PeerState::Connected(_) => {
