@@ -29,14 +29,13 @@ fn for_each_message_connecting(
     socket: TcpStream,
     msg: &Message,
 ) -> Result<(), Error> {
-    // TODO: lock for the whole block?
     let mut peer_opt = peer_opt.lock().unwrap();
     if let Some(ref peer) = *peer_opt {
         // println!("Client : {} : `peer_opt` is `Some()`.", peer_addr);
 
         let mut peer_locked = peer.lock().unwrap();
-        // println!("Client : {} : `peer.state` is `{:?}`.", peer_addr, peer_locked.state);
 
+        // println!("Client : {} : `peer.state` is `{:?}`.", peer_addr, peer_locked.state);
         match peer_locked.state {
             PeerState::Connecting(_) => {
                 match msg {
