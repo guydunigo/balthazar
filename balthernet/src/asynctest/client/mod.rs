@@ -32,18 +32,15 @@ fn for_each_message_connecting(
     // TODO: lock for the whole block?
     let mut peer_opt = peer_opt.lock().unwrap();
     if let Some(ref peer) = *peer_opt {
-        println!("Client : {} : `peer_opt` is `Some()`.", peer_addr);
+        // println!("Client : {} : `peer_opt` is `Some()`.", peer_addr);
 
-        // TODO: keep lock ?
-        let state = peer.lock().unwrap().state.clone();
-        println!("Client : {} : `peer.state` is `{:?}`.", peer_addr, state);
+        let mut peer_locked = peer.lock().unwrap();
+        // println!("Client : {} : `peer.state` is `{:?}`.", peer_addr, peer_locked.state);
 
-        match state {
+        match peer_locked.state {
             PeerState::Connecting(_) => {
                 match msg {
                     Message::ConnectAck => {
-                        let mut peer_locked = peer.lock().unwrap();
-
                         if !peer_locked.listener_connecting {
                             peer_locked.client_connection_acked(peer.clone(), socket);
                         } else {
@@ -52,16 +49,12 @@ fn for_each_message_connecting(
                         }
                     },
                     Message::ConnectCancel => {
-                        let mut peer_locked = peer.lock().unwrap();
-                        // TODO: close socket and stop loop
-                        peer_locked.client_connection_cancel();
+                        peer_locked.client_connection_cancelled();
                         // End the message listening loop :
                         return Err(Error::ConnectionCancelled);
                     },
                     Message::Vote(_peer_vote) => {
-                        let peer = peer.lock().unwrap();
-
-                        if peer.listener_connecting {
+                        if peer_locked.listener_connecting {
                             // TODO: send vote to listener
                             unimplemented!();
                         } else {
@@ -81,7 +74,6 @@ fn for_each_message_connecting(
                 return Err(Error::ConnectionEnded);
             }
             PeerState::NotConnected => {
-                let mut peer_locked = peer.lock().unwrap();
                 vote(&mut peer_locked, socket);
             } /*
               _ => panic!(
@@ -91,28 +83,23 @@ fn for_each_message_connecting(
               */
         }
     } else {
-        println!("Client : {} : `peer_opt` is `None`.", peer_addr);
+        // println!("Client : {} : `peer_opt` is `None`.", peer_addr);
         match msg {
             Message::ConnectReceived(peer_pid) => {
-                // TODO: lock for the whole block
-                let peer_from_peers = {
-                    let peers = peers.lock().unwrap();
-                    match peers.get(&peer_pid) {
-                        Some(peer) => Some(peer.clone()),
-                        None => None,
-                    }
-                };
+                let mut peers_locked = peers.lock().unwrap();
 
-                if let Some(peer_from_peers) = peer_from_peers {
-                    println!("Client : {} : Peer is in peers.", peer_addr);
+                if let Some(peer_from_peers) = peers_locked.get(&peer_pid) {
+                    // println!("Client : {} : Peer is in peers.", peer_addr);
                     *peer_opt = Some(peer_from_peers.clone());
 
                     let mut peer = peer_from_peers.lock().unwrap();
 
+                    /*
                     println!(
                         "Client : {} : `peer.state` is `{:?}`.",
                         peer_addr, peer.state
                     );
+                    */
                     match peer.state {
                         PeerState::NotConnected => {
                             if peer.peer_pid() != *peer_pid {
@@ -123,7 +110,7 @@ fn for_each_message_connecting(
                             vote(&mut peer, socket);
                         }
                         PeerState::Connected(_) => {
-                            peer.client_connection_cancel();
+                            peer.client_connection_cancel(socket);
                             // End the message listening loop :
                             return Err(Error::ConnectionCancelled);
                         }
@@ -139,8 +126,7 @@ fn for_each_message_connecting(
                         }
                     }
                 } else {
-                    let mut peers_locked = peers.lock().unwrap();
-                    println!("Client : {} : Peer is not in peers.", peer_addr);
+                    // println!("Client : {} : Peer is not in peers.", peer_addr);
 
                     let mut peer = Peer::new(local_pid, *peer_pid, peer_addr, peers.clone());
                     vote(&mut peer, socket);

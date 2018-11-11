@@ -20,7 +20,7 @@ fn handle_vote(
 ) {
     if local_vote < peer_vote {
         println!("Listener : Vote : peer won, cancelling connection...");
-        peer_locked.listener_connection_cancel();
+        peer_locked.listener_connection_cancel(socket);
     // TODO: stop the loop...
     } else if local_vote > peer_vote {
         println!("Listener : Vote : peer lost, validating connection...");
@@ -33,7 +33,6 @@ fn handle_vote(
 }
 
 // TODO: rename everything everywhere with {peer,local}_{pid,vote,...}
-// TODO: properly define the algorithm here
 fn for_each_message_connecting(
     local_pid: Pid,
     peers: PeersMapArcMut,
@@ -42,19 +41,15 @@ fn for_each_message_connecting(
     socket: TcpStream,
     msg: &Message,
 ) -> Result<(), Error> {
-    // TODO: lock for the whole block?
     let mut peer_opt = peer_opt.lock().unwrap();
     if let Some(ref peer) = *peer_opt {
-        println!("Listener : `peer_opt` is `Some()`.");
+        // println!("Listener : `peer_opt` is `Some()`.");
 
-        // TODO: keep lock ?
-        let state = peer.lock().unwrap().state.clone();
-        println!("Listener : `peer.state` is `{:?}`.", state);
+        let mut peer_locked = peer.lock().unwrap();
 
-        match state {
+        // println!("Listener : `peer.state` is `{:?}`.", peer_locked.state);
+        match peer_locked.state {
             PeerState::Connecting(local_vote) => {
-                let mut peer_locked = peer.lock().unwrap();
-
                 if peer_locked.client_connecting {
                     match msg {
                         Message::Vote(peer_vote) => handle_vote(
@@ -81,29 +76,22 @@ fn for_each_message_connecting(
             }
             _ => panic!(
                 "Listener : `peer.state` shouldn't be `{:?}` when `peer_opt` is `Some(peer)`.",
-                state
+                peer_locked.state
             ),
         }
     } else {
-        println!("Listener : `peer_opt` is `None`.");
+        // println!("Listener : `peer_opt` is `None`.");
         match msg {
             Message::Connect(peer_pid) => {
-                // TODO: lock for the whole block
-                let peer_from_peers = {
-                    let peers = peers.lock().unwrap();
-                    match peers.get(&peer_pid) {
-                        Some(peer) => Some(peer.clone()),
-                        None => None,
-                    }
-                };
+                let mut peers_locked = peers.lock().unwrap();
 
-                if let Some(peer_from_peers) = peer_from_peers {
-                    println!("Listener : {} : Peer is in peers.", peer_addr);
+                if let Some(peer_from_peers) = peers_locked.get(&peer_pid) {
+                    // println!("Listener : {} : Peer is in peers.", peer_addr);
                     *peer_opt = Some(peer_from_peers.clone());
 
                     let mut peer = peer_from_peers.lock().unwrap();
 
-                    println!("Listener : `peer.state` is `{:?}`.", peer.state);
+                    // println!("Listener : `peer.state` is `{:?}`.", peer.state);
                     match peer.state {
                         PeerState::NotConnected => {
                             if peer.peer_pid() != *peer_pid {
@@ -115,16 +103,15 @@ fn for_each_message_connecting(
                             // End the message listening loop :
                             return Err(Error::ConnectionEnded);
                         }
-                        // TODO: is closing the socket sufficient for stopping the loop ?
                         PeerState::Connected(_) => {
-                            eprintln!("Listener : Someone tried to connect with pid `{}` but it is already connected (`state` is `Connected`). Cancelling...", peer_pid);
+                            // eprintln!("Listener : Someone tried to connect with pid `{}` but it is already connected (`state` is `Connected`). Cancelling...", peer_pid);
                             cancel_connection(socket);
                             // End the message listening loop :
                             return Err(Error::ConnectionCancelled);
                         }
                         PeerState::Connecting(_local_vote) => {
                             if peer.listener_connecting {
-                                eprintln!("Listener : Someone tried to connect with pid `{}` but it is in connection with a listener (`state` is `Connected` and `listener_connecting` is `true`). Cancelling...", peer_pid);
+                                // eprintln!("Listener : Someone tried to connect with pid `{}` but it is in connection with a listener (`state` is `Connected` and `listener_connecting` is `true`). Cancelling...", peer_pid);
                                 cancel_connection(socket);
                                 return Err(Error::ConnectionCancelled);
                             } else if !peer.client_connecting {
@@ -133,8 +120,7 @@ fn for_each_message_connecting(
                         }
                     }
                 } else {
-                    let mut peers_locked = peers.lock().unwrap();
-                    println!("Client : {} : Peer is not in peers.", peer_addr);
+                    // println!("Client : {} : Peer is not in peers.", peer_addr);
 
                     let peer = Peer::new(local_pid, *peer_pid, peer_addr, peers.clone());
                     let peer_arc_mut = Arc::new(Mutex::new(peer));

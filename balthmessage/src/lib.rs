@@ -57,7 +57,7 @@ impl From<de::Error> for Error {
 // ------------------------------------------------------------------
 // Message
 
-#[derive(Serialize, Deserialize, PartialEq, Eq, Debug)]
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 pub enum Message {
     Hello(String),
     // TODO: use `type Pid` and `type ConnVote`

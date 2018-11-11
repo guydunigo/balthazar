@@ -15,7 +15,6 @@ use balthmessage::Message;
 pub type Pid = u32;
 pub type ConnVote = u32;
 
-// TODO: beware of deadlocking a peer ?
 // TODO: async lock?
 pub type PeerArcMut = Arc<Mutex<Peer>>;
 pub type PeersMapArcMut = Arc<Mutex<HashMap<Pid, PeerArcMut>>>;
@@ -36,8 +35,8 @@ pub fn send_message(
     // TODO: unwrap?
     let framed_sock = Framed::new(socket, MessageCodec::new());
 
-    framed_sock.send(msg).map_err(move |err| {
-        eprintln!("Error when sending message : `{:?}`.", err);
+    framed_sock.send(msg.clone()).map_err(move |err| {
+        eprintln!("Error when sending message `{:?}` : `{:?}`.", msg, err);
         Error::from(err)
     })
 }
@@ -57,11 +56,13 @@ pub fn cancel_connection(socket: TcpStream) {
                 .map_err(Error::from)
         })
         .map(|_| ())
-        .map_err(|err| {
+        .map_err(|_err| {
+            /*
             eprintln!(
                 "Listener : Error when sending message `ConnectCancel` : `{:?}`.",
                 err
             )
+            */
         });
 
     tokio::spawn(future);
@@ -99,7 +100,7 @@ impl PingStatus {
 
 #[derive(Debug)]
 pub enum PeerState {
-    // TODO: ping uses this values?
+    // TODO: ping uses these values?
     NotConnected,
     Connecting(ConnVote),
     // TODO: Connected(TcpStream)
@@ -124,13 +125,11 @@ impl Clone for PeerState {
 #[derive(Debug)]
 pub struct Peer {
     // TODO: no `pub` ?
-    // pid as option ?
     peer_pid: Pid,
     local_pid: Pid,
     peers: PeersMapArcMut,
     pub addr: SocketAddr,
     pub ping_status: PingStatus,
-    // TODO: remove this todo if connection is done
     pub state: PeerState,
     // TODO: set to false when client socket error
     pub client_connecting: bool,
@@ -139,23 +138,20 @@ pub struct Peer {
 }
 
 impl Peer {
-    // TODO: Use pid in constuctor
     pub fn new(local_pid: Pid, peer_pid: Pid, addr: SocketAddr, peers: PeersMapArcMut) -> Self {
         Peer {
-            // TODO: do something with pid...
             peer_pid,
             local_pid,
             addr,
             peers,
             ping_status: PingStatus::new(),
-            // TODO: remove this todo if connection is done
             state: PeerState::NotConnected,
             client_connecting: false,
             listener_connecting: false,
         }
     }
 
-    pub fn is_connected(&self) -> bool {
+    pub fn _is_connected(&self) -> bool {
         if let PeerState::Connected(_) = self.state {
             true
         } else {
@@ -163,7 +159,7 @@ impl Peer {
         }
     }
 
-    pub fn is_ping_sent(&self) -> bool {
+    pub fn _is_ping_sent(&self) -> bool {
         self.ping_status.is_ping_sent()
     }
 
@@ -203,9 +199,10 @@ impl Peer {
         self.client_connecting = false;
         self.state = PeerState::Connected(socket);
 
-        // TODO: make sure this is the last ref to socket?
-        // TODO: start listening thread...
-        println!("Connected to : `{}`", self.peer_pid);
+        println!(
+            "Manager : {} : Connected to : `{}`",
+            self.addr, self.peer_pid
+        );
 
         self.manage(peer);
 
@@ -228,7 +225,6 @@ impl Peer {
         }
     }
 
-    // TODO: use that?
     pub fn client_connection_cancelled(&mut self) {
         self.client_connecting = false;
 
@@ -237,18 +233,14 @@ impl Peer {
         }
     }
 
-    pub fn client_connection_cancel(&mut self) {
-        self.client_connecting = false;
-        self.send_and_spawn(Message::ConnectCancel);
-
-        if !self.listener_connecting {
-            self.state = PeerState::NotConnected;
-        }
+    pub fn client_connection_cancel(&mut self, socket: TcpStream) {
+        self.client_connection_cancelled();
+        send_message_and_spawn(socket, Message::ConnectCancel);
     }
 
-    pub fn listener_connection_cancel(&mut self) {
+    pub fn listener_connection_cancel(&mut self, socket: TcpStream) {
         self.listener_connecting = false;
-        self.send_and_spawn(Message::ConnectCancel);
+        send_message_and_spawn(socket, Message::ConnectCancel);
 
         if !self.client_connecting {
             self.state = PeerState::NotConnected;
@@ -286,7 +278,7 @@ impl Peer {
     }
 
     /// **Important** : peer must be a reference to self.
-    /// // TODO: check for that ?
+    /// // TODO: ensure that ?
     pub fn manage(&mut self, peer: PeerArcMut) {
         if let PeerState::Connected(socket) = self.state.clone() {
             let framed_sock = Framed::new(socket, MessageCodec::new());
@@ -299,6 +291,7 @@ impl Peer {
                 .map_err(move |err| match err {
                     // TODO: println anyway ?
                     Error::ConnectionCancelled | Error::ConnectionEnded => (),
+                    Error::PeerNotInConnectedState(_) => (),
                     _ => eprintln!(
                         "Manager : {} : error when receiving a message : {:?}.",
                         peer_addr, err
@@ -324,7 +317,6 @@ impl Peer {
 }
 
 fn for_each_message(peer: PeerArcMut, msg: &Message) -> Result<(), Error> {
-    // TODO: lock for the whole function ?
     let mut peer = peer.lock().unwrap();
 
     match msg {
@@ -371,7 +363,6 @@ fn ping_peer(peer: PeerArcMut) -> impl Future<Item = (), Error = Error> {
 
     peer_locked
         .send(Message::Ping)
-        // TODO: is this map useful ?
         .map(move |_| {
             // TODO: unwrap?
             peer_clone.lock().unwrap().ping();
