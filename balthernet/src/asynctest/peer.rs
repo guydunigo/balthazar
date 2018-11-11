@@ -2,11 +2,12 @@ use rand::random;
 use tokio::codec::Framed;
 use tokio::net::TcpStream;
 use tokio::prelude::*;
+use tokio::timer::Delay;
 
 use std::collections::HashMap;
 use std::net::{Shutdown, SocketAddr};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use super::{Error, MessageCodec};
 use balthmessage::Message;
@@ -217,7 +218,6 @@ impl Peer {
             Ok(()) => (),
             _ => unimplemented!(),
         }
-        self.send_and_spawn(Message::ConnectAck);
     }
 
     // TODO: use that?
@@ -294,6 +294,7 @@ impl Peer {
         if let PeerState::Connected(socket) = self.state.clone() {
             let framed_sock = Framed::new(socket, MessageCodec::new());
             let peer_addr = self.addr;
+            let peer_clone = peer.clone();
 
             let manage_future = framed_sock
                 .map_err(Error::from)
@@ -308,6 +309,21 @@ impl Peer {
                 });
 
             tokio::spawn(manage_future);
+
+            self.send_and_spawn(Message::ConnectAck);
+
+            let delay_future = Delay::new(Instant::now() + Duration::from_secs(3))
+                .and_then(move |_| {
+                    peer_clone
+                        .lock()
+                        .unwrap()
+                        .send_and_spawn(Message::Hello("Hi, this is me !".to_string()));
+                    Ok(())
+                })
+                .map(|_| ())
+                .map_err(|_| ());
+
+            tokio::spawn(delay_future);
         }
     }
 }
@@ -344,4 +360,45 @@ fn for_each_message(peer: PeerArcMut, msg: &Message) -> Result<(), Error> {
     }
 
     Ok(())
+}
+
+// TODO: Ping if there is already an unanswered Ping ? (in this case, override the Ping time ?)
+// TODO: can also use some "last time a message was sent..." to test if necessary, ...
+fn ping_peer(peer: PeerArcMut) -> impl Future<Item = (), Error = Error> {
+    let peer2 = peer.clone();
+
+    let (addr, socket) = {
+        let peer = peer.lock().unwrap();
+        // TODO: check if connected ?
+        let socket = if let PeerState::Connected(socket) = &peer.state {
+            // TODO: unwrap?
+            socket.try_clone().unwrap()
+        } else {
+            panic!("Client : `peer.state` is not `Connected(socket)`, can't Ping !");
+        };
+
+        (peer.addr, socket)
+    };
+
+    send_message(socket, Message::Ping)
+        // TODO: is this map useful ?
+        .map(move |_| {
+            // TODO: send_message in ping ?
+            // TODO: unwrap?
+            peer.lock().unwrap().ping();
+        })
+        .map_err(move |err| {
+            eprintln!("Client : Ping failed for : `{}`", addr);
+            Error::from(err)
+        })
+        .or_else(move |_| {
+            // TODO: diagnose and reconnect if necessary...
+            println!("Client : Triggering reconnection for `{}`...", addr);
+
+            // TODO: different way to reconnect ?
+            // TODO: unwrap?
+            peer2.lock().unwrap().disconnect();
+
+            Ok(())
+        })
 }

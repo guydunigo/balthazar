@@ -54,7 +54,7 @@ fn for_each_message_connecting(
                         // TODO: close socket
                         unimplemented!();
                     },
-                    Message::Vote(peer_vote) => {
+                    Message::Vote(_peer_vote) => {
                         let peer = peer.lock().unwrap();
 
                         if peer.listener_connecting {
@@ -148,6 +148,7 @@ fn for_each_message_connecting(
 }
 
 fn connect_to_peer(
+    peer_opt: PeerArcMutOpt,
     local_pid: Pid,
     peer_addr: SocketAddr,
     peers: PeersMapArcMut,
@@ -160,15 +161,13 @@ fn connect_to_peer(
 
             println!("Client : starting connection for `{}`.", peer_addr);
 
-            let peer = Arc::new(Mutex::new(None));
-
             let manager = framed_sock
                 .map_err(Error::from)
                 .for_each(move |msg| {
                     for_each_message_connecting(
                         local_pid,
                         peers.clone(),
-                        peer.clone(),
+                        peer_opt.clone(),
                         peer_addr,
                         socket.try_clone().unwrap(),
                         &msg,
@@ -189,87 +188,56 @@ fn connect_to_peer(
         })
 }
 
-// TODO: Ping if there is already an unanswered Ping ? (in this case, override the Ping time ?)
-fn ping_peer(peer: PeerArcMut) -> impl Future<Item = (), Error = Error> {
-    let peer2 = peer.clone();
-
-    let (addr, socket) = {
-        let peer = peer.lock().unwrap();
-        // TODO: check if connected ?
-        let socket = if let PeerState::Connected(socket) = &peer.state {
-            // TODO: unwrap?
-            socket.try_clone().unwrap()
-        } else {
-            panic!("Client : `peer.state` is not `Connected(socket)`, can't Ping !");
-        };
-
-        (peer.addr, socket)
-    };
-
-    send_message(socket, Message::Ping)
-        // TODO: is this map useful ?
-        .map(move |_| {
-            // TODO: send_message in ping ?
-            // TODO: unwrap?
-            peer.lock().unwrap().ping();
-        })
-        .map_err(move |err| {
-            eprintln!("Client : Ping failed for : `{}`", addr);
-            Error::from(err)
-        })
-        .or_else(move |_| {
-            // TODO: diagnose and reconnect if necessary...
-            println!("Client : Triggering reconnection for `{}`...", addr);
-
-            // TODO: different way to reconnect ?
-            // TODO: unwrap?
-            peer2.lock().unwrap().disconnect();
-
-            Ok(())
-        })
-}
-
-pub fn connect(
+pub fn try_connecting_at_interval(
     local_pid: Pid,
     peer_addr: SocketAddr,
     peers: PeersMapArcMut,
 ) -> impl Future<Item = (), Error = ()> {
-    connect_to_peer(local_pid, peer_addr, peers).map_err(|_| ())
-    /*
-    let peer = Arc::new(Mutex::new(Peer::new(addr)));
-    
+    let peer_opt: PeerArcMutOpt = Arc::new(Mutex::new(None));
+
     Interval::new(Instant::now(), Duration::from_secs(CONNECTION_INTERVAL))
         .inspect_err(|err| eprintln!("Client : Interval error: {:?}", err))
         .map_err(Error::from)
         .and_then(move |_| -> Box<Future<Item = (), Error = Error> + Send> {
-            // TODO: unwrap?
-            let state = peer.lock().unwrap().state;
-    
-            match state {
-                PeerState::Connected => {
-                    // TODO: can also use some "last time a message was sent..." to test if necessary, ...
-                    // TODO: If a ping is pending, prevent sending another one ?
-                    let future = ping_peer(peer.clone());
-                    Box::new(future)
+            let do_connect = if let Some(ref peer) = *peer_opt.lock().unwrap() {
+                if let PeerState::NotConnected = peer.lock().unwrap().state {
+                    println!(
+                        "Client : {} : `peer.state` is `NotConnected`, connecting...",
+                        peer_addr
+                    );
+                    true
+                } else {
+                    println!(
+                        "Client : {} : `peer.state` is not `NotConnected`, cancelling connection. Retrying in {} seconds...",
+                        peer_addr,
+                        CONNECTION_INTERVAL
+                    );
+                    false
                 }
-                PeerState::NotConnected => {
-                    let future = connect_to_peer(pid, peer.clone(), peers.clone())
-                        .map_err(move |err| {
+            } else {
+                println!(
+                    "Client : {} : `peer_opt` is `None`, connecting...",
+                    peer_addr
+                );
+                true
+            };
+
+            if do_connect {
+                Box::new(
+                    connect_to_peer(peer_opt.clone(), local_pid, peer_addr, peers.clone()).or_else(
+                        move |err| {
                             eprintln!(
-                                "Client : Error connecting to `{}` : `{:?}`, retrying in {} seconds...",
-                                addr, err, CONNECTION_INTERVAL
+                                "Client : {} : Error while connecting : `{:?}`. Retrying in {} seconds...",
+                                peer_addr, err, CONNECTION_INTERVAL
                             );
-                            Error::from(err)
-                        })
-                        // Discarding errors to avoid fusing the Stream:
-                        .or_else(|_| Ok(()));
-                    Box::new(future)
-                }
-                // TODO: What if peer is stuck in connecting ?
-                PeerState::Connecting(_) => Box::new(future::ok(())),
+                            Ok(())
+                        }
+                    )
+                )
+            } else {
+                Box::new(future::ok(()))
             }
         })
         .for_each(|_| Ok(()))
         .map_err(|_| ())
-        */
 }

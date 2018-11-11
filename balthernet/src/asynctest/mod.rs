@@ -43,7 +43,7 @@ pub fn swim(local_addr: SocketAddr) -> Result<(), Error> {
         })
         .filter(|addr| *addr != local_addr)
         .for_each(|addr| {
-            let client_future = client::connect(local_pid, addr, peers.clone());
+            let client_future = client::try_connecting_at_interval(local_pid, addr, peers.clone());
             runtime.spawn(client_future);
         });
 
