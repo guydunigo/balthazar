@@ -22,7 +22,7 @@ fn vote(peer: &mut Peer, socket: TcpStream) {
 }
 
 fn for_each_message_connecting(
-    _local_pid: Pid,
+    local_pid: Pid,
     peers: PeersMapArcMut,
     peer_opt: PeerArcMutOpt,
     peer_addr: SocketAddr,
@@ -35,17 +35,17 @@ fn for_each_message_connecting(
         println!("Client : {} : `peer_opt` is `Some()`.", peer_addr);
 
         // TODO: keep lock ?
-        let state = peer.lock().unwrap().state;
+        let state = peer.lock().unwrap().state.clone();
         println!("Client : {} : `peer.state` is `{:?}`.", peer_addr, state);
 
         match state {
             PeerState::Connecting(_) => {
                 match msg {
                     Message::ConnectAck => {
-                        let mut peer = peer.lock().unwrap();
+                        let mut peer_locked = peer.lock().unwrap();
 
-                        if !peer.listener_connecting {
-                            peer.client_connection_acked(socket);
+                        if !peer_locked.listener_connecting {
+                            peer_locked.client_connection_acked(peer.clone(), socket);
                         } else {
                             unimplemented!();
                         }
@@ -68,7 +68,7 @@ fn for_each_message_connecting(
                     _ => eprintln!("Client : {} : received a message but it was not `ConnectAck`, `ConnectCancel` or `Vote(vote)`.", peer_addr),
                 }
             }
-            PeerState::Connected => {
+            PeerState::Connected(_) => {
                 println!(
                     "Client : {} : `peer.state` is `Connected`, stopping connecting loop.",
                     peer_addr
@@ -110,7 +110,7 @@ fn for_each_message_connecting(
                             peer.set_pid(*peer_pid);
                             vote(&mut peer, socket);
                         }
-                        PeerState::Connected => {
+                        PeerState::Connected(_) => {
                             peer.client_connection_cancel();
                             // End the message listening loop :
                             return Err(Error::ConnectionCancelled);
@@ -127,15 +127,15 @@ fn for_each_message_connecting(
                         }
                     }
                 } else {
-                    let mut peers = peers.lock().unwrap();
+                    let mut peers_locked = peers.lock().unwrap();
                     println!("Client : {} : Peer is not in peers.", peer_addr);
 
-                    let mut peer = Peer::new(*peer_pid, peer_addr);
+                    let mut peer = Peer::new(local_pid, *peer_pid, peer_addr, peers.clone());
                     vote(&mut peer, socket);
 
                     let peer = Arc::new(Mutex::new(peer));
                     *peer_opt = Some(peer.clone());
-                    peers.insert(*peer_pid, peer);
+                    peers_locked.insert(*peer_pid, peer);
                 }
             }
             _ => eprintln!(
@@ -196,11 +196,11 @@ fn ping_peer(peer: PeerArcMut) -> impl Future<Item = (), Error = Error> {
     let (addr, socket) = {
         let peer = peer.lock().unwrap();
         // TODO: check if connected ?
-        let socket = if let Some(socket) = &peer.socket {
+        let socket = if let PeerState::Connected(socket) = &peer.state {
             // TODO: unwrap?
             socket.try_clone().unwrap()
         } else {
-            panic!("Client : Peer has no Socket, can't Ping !");
+            panic!("Client : `peer.state` is not `Connected(socket)`, can't Ping !");
         };
 
         (peer.addr, socket)

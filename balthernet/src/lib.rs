@@ -35,7 +35,6 @@ pub enum Error {
     TokioTimerError(tokio::timer::Error),
     ConnectionEnded,
     ConnectionCancelled,
-    PidMissing,
 }
 
 impl From<message::Error> for Error {

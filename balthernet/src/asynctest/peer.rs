@@ -9,7 +9,6 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use super::{Error, MessageCodec};
-use balthmessage as message;
 use balthmessage::Message;
 
 pub type Pid = u32;
@@ -93,22 +92,38 @@ impl PingStatus {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 pub enum PeerState {
     // TODO: ping uses this values?
     NotConnected,
     Connecting(ConnVote),
     // TODO: Connected(TcpStream)
-    Connected,
+    Connected(TcpStream),
+}
+
+impl Clone for PeerState {
+    fn clone(&self) -> Self {
+        use self::PeerState::*;
+        match self {
+            NotConnected => NotConnected,
+            Connecting(connvote) => Connecting(*connvote),
+            Connected(stream) => Connected(
+                stream
+                    .try_clone()
+                    .expect("Could not clone stream when cloning PeerState"),
+            ),
+        }
+    }
 }
 
 #[derive(Debug)]
 pub struct Peer {
     // TODO: no `pub` ?
     // pid as option ?
-    pid: Option<Pid>,
+    peer_pid: Pid,
+    local_pid: Pid,
+    peers: PeersMapArcMut,
     pub addr: SocketAddr,
-    pub socket: Option<TcpStream>,
     pub ping_status: PingStatus,
     // TODO: remove this todo if connection is done
     pub state: PeerState,
@@ -120,12 +135,13 @@ pub struct Peer {
 
 impl Peer {
     // TODO: Use pid in constuctor
-    pub fn new(peer_pid: Pid, addr: SocketAddr) -> Self {
+    pub fn new(local_pid: Pid, peer_pid: Pid, addr: SocketAddr, peers: PeersMapArcMut) -> Self {
         Peer {
             // TODO: do something with pid...
-            pid: Some(peer_pid),
+            peer_pid,
+            local_pid,
             addr,
-            socket: None,
+            peers,
             ping_status: PingStatus::new(),
             // TODO: remove this todo if connection is done
             state: PeerState::NotConnected,
@@ -135,7 +151,7 @@ impl Peer {
     }
 
     pub fn is_connected(&self) -> bool {
-        if let PeerState::Connected = self.state {
+        if let PeerState::Connected(_) = self.state {
             true
         } else {
             false
@@ -153,6 +169,7 @@ impl Peer {
     pub fn pong(&mut self) {
         self.ping_status.pong()
     }
+
     pub fn to_connecting(&mut self) -> ConnVote {
         let local_vote = vote();
         self.state = PeerState::Connecting(local_vote);
@@ -170,46 +187,40 @@ impl Peer {
     }
 
     // TODO: return Result ?
-    pub fn connected(&mut self, socket: TcpStream) -> Result<(), Error> {
-        if let Some(pid) = self.pid {
-            // TODO: other checks ?
-            self.listener_connecting = false;
-            self.client_connecting = false;
-            self.state = PeerState::Connected;
-            self.socket = Some(socket);
+    /// **Important** : peer must be a reference to self.
+    pub fn connected(&mut self, peer: PeerArcMut, socket: TcpStream) -> Result<(), Error> {
+        // TODO: other checks ?
+        self.listener_connecting = false;
+        self.client_connecting = false;
+        self.state = PeerState::Connected(socket);
 
-            // TODO: make sure this is the last ref to socket?
-            // TODO: start listening thread...
-            println!("Connected to : `{}`", pid);
+        // TODO: make sure this is the last ref to socket?
+        // TODO: start listening thread...
+        println!("Connected to : `{}`", self.peer_pid);
 
-            Ok(())
-        } else {
-            Err(Error::PidMissing)
-        }
+        self.manage(peer);
+
+        Ok(())
     }
 
     // TODO: too close names ? `{listener,client}_connection` ?
-    pub fn client_connection_acked(&mut self, socket: TcpStream) {
-        match self.connected(socket) {
+    /// **Important** : peer must be a reference to self.
+    pub fn client_connection_acked(&mut self, peer: PeerArcMut, socket: TcpStream) {
+        match self.connected(peer, socket) {
             Ok(()) => (),
-            Err(Error::PidMissing) => {
-                eprintln!("Received `Message::ConnectAck` but pid is missing.")
-            }
             _ => unimplemented!(),
         }
     }
 
-    pub fn listener_connection_ack(&mut self, socket: TcpStream) {
-        match self.connected(socket) {
+    pub fn listener_connection_ack(&mut self, peer: PeerArcMut, socket: TcpStream) {
+        match self.connected(peer, socket) {
             Ok(()) => (),
-            Err(Error::PidMissing) => {
-                eprintln!("Can't send `Message::ConnectAck` : pid is missing.")
-            }
             _ => unimplemented!(),
         }
         self.send_and_spawn(Message::ConnectAck);
     }
 
+    // TODO: use that?
     pub fn client_connection_cancelled(&mut self) {
         self.client_connecting = false;
 
@@ -237,7 +248,6 @@ impl Peer {
     }
 
     pub fn disconnect(&mut self) {
-        self.socket = None;
         self.ping_status = PingStatus::NoPingYet;
         self.state = PeerState::NotConnected;
         // TODO: disconnect message ?
@@ -245,14 +255,17 @@ impl Peer {
 
     // TODO: return Result ?
     pub fn set_pid(&mut self, pid: Pid) {
-        if let Some(present_pid) = self.pid {
+        unimplemented!();
+        /*
+        if let Some(present_pid) = self.peer_pid {
             eprintln!(
                 "Attempting to write pid `{}`, but pid is already set `{}`.",
                 pid, present_pid
             );
         } else {
-            self.pid = Some(pid);
+            self.peer_pid = Some(pid);
         }
+        */
     }
 
     /// Don't forget to spawn that...
@@ -260,11 +273,14 @@ impl Peer {
         &mut self,
         msg: Message,
     ) -> impl Future<Item = Framed<TcpStream, MessageCodec>, Error = Error> {
-        if let Some(socket) = &self.socket {
+        if let PeerState::Connected(socket) = &self.state {
             // TODO: unwrap?
             send_message(socket.try_clone().unwrap(), msg)
         } else {
-            panic!("Can't send `{:?}`, no socket present!", msg);
+            panic!(
+                "Can't send `{:?}`, `peer.state` not in `Connected(socket)` !",
+                msg
+            );
         }
     }
 
@@ -272,23 +288,43 @@ impl Peer {
         let future = self.send(msg).map(|_| ()).map_err(|_| ());
         tokio::spawn(future);
     }
+
+    /// **Important** : peer must be a reference to self.
+    pub fn manage(&mut self, peer: PeerArcMut) {
+        if let PeerState::Connected(socket) = self.state.clone() {
+            let framed_sock = Framed::new(socket, MessageCodec::new());
+            let peer_addr = self.addr;
+
+            let manage_future = framed_sock
+                .map_err(Error::from)
+                .for_each(move |msg| for_each_message(peer.clone(), &msg))
+                .map_err(move |err| match err {
+                    // TODO: println anyway ?
+                    Error::ConnectionCancelled | Error::ConnectionEnded => (),
+                    _ => eprintln!(
+                        "Client : {} : error when receiving a message : {:?}.",
+                        peer_addr, err
+                    ),
+                });
+
+            tokio::spawn(manage_future);
+        }
+    }
 }
 
-pub fn for_each_message_connected(
-    addr: SocketAddr,
-    peer: PeerArcMut,
-    msg: &Message,
-) -> Result<(), message::Error> {
+fn for_each_message(peer: PeerArcMut, msg: &Message) -> Result<(), Error> {
+    // TODO: lock for the whole function ?
+    let mut peer = peer.lock().unwrap();
+
     match msg {
         Message::Ping => {
             // TODO: unwrap?
             let socket = {
-                let peer = peer.lock().unwrap();
-                let socket = if let Some(socket) = &peer.socket {
+                let socket = if let PeerState::Connected(socket) = &peer.state {
                     // TODO: unwrap?
                     socket.try_clone().unwrap()
                 } else {
-                    panic!("Inconsistent Peer object : a message was received, but `peer.socket` is `None` (and `peer.state` is `PeerState::Connected`).");
+                    panic!("Inconsistent Peer object : a message was received, but `peer.state` is not `Connected(socket)`.");
                 };
 
                 socket
@@ -298,10 +334,13 @@ pub fn for_each_message_connected(
         }
         Message::Pong => {
             // TODO: unwrap?
-            peer.lock().unwrap().pong();
+            peer.pong();
             // println!("{} : received Pong ! It is alive !!!", addr);
         }
-        _ => println!("{} : received a message (but won't do anything ;) !", addr),
+        _ => println!(
+            "{} : received a message (but won't do anything ;) !",
+            peer.addr
+        ),
     }
 
     Ok(())
