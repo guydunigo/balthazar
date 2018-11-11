@@ -76,10 +76,15 @@ fn for_each_message_connecting(
                 // End the message listening loop :
                 return Err(Error::ConnectionEnded);
             }
-            _ => panic!(
-                "Client : {} : `peer.state` shouldn't be `{:?}` when `peer_opt` is `Some(peer)`.",
-                peer_addr, state
-            ),
+            PeerState::NotConnected => {
+                let mut peer_locked = peer.lock().unwrap();
+                vote(&mut peer_locked, socket);
+            } /*
+              _ => panic!(
+                  "Client : {} : `peer.state` shouldn't be `{:?}` when `peer_opt` is `Some(peer)`.",
+                  peer_addr, state
+              ),
+              */
         }
     } else {
         println!("Client : {} : `peer_opt` is `None`.", peer_addr);
@@ -201,24 +206,30 @@ pub fn try_connecting_at_interval(
         .and_then(move |_| -> Box<Future<Item = (), Error = Error> + Send> {
             let do_connect = if let Some(ref peer) = *peer_opt.lock().unwrap() {
                 if let PeerState::NotConnected = peer.lock().unwrap().state {
+                    /*
                     println!(
                         "Client : {} : `peer.state` is `NotConnected`, connecting...",
                         peer_addr
                     );
+                    */
                     true
                 } else {
+                    /*
                     println!(
                         "Client : {} : `peer.state` is not `NotConnected`, cancelling connection. Retrying in {} seconds...",
                         peer_addr,
                         CONNECTION_INTERVAL
                     );
+                    */
                     false
                 }
             } else {
+                /*
                 println!(
                     "Client : {} : `peer_opt` is `None`, connecting...",
                     peer_addr
                 );
+                */
                 true
             };
 

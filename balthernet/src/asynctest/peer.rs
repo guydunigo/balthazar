@@ -2,7 +2,7 @@ use rand::random;
 use tokio::codec::Framed;
 use tokio::net::TcpStream;
 use tokio::prelude::*;
-use tokio::timer::Delay;
+use tokio::timer::Interval;
 
 use std::collections::HashMap;
 use std::net::{Shutdown, SocketAddr};
@@ -20,6 +20,9 @@ pub type ConnVote = u32;
 pub type PeerArcMut = Arc<Mutex<Peer>>;
 pub type PeersMapArcMut = Arc<Mutex<HashMap<Pid, PeerArcMut>>>;
 pub type PeerArcMutOpt = Arc<Mutex<Option<PeerArcMut>>>;
+
+/// Interval between ping messages in seconds
+const PING_INTERVAL: u64 = 3;
 
 fn vote() -> ConnVote {
     random()
@@ -64,7 +67,7 @@ pub fn cancel_connection(socket: TcpStream) {
     tokio::spawn(future);
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum PingStatus {
     PingSent(Instant),
     PongReceived(Instant),
@@ -84,6 +87,7 @@ impl PingStatus {
         }
     }
 
+    // TODO: send_message in ping ?
     pub fn ping(&mut self) {
         *self = PingStatus::PingSent(Instant::now());
     }
@@ -290,6 +294,7 @@ impl Peer {
     }
 
     /// **Important** : peer must be a reference to self.
+    /// // TODO: check for that ?
     pub fn manage(&mut self, peer: PeerArcMut) {
         if let PeerState::Connected(socket) = self.state.clone() {
             let framed_sock = Framed::new(socket, MessageCodec::new());
@@ -303,7 +308,7 @@ impl Peer {
                     // TODO: println anyway ?
                     Error::ConnectionCancelled | Error::ConnectionEnded => (),
                     _ => eprintln!(
-                        "Client : {} : error when receiving a message : {:?}.",
+                        "Manager : {} : error when receiving a message : {:?}.",
                         peer_addr, err
                     ),
                 });
@@ -312,18 +317,16 @@ impl Peer {
 
             self.send_and_spawn(Message::ConnectAck);
 
-            let delay_future = Delay::new(Instant::now() + Duration::from_secs(3))
-                .and_then(move |_| {
-                    peer_clone
-                        .lock()
-                        .unwrap()
-                        .send_and_spawn(Message::Hello("Hi, this is me !".to_string()));
-                    Ok(())
+            let ping_future = Interval::new_interval(Duration::from_secs(PING_INTERVAL))
+                .inspect_err(move |err| {
+                    eprintln!("Manager : {} : Ping error : {:?}", peer_addr, err)
                 })
-                .map(|_| ())
+                .map_err(Error::from)
+                .and_then(move |_| ping_peer(peer_clone.clone()))
+                .for_each(|_| Ok(()))
                 .map_err(|_| ());
 
-            tokio::spawn(delay_future);
+            tokio::spawn(ping_future);
         }
     }
 }
@@ -340,21 +343,20 @@ fn for_each_message(peer: PeerArcMut, msg: &Message) -> Result<(), Error> {
                     // TODO: unwrap?
                     socket.try_clone().unwrap()
                 } else {
-                    panic!("Inconsistent Peer object : a message was received, but `peer.state` is not `Connected(socket)`.");
+                    panic!("Manager : {} : Inconsistent Peer object : a message was received, but `peer.state` is not `Connected(socket)`.", peer.addr);
                 };
 
                 socket
             };
 
-            send_message_and_spawn(socket, Message::Ping);
+            send_message_and_spawn(socket, Message::Pong);
         }
         Message::Pong => {
-            // TODO: unwrap?
             peer.pong();
-            // println!("{} : received Pong ! It is alive !!!", addr);
+            // println!("Manager : {} : received Pong ! It is alive !!!", peer.addr);
         }
         _ => println!(
-            "{} : received a message (but won't do anything ;) !",
+            "Manager : {} : received a message (but won't do anything ;) !",
             peer.addr
         ),
     }
@@ -365,40 +367,32 @@ fn for_each_message(peer: PeerArcMut, msg: &Message) -> Result<(), Error> {
 // TODO: Ping if there is already an unanswered Ping ? (in this case, override the Ping time ?)
 // TODO: can also use some "last time a message was sent..." to test if necessary, ...
 fn ping_peer(peer: PeerArcMut) -> impl Future<Item = (), Error = Error> {
-    let peer2 = peer.clone();
+    // TODO: unwrap?
+    let mut peer_locked = peer.lock().unwrap();
 
-    let (addr, socket) = {
-        let peer = peer.lock().unwrap();
-        // TODO: check if connected ?
-        let socket = if let PeerState::Connected(socket) = &peer.state {
-            // TODO: unwrap?
-            socket.try_clone().unwrap()
-        } else {
-            panic!("Client : `peer.state` is not `Connected(socket)`, can't Ping !");
-        };
+    let peer_addr = peer_locked.addr;
+    let peer_clone = peer.clone();
+    let peer_clone_2 = peer.clone();
 
-        (peer.addr, socket)
-    };
-
-    send_message(socket, Message::Ping)
+    peer_locked
+        .send(Message::Ping)
         // TODO: is this map useful ?
         .map(move |_| {
-            // TODO: send_message in ping ?
             // TODO: unwrap?
-            peer.lock().unwrap().ping();
+            peer_clone.lock().unwrap().ping();
         })
-        .map_err(move |err| {
-            eprintln!("Client : Ping failed for : `{}`", addr);
-            Error::from(err)
-        })
+        .map_err(Error::from)
         .or_else(move |_| {
             // TODO: diagnose and reconnect if necessary...
-            println!("Client : Triggering reconnection for `{}`...", addr);
+            println!(
+                "Manager : {} : Ping : Failed, triggering reconnection...",
+                peer_addr
+            );
 
             // TODO: different way to reconnect ?
             // TODO: unwrap?
-            peer2.lock().unwrap().disconnect();
+            peer_clone_2.lock().unwrap().disconnect();
 
-            Ok(())
+            Err(Error::PingSendError)
         })
 }
