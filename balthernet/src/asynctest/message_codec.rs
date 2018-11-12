@@ -54,9 +54,10 @@ impl Decoder for MessageCodec {
                     Message::Task(job_id, task_id, _) => {
                         println!("-- Received : Task #{} for Job #{}.", task_id, job_id)
                     }
-                    Message::ReturnValue(job_id, task_id, _) => {
-                        println!("-- Received | result for Task #{} for Job #{}.", task_id, job_id)
-                    }
+                    Message::ReturnValue(job_id, task_id, _) => println!(
+                        "-- Received | result for Task #{} for Job #{}.",
+                        task_id, job_id
+                    ),
                     Message::Ping | Message::Pong => (),
                     _ => println!("-- Received : `{:?}`.", msg),
                 }

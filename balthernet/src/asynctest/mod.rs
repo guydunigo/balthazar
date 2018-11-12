@@ -24,7 +24,7 @@ pub fn swim(local_addr: SocketAddr) -> Result<(), Error> {
 
     // TODO: actual pid
     // create pid:
-    let local_pid: Pid = random();
+    let local_pid: Pid = local_addr.port() as Pid;
     println!("Using pid : {}", local_pid);
 
     let mut runtime = Runtime::new()?;

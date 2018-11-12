@@ -73,6 +73,13 @@ fn for_each_message_connecting(
                 return Err(Error::ConnectionEnded);
             }
             PeerState::NotConnected => {
+                if let Message::ConnectReceived(peer_pid) = msg {
+                    if peer_locked.peer_pid() != *peer_pid {
+                        eprintln!("Client : {} : Received a `peer_id` that differs from the already known `peer.peer_pid` : `peer_id=={}`, `peer.peer_id=={}`.", peer_locked.addr, peer_pid, peer_locked.peer_pid());
+                        // TODO: return error and cancel connection or create new peer ?
+                    }
+                }
+
                 vote(&mut peer_locked, socket);
             } /*
               _ => panic!(
@@ -152,11 +159,12 @@ fn connect_to_peer(
 ) -> impl Future<Item = (), Error = Error> {
     TcpStream::connect(&peer_addr)
         .map_err(Error::from)
-        .and_then(move |socket| send_message(socket, Message::Connect(local_pid)))
+        .and_then(move |socket| {
+            println!("Client : {} : starting connection...", peer_addr);
+            send_message(socket, Message::Connect(local_pid))
+        })
         .and_then(move |framed_sock| {
             let socket = framed_sock.get_ref().try_clone().unwrap();
-
-            println!("Client : starting connection for `{}`.", peer_addr);
 
             let manager = framed_sock
                 .map_err(Error::from)
