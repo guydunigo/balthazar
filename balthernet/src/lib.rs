@@ -6,6 +6,7 @@ extern crate tokio;
 extern crate bytes;
 extern crate futures;
 extern crate rand;
+extern crate secp256k1;
 
 extern crate balthmessage as message;
 

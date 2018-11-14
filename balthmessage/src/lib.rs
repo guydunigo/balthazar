@@ -18,6 +18,10 @@ use std::iter::FusedIterator;
 
 use job::task::arguments::Arguments;
 
+// TODO: unify with balthernet
+type Pid=u32;
+type ConnVote=u32;
+
 // TODO: As parameters...
 const MESSAGE_SIZE_LIMIT: usize = 2 << 20;
 // TODO: Is there a window between JOB_SIZE_LIMIT converted and MESSAGE_SIZE_LIMIT?
@@ -57,14 +61,14 @@ impl From<de::Error> for Error {
 // ------------------------------------------------------------------
 // Message
 
-#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Hash)]
 pub enum Message {
     Hello(String),
     // TODO: use `type Pid` and `type ConnVote`
-    Connect(u32),
+    Connect(Pid),
     // TODO: rename ?
-    ConnectReceived(u32),
-    Vote(u32),
+    ConnectReceived(Pid),
+    Vote(ConnVote),
     ConnectAck,
     ConnectCancel,
     Connected(usize),

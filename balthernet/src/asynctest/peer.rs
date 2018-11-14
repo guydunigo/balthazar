@@ -3,6 +3,7 @@ use tokio::codec::Framed;
 use tokio::net::TcpStream;
 use tokio::prelude::*;
 use tokio::timer::Interval;
+use futures::sync::mpsc;
 
 use std::collections::HashMap;
 use std::net::{Shutdown, SocketAddr};
@@ -10,6 +11,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use super::{Error, MessageCodec};
+use super::shoal::*;
 use balthmessage::Message;
 
 pub type Pid = u32;
@@ -19,6 +21,8 @@ pub type ConnVote = u32;
 pub type PeerArcMut = Arc<Mutex<Peer>>;
 pub type PeersMapArcMut = Arc<Mutex<HashMap<Pid, PeerArcMut>>>;
 pub type PeerArcMutOpt = Arc<Mutex<Option<PeerArcMut>>>;
+pub type MessageTxMpsc = mpsc::Sender<Message>;
+pub type MessageRxMpsc = mpsc::Receiver<Message>;
 
 /// Interval between ping messages in seconds
 const PING_INTERVAL: u64 = 3;
@@ -32,7 +36,6 @@ pub fn send_message(
     socket: TcpStream,
     msg: Message,
 ) -> impl Future<Item = Framed<TcpStream, MessageCodec>, Error = Error> {
-    // TODO: unwrap?
     let framed_sock = Framed::new(socket, MessageCodec::new());
 
     framed_sock.send(msg.clone()).map_err(move |err| {
@@ -100,10 +103,8 @@ impl PingStatus {
 
 #[derive(Debug)]
 pub enum PeerState {
-    // TODO: ping uses these values?
     NotConnected,
     Connecting(ConnVote),
-    // TODO: Connected(TcpStream)
     Connected(TcpStream),
 }
 
@@ -125,9 +126,9 @@ impl Clone for PeerState {
 #[derive(Debug)]
 pub struct Peer {
     // TODO: no `pub` ?
-    peer_pid: Pid,
-    local_pid: Pid,
-    peers: PeersMapArcMut,
+    pid: Pid,
+    // TODO: method to automatically upgrade, lock read, unwrap, ... ?
+    shoal: ShoalWeakRwLock,
     pub addr: SocketAddr,
     pub ping_status: PingStatus,
     pub state: PeerState,
@@ -138,12 +139,11 @@ pub struct Peer {
 }
 
 impl Peer {
-    pub fn new(local_pid: Pid, peer_pid: Pid, addr: SocketAddr, peers: PeersMapArcMut) -> Self {
+    pub fn new(shoal: ShoalArcRwLock, peer_pid: Pid, addr: SocketAddr) -> Self {
         Peer {
-            peer_pid,
-            local_pid,
+            pid: peer_pid,
+            shoal: Arc::downgrade(&shoal),
             addr,
-            peers,
             ping_status: PingStatus::new(),
             state: PeerState::NotConnected,
             client_connecting: false,
@@ -171,8 +171,8 @@ impl Peer {
         self.ping_status.is_ping_sent()
     }
 
-    pub fn peer_pid(&self) -> Pid {
-        self.peer_pid
+    pub fn pid(&self) -> Pid {
+        self.pid
     }
 
     pub fn ping(&mut self) {
@@ -209,7 +209,7 @@ impl Peer {
 
         println!(
             "Manager : {} : Connected to : `{}`",
-            self.addr, self.peer_pid
+            self.addr, self.pid
         );
 
         self.manage(peer);
@@ -217,7 +217,6 @@ impl Peer {
         Ok(())
     }
 
-    // TODO: too close names ? `{listener,client}_connection` ?
     /// **Important** : peer must be a reference to self.
     pub fn client_connection_acked(&mut self, peer: PeerArcMut, socket: TcpStream) {
         match self.connected(peer, socket) {
@@ -262,6 +261,7 @@ impl Peer {
     }
 
     /// Don't forget to spawn that...
+    // TODO: if send msg error, set to not connected ?
     pub fn send(
         &mut self,
         msg: Message,
@@ -325,11 +325,11 @@ impl Peer {
 }
 
 fn for_each_message(peer: PeerArcMut, msg: &Message) -> Result<(), Error> {
+    // TODO: unwrap?
     let mut peer = peer.lock().unwrap();
 
     match msg {
         Message::Ping => {
-            // TODO: unwrap?
             let socket = {
                 let socket = if let PeerState::Connected(socket) = &peer.state {
                     // TODO: unwrap?

@@ -5,8 +5,9 @@ use tokio::prelude::*;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
-// TODO: local Error
 use super::peer::*;
+use super::shoal::*;
+// TODO: local Error
 use super::Error;
 use balthmessage::Message;
 
@@ -17,11 +18,11 @@ fn handle_vote(
     peer: PeerArcMut,
     local_vote: ConnVote,
     peer_vote: ConnVote,
-) {
+) -> Result<(), Error> {
     if local_vote < peer_vote {
         println!("Listener : Vote : peer won, cancelling connection...");
         peer_locked.listener_connection_cancel(socket);
-    // TODO: stop the loop...
+        return Err(Error::ConnectionCancelled);
     } else if local_vote > peer_vote {
         println!("Listener : Vote : peer lost, validating connection...");
         peer_locked.listener_connection_ack(peer, socket);
@@ -30,17 +31,18 @@ fn handle_vote(
         let new_local_vote = peer_locked.listener_to_connecting();
         peer_locked.send_and_spawn(Message::Vote(new_local_vote));
     }
+
+    Ok(())
 }
 
-// TODO: rename everything everywhere with {peer,local}_{pid,vote,...}
 fn for_each_message_connecting(
-    local_pid: Pid,
-    peers: PeersMapArcMut,
+    shoal: ShoalArcRwLock,
     peer_opt: PeerArcMutOpt,
     peer_addr: SocketAddr,
     socket: TcpStream,
     msg: &Message,
 ) -> Result<(), Error> {
+    let shoal_read = shoal.read().unwrap();
     let mut peer_opt = peer_opt.lock().unwrap();
     if let Some(ref peer) = *peer_opt {
         // println!("Listener : `peer_opt` is `Some()`.");
@@ -58,7 +60,7 @@ fn for_each_message_connecting(
                             peer.clone(),
                             local_vote,
                             *peer_vote,
-                        ),
+                        )?,
                         _ => {
                             eprintln!("Listener : received a message but it was not `Vote(vote)`.")
                         }
@@ -83,7 +85,7 @@ fn for_each_message_connecting(
         // println!("Listener : `peer_opt` is `None`.");
         match msg {
             Message::Connect(peer_pid) => {
-                let mut peers_locked = peers.lock().unwrap();
+                let mut peers_locked = shoal_read.peers.lock().unwrap();
 
                 if let Some(peer_from_peers) = peers_locked.get(&peer_pid) {
                     // println!("Listener : {} : Peer is in peers.", peer_addr);
@@ -94,8 +96,8 @@ fn for_each_message_connecting(
                     // println!("Listener : `peer.state` is `{:?}`.", peer.state);
                     match peer.state {
                         PeerState::NotConnected => {
-                            if peer.peer_pid() != *peer_pid {
-                                eprintln!("Client : {} : Received a `peer_id` that differs from the already known `peer.peer_pid` : `peer_id=={}`, `peer.peer_id=={}`.", peer.addr, peer_pid, peer.peer_pid());
+                            if peer.pid() != *peer_pid {
+                                eprintln!("Client : {} : Received a `peer_id` that differs from the already known `peer.pid` : `peer_id=={}`, `peer.peer_id=={}`.", peer.addr, peer_pid, peer.pid());
                                 // TODO: return error and cancel connection ?
                             }
 
@@ -122,7 +124,7 @@ fn for_each_message_connecting(
                 } else {
                     // println!("Client : {} : Peer is not in peers.", peer_addr);
 
-                    let peer = Peer::new(local_pid, *peer_pid, peer_addr, peers.clone());
+                    let peer = Peer::new(shoal.clone(), *peer_pid, peer_addr);
                     let peer_arc_mut = Arc::new(Mutex::new(peer));
                     let mut peer = peer_arc_mut.lock().unwrap();
 
@@ -143,14 +145,16 @@ pub fn bind(local_addr: &SocketAddr) -> Result<TcpListener, io::Error> {
 }
 
 pub fn listen(
-    local_pid: Pid,
-    peers: PeersMapArcMut,
+    shoal: ShoalArcRwLock,
     listener: TcpListener,
 ) -> impl Future<Item = (), Error = ()> {
     listener
         .incoming()
         .for_each(move |socket| {
-            let peers = peers.clone();
+            let shoal_read = shoal.read().unwrap();
+            let local_pid = shoal_read.local_pid;
+
+            let shoal = shoal.clone();
             let peer_addr = socket.peer_addr()?;
             println!("Listener : Asked for connection : `{}`", peer_addr);
 
@@ -163,8 +167,7 @@ pub fn listen(
                             .map_err(Error::from)
                             .for_each(move |msg| {
                                 for_each_message_connecting(
-                                    local_pid,
-                                    peers.clone(),
+                                    shoal.clone(),
                                     peer.clone(),
                                     peer_addr,
                                     // TODO: unwrap?

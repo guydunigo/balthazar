@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 
 // TODO: local Error
 use super::peer::*;
+use super::shoal::*;
 use super::Error;
 
 /// Interval between connections tries in seconds
@@ -22,8 +23,7 @@ fn vote(peer: &mut Peer, socket: TcpStream) {
 }
 
 fn for_each_message_connecting(
-    local_pid: Pid,
-    peers: PeersMapArcMut,
+    shoal: ShoalArcRwLock,
     peer_opt: PeerArcMutOpt,
     peer_addr: SocketAddr,
     socket: TcpStream,
@@ -74,8 +74,8 @@ fn for_each_message_connecting(
             }
             PeerState::NotConnected => {
                 if let Message::ConnectReceived(peer_pid) = msg {
-                    if peer_locked.peer_pid() != *peer_pid {
-                        eprintln!("Client : {} : Received a `peer_id` that differs from the already known `peer.peer_pid` : `peer_id=={}`, `peer.peer_id=={}`.", peer_locked.addr, peer_pid, peer_locked.peer_pid());
+                    if peer_locked.pid() != *peer_pid {
+                        eprintln!("Client : {} : Received a `peer_id` that differs from the already known `peer.pid` : `peer_id=={}`, `peer.peer_id=={}`.", peer_locked.addr, peer_pid, peer_locked.pid());
                         // TODO: return error and cancel connection or create new peer ?
                     }
                 }
@@ -92,7 +92,8 @@ fn for_each_message_connecting(
         // println!("Client : {} : `peer_opt` is `None`.", peer_addr);
         match msg {
             Message::ConnectReceived(peer_pid) => {
-                let mut peers_locked = peers.lock().unwrap();
+                let shoal_read = shoal.read().unwrap();
+                let mut peers_locked = shoal_read.peers.lock().unwrap();
 
                 if let Some(peer_from_peers) = peers_locked.get(&peer_pid) {
                     // println!("Client : {} : Peer is in peers.", peer_addr);
@@ -108,8 +109,8 @@ fn for_each_message_connecting(
                     */
                     match peer.state {
                         PeerState::NotConnected => {
-                            if peer.peer_pid() != *peer_pid {
-                                eprintln!("Client : {} : Received a `peer_id` that differs from the already known `peer.peer_pid` : `peer_id=={}`, `peer.peer_id=={}`.", peer.addr, peer_pid, peer.peer_pid());
+                            if peer.pid() != *peer_pid {
+                                eprintln!("Client : {} : Received a `peer_id` that differs from the already known `peer.pid` : `peer_id=={}`, `peer.peer_id=={}`.", peer.addr, peer_pid, peer.pid());
                                 // TODO: return error and cancel connection ?
                             }
 
@@ -134,7 +135,7 @@ fn for_each_message_connecting(
                 } else {
                     // println!("Client : {} : Peer is not in peers.", peer_addr);
 
-                    let mut peer = Peer::new(local_pid, *peer_pid, peer_addr, peers.clone());
+                    let mut peer = Peer::new(shoal.clone(), *peer_pid, peer_addr);
                     vote(&mut peer, socket);
 
                     let peer = Arc::new(Mutex::new(peer));
@@ -152,11 +153,15 @@ fn for_each_message_connecting(
 }
 
 fn connect_to_peer(
+    shoal: ShoalArcRwLock,
     peer_opt: PeerArcMutOpt,
-    local_pid: Pid,
     peer_addr: SocketAddr,
-    peers: PeersMapArcMut,
 ) -> impl Future<Item = (), Error = Error> {
+    let local_pid = {
+        let shoal_read = shoal.read().unwrap();
+        shoal_read.local_pid
+    };
+
     TcpStream::connect(&peer_addr)
         .map_err(Error::from)
         .and_then(move |socket| {
@@ -164,14 +169,14 @@ fn connect_to_peer(
             send_message(socket, Message::Connect(local_pid))
         })
         .and_then(move |framed_sock| {
+            let shoal = shoal.clone();
             let socket = framed_sock.get_ref().try_clone().unwrap();
 
             let manager = framed_sock
                 .map_err(Error::from)
                 .for_each(move |msg| {
                     for_each_message_connecting(
-                        local_pid,
-                        peers.clone(),
+                        shoal.clone(),
                         peer_opt.clone(),
                         peer_addr,
                         socket.try_clone().unwrap(),
@@ -194,9 +199,8 @@ fn connect_to_peer(
 }
 
 pub fn try_connecting_at_interval(
-    local_pid: Pid,
+    shoal: ShoalArcRwLock,
     peer_addr: SocketAddr,
-    peers: PeersMapArcMut,
 ) -> impl Future<Item = (), Error = ()> {
     let peer_opt: PeerArcMutOpt = Arc::new(Mutex::new(None));
 
@@ -235,7 +239,7 @@ pub fn try_connecting_at_interval(
 
             if do_connect {
                 Box::new(
-                    connect_to_peer(peer_opt.clone(), local_pid, peer_addr, peers.clone()).or_else(
+                    connect_to_peer(shoal.clone(), peer_opt.clone(), peer_addr).or_else(
                         move |err| {
                             eprintln!(
                                 "Client : {} : Error while connecting : `{:?}`. Retrying in {} seconds...",

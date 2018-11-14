@@ -4,7 +4,7 @@ type ArgumentKind = argument_kind::ArgumentKind;
 
 use std::default::Default;
 
-#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Hash)]
 // TODO: Options rather than Vec ?
 pub struct Arguments {
     pub args: Vec<ArgumentKind>,

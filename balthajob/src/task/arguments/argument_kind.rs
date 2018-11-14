@@ -1,7 +1,7 @@
 use wasmi::nan_preserving_float::{F32, F64};
 pub use wasmi::RuntimeValue;
 
-#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Hash)]
 pub enum ArgumentKind {
     //TODO: U{32,64,...} as well (or instead)?
     I32(i32),
