@@ -5,8 +5,7 @@ use tokio::prelude::*;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
-use super::peer::*;
-use super::shoal::*;
+use super::*;
 // TODO: local Error
 use super::Error;
 use balthmessage::Message;
@@ -36,13 +35,12 @@ fn handle_vote(
 }
 
 fn for_each_message_connecting(
-    shoal: ShoalArcRwLock,
+    shoal: ShoalReadArc,
     peer_opt: PeerArcMutOpt,
     peer_addr: SocketAddr,
     socket: TcpStream,
     msg: &Message,
 ) -> Result<(), Error> {
-    let shoal_read = shoal.read().unwrap();
     let mut peer_opt = peer_opt.lock().unwrap();
     if let Some(ref peer) = *peer_opt {
         // println!("Listener : `peer_opt` is `Some()`.");
@@ -85,7 +83,8 @@ fn for_each_message_connecting(
         // println!("Listener : `peer_opt` is `None`.");
         match msg {
             Message::Connect(peer_pid) => {
-                let mut peers_locked = shoal_read.peers.lock().unwrap();
+                let peers = shoal.lock().peers();
+                let mut peers_locked = peers.lock().unwrap();
 
                 if let Some(peer_from_peers) = peers_locked.get(&peer_pid) {
                     // println!("Listener : {} : Peer is in peers.", peer_addr);
@@ -144,15 +143,11 @@ pub fn bind(local_addr: &SocketAddr) -> Result<TcpListener, io::Error> {
     TcpListener::bind(local_addr)
 }
 
-pub fn listen(
-    shoal: ShoalArcRwLock,
-    listener: TcpListener,
-) -> impl Future<Item = (), Error = ()> {
+pub fn listen(shoal: ShoalReadArc, listener: TcpListener) -> impl Future<Item = (), Error = ()> {
     listener
         .incoming()
         .for_each(move |socket| {
-            let shoal_read = shoal.read().unwrap();
-            let local_pid = shoal_read.local_pid;
+            let local_pid = shoal.lock().local_pid;
 
             let shoal = shoal.clone();
             let peer_addr = socket.peer_addr()?;

@@ -10,9 +10,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 // TODO: local Error
-use super::peer::*;
-use super::shoal::*;
 use super::Error;
+use super::*;
 
 /// Interval between connections tries in seconds
 const CONNECTION_INTERVAL: u64 = 10;
@@ -23,7 +22,7 @@ fn vote(peer: &mut Peer, socket: TcpStream) {
 }
 
 fn for_each_message_connecting(
-    shoal: ShoalArcRwLock,
+    shoal: ShoalReadArc,
     peer_opt: PeerArcMutOpt,
     peer_addr: SocketAddr,
     socket: TcpStream,
@@ -92,8 +91,8 @@ fn for_each_message_connecting(
         // println!("Client : {} : `peer_opt` is `None`.", peer_addr);
         match msg {
             Message::ConnectReceived(peer_pid) => {
-                let shoal_read = shoal.read().unwrap();
-                let mut peers_locked = shoal_read.peers.lock().unwrap();
+                let peers = shoal.lock().peers();
+                let mut peers_locked = peers.lock().unwrap();
 
                 if let Some(peer_from_peers) = peers_locked.get(&peer_pid) {
                     // println!("Client : {} : Peer is in peers.", peer_addr);
@@ -153,14 +152,11 @@ fn for_each_message_connecting(
 }
 
 fn connect_to_peer(
-    shoal: ShoalArcRwLock,
+    shoal: ShoalReadArc,
     peer_opt: PeerArcMutOpt,
     peer_addr: SocketAddr,
 ) -> impl Future<Item = (), Error = Error> {
-    let local_pid = {
-        let shoal_read = shoal.read().unwrap();
-        shoal_read.local_pid
-    };
+    let local_pid = shoal.lock().local_pid();
 
     TcpStream::connect(&peer_addr)
         .map_err(Error::from)
@@ -199,7 +195,7 @@ fn connect_to_peer(
 }
 
 pub fn try_connecting_at_interval(
-    shoal: ShoalArcRwLock,
+    shoal: ShoalReadArc,
     peer_addr: SocketAddr,
 ) -> impl Future<Item = (), Error = ()> {
     let peer_opt: PeerArcMutOpt = Arc::new(Mutex::new(None));

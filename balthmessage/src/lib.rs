@@ -19,8 +19,8 @@ use std::iter::FusedIterator;
 use job::task::arguments::Arguments;
 
 // TODO: unify with balthernet
-type Pid=u32;
-type ConnVote=u32;
+type Pid = u32;
+type ConnVote = u32;
 
 // TODO: As parameters...
 const MESSAGE_SIZE_LIMIT: usize = 2 << 20;

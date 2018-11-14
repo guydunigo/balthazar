@@ -53,7 +53,7 @@ dependencies = [
  "balthajob 0.1.0",
  "balthernet 0.1.0",
  "balthmessage 0.1.0",
- "parity-wasm 0.32.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "parity-wasm 0.35.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "wasmi 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
@@ -463,14 +463,6 @@ dependencies = [
 [[package]]
 name = "parity-wasm"
 version = "0.31.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-dependencies = [
- "byteorder 1.2.7 (registry+https://github.com/rust-lang/crates.io-index)",
-]
-
-[[package]]
-name = "parity-wasm"
-version = "0.32.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "byteorder 1.2.7 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -946,7 +938,6 @@ dependencies = [
 "checksum opaque-debug 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)" = "51ecbcb821e1bd256d456fe858aaa7f380b63863eab2eb86eee1bd9f33dd6682"
 "checksum owning_ref 0.3.3 (registry+https://github.com/rust-lang/crates.io-index)" = "cdf84f41639e037b484f93433aa3897863b561ed65c6e59c7073d7c561710f37"
 "checksum parity-wasm 0.31.3 (registry+https://github.com/rust-lang/crates.io-index)" = "511379a8194230c2395d2f5fa627a5a7e108a9f976656ce723ae68fca4097bfc"
-"checksum parity-wasm 0.32.0 (registry+https://github.com/rust-lang/crates.io-index)" = "16ad52817c4d343339b3bc2e26861bd21478eda0b7509acf83505727000512ac"
 "checksum parity-wasm 0.35.1 (registry+https://github.com/rust-lang/crates.io-index)" = "217f192f4d314968d875b0394ec0c26505f5993eba9c4c3c75c1d0317cd81c9e"
 "checksum parking_lot 0.6.4 (registry+https://github.com/rust-lang/crates.io-index)" = "f0802bff09003b291ba756dc7e79313e51cc31667e94afbe847def490424cde5"
 "checksum parking_lot_core 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)" = "ad7f7e6ebdc79edff6fdcb87a55b620174f7a989e3eb31b65231f4af57f00b8c"

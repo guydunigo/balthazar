@@ -1,18 +1,16 @@
+use futures::sync::mpsc;
 use rand::random;
 use tokio::codec::Framed;
 use tokio::net::TcpStream;
 use tokio::prelude::*;
 use tokio::timer::Interval;
-use futures::sync::mpsc;
 
 use std::collections::HashMap;
 use std::net::{Shutdown, SocketAddr};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use super::{Error, MessageCodec};
-use super::shoal::*;
-use balthmessage::Message;
+use super::*;
 
 pub type Pid = u32;
 pub type ConnVote = u32;
@@ -123,12 +121,10 @@ impl Clone for PeerState {
     }
 }
 
-#[derive(Debug)]
 pub struct Peer {
     // TODO: no `pub` ?
     pid: Pid,
-    // TODO: method to automatically upgrade, lock read, unwrap, ... ?
-    shoal: ShoalWeakRwLock,
+    shoal: ShoalReadWeak,
     pub addr: SocketAddr,
     pub ping_status: PingStatus,
     pub state: PeerState,
@@ -139,10 +135,10 @@ pub struct Peer {
 }
 
 impl Peer {
-    pub fn new(shoal: ShoalArcRwLock, peer_pid: Pid, addr: SocketAddr) -> Self {
+    pub fn new(shoal: ShoalReadArc, peer_pid: Pid, addr: SocketAddr) -> Self {
         Peer {
             pid: peer_pid,
-            shoal: Arc::downgrade(&shoal),
+            shoal: shoal.downgrade(),
             addr,
             ping_status: PingStatus::new(),
             state: PeerState::NotConnected,
@@ -201,16 +197,14 @@ impl Peer {
 
     // TODO: return Result ?
     /// **Important** : peer must be a reference to self.
+    /// TODO: to a wrapper like for Shoal ?
     pub fn connected(&mut self, peer: PeerArcMut, socket: TcpStream) -> Result<(), Error> {
         // TODO: other checks ?
         self.listener_connecting = false;
         self.client_connecting = false;
         self.state = PeerState::Connected(socket);
 
-        println!(
-            "Manager : {} : Connected to : `{}`",
-            self.addr, self.pid
-        );
+        println!("Manager : {} : Connected to : `{}`", self.addr, self.pid);
 
         self.manage(peer);
 
