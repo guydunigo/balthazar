@@ -9,6 +9,7 @@ use super::*;
 mod message_codec;
 use self::message_codec::MessageCodec;
 mod shoal;
+pub use self::shoal::Pid;
 use self::shoal::*;
 
 pub fn swim(local_addr: SocketAddr) -> Result<(), Error> {

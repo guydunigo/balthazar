@@ -18,6 +18,7 @@ use balthmessage::{Message, MessageReader};
 
 pub mod asynctest;
 pub mod listener;
+use self::asynctest::Pid;
 
 // ------------------------------------------------------------------
 // Errors
@@ -38,6 +39,7 @@ pub enum Error {
     ConnectionCancelled,
     PingSendError,
     PeerNotInConnectedState(String),
+    PeerNotFound(Pid),
 }
 
 impl From<message::Error> for Error {

@@ -80,6 +80,19 @@ impl Shoal {
         self.tx.clone()
     }
 
+    pub fn send_to(&self, peer_pid: Pid, msg: Message) -> Result<(), Error> {
+        let peers = self.peers.lock().unwrap();
+
+        match peers.get(&peer_pid) {
+            Some(peer) => {
+                let mut peer = peer.lock().unwrap();
+                peer.send_and_spawn(msg.clone());
+                Ok(())
+            }
+            None => Err(Error::PeerNotFound(peer_pid)),
+        }
+    }
+
     pub fn broadcast(&self, msg: Message, exclude: &[Pid]) {
         let peers = self.peers.lock().unwrap();
 
