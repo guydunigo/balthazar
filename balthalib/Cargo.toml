@@ -4,6 +4,8 @@ version = "0.1.0"
 authors = ["GONI Guillaume <gdn3@live.fr>"]
 
 [dependencies]
+tokio = "0.1.11"
+
 balthacephalo = { path = "../balthacephalo" }
 balthapode = { path = "../balthapode" }
 balthernet = { path = "../balthernet" }
