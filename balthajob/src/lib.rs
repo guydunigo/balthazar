@@ -17,15 +17,15 @@ type Arguments = task::arguments::Arguments;
 
 // TODO: id with clone ?
 #[derive(Debug, Clone)]
-pub struct Job<T> {
+pub struct Job {
     pub id: usize,
     pub bytecode: Vec<u8>,
-    pub tasks: Vec<Arc<Mutex<task::Task<T>>>>,
+    pub tasks: Vec<Arc<Mutex<task::Task>>>,
     next_task_id: usize,
 }
 
-impl<T> Job<T> {
-    pub fn new(id: usize, bytecode: Vec<u8>) -> Job<T> {
+impl Job {
+    pub fn new(id: usize, bytecode: Vec<u8>) -> Job {
         Job {
             id,
             bytecode,
@@ -34,7 +34,7 @@ impl<T> Job<T> {
         }
     }
 
-    pub fn get_free_job_id(list: &[Arc<Mutex<Job<T>>>]) -> Option<usize> {
+    pub fn get_free_job_id(list: &[Arc<Mutex<Job>>]) -> Option<usize> {
         let mut id = 0;
 
         loop {
@@ -56,7 +56,7 @@ impl<T> Job<T> {
         res
     }
 
-    pub fn push_task(&mut self, task: task::Task<T>) {
+    pub fn push_task(&mut self, task: task::Task) {
         self.tasks.push(Arc::new(Mutex::new(task)));
     }
 
@@ -71,7 +71,7 @@ impl<T> Job<T> {
     }
 
     // TODO: what happens between the mutex unlock and the new lock ? return MutexGuard ?
-    pub fn get_available_task(&self) -> Option<Arc<Mutex<task::Task<T>>>> {
+    pub fn get_available_task(&self) -> Option<Arc<Mutex<task::Task>>> {
         match self.tasks.iter().find(|t| t.lock().unwrap().is_available()) {
             Some(t) => Some(t.clone()),
             None => None,
@@ -85,9 +85,9 @@ impl<T> Job<T> {
 
 // TODO: name?
 // TODO: what happens between the mutex unlock and the new lock ? return MutexGuard ?
-pub fn get_available_task<T>(
-    jobs: &[Arc<Mutex<Job<T>>>],
-) -> Option<(Arc<Mutex<Job<T>>>, Arc<Mutex<task::Task<T>>>)> {
+pub fn get_available_task(
+    jobs: &[Arc<Mutex<Job>>],
+) -> Option<(Arc<Mutex<Job>>, Arc<Mutex<task::Task>>)> {
     jobs.iter()
         .map(|job| (job, job.lock().unwrap().get_available_task()))
         .skip_while(|(_, task_option)| task_option.is_none())
@@ -101,7 +101,6 @@ pub fn get_available_task<T>(
         .next()
 }
 
-/*
 #[cfg(test)]
 mod tests {
     #[test]
@@ -109,4 +108,3 @@ mod tests {
         assert_eq!(2 + 2, 4);
     }
 }
-*/

@@ -90,7 +90,7 @@ pub fn swim(config: config_parser::Config) -> Result<(), Error> {
 
     match config.command {
         CephalopodeType::Cephalo => cephalo::swim(&mut runtime, shoal, rx)?,
-        CephalopodeType::Pode => pode::swim(&mut runtime, shoal, rx)?,
+        CephalopodeType::Pode => pode::swim(&mut runtime, shoal, rx),
         CephalopodeType::InkPode => pode::fill(&mut runtime, shoal, rx)?,
         _ => net::asynctest::swim(&mut runtime, shoal, rx),
     };

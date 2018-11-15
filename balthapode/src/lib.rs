@@ -14,17 +14,15 @@ use tokio::prelude::*;
 use tokio::runtime::Runtime;
 
 use std::convert::From;
-use std::fmt::Display;
 use std::fs::File;
 use std::io;
-use std::net::ToSocketAddrs;
 use std::sync::Arc;
 use std::sync::Mutex;
 
 use job::task::arguments::Arguments;
 use job::task::{LoneTask, Task};
 use job::Job;
-use message::{de, Message, MessageReader};
+use message::{de, Message};
 use net::asynctest::shoal::{MpscReceiverMessage, ShoalReadArc};
 use net::MANAGER_ID;
 
@@ -68,7 +66,7 @@ impl From<de::Error> for Error {
 
 // ------------------------------------------------------------------
 
-pub fn fill<A: ToSocketAddrs + Display>(
+pub fn fill(
     runtime: &mut Runtime,
     shoal: ShoalReadArc,
     shoal_rx: MpscReceiverMessage,
@@ -79,7 +77,7 @@ pub fn fill<A: ToSocketAddrs + Display>(
         let mut code: Vec<u8> = Vec::new();
         f.read_to_end(&mut code)?;
 
-        shoal.lock().send_to(MANAGER_ID, Message::Job(0, code));
+        shoal.lock().send_to(MANAGER_ID, Message::Job(0, code))?;
     }
 
     let shoal_rx_future = shoal_rx
@@ -95,7 +93,8 @@ pub fn fill<A: ToSocketAddrs + Display>(
                 for args in args_list.drain(..) {
                     shoal
                         .lock()
-                        .send_to(MANAGER_ID, Message::Task(job_id, 0, args));
+                        .send_to(MANAGER_ID, Message::Task(job_id, 0, args))
+                        .unwrap();
                 }
                 // Then stop the receive loop:
                 Err(())
@@ -116,16 +115,12 @@ pub fn fill<A: ToSocketAddrs + Display>(
     Ok(())
 }
 
-pub fn swim<A: ToSocketAddrs + Display>(
-    runtime: &mut Runtime,
-    shoal: ShoalReadArc,
-    shoal_rx: MpscReceiverMessage,
-) {
+pub fn swim(runtime: &mut Runtime, shoal: ShoalReadArc, shoal_rx: MpscReceiverMessage) {
     let pode_id = 0;
 
-    let mut lone_tasks: Vec<LoneTask<bool>> = Vec::new();
+    let mut lone_tasks: Vec<LoneTask> = Vec::new();
 
-    let jobs: Vec<Arc<Mutex<Job<bool>>>> = Vec::new();
+    let jobs: Vec<Arc<Mutex<Job>>> = Vec::new();
     let jobs = Arc::new(Mutex::new(jobs));
 
     let rx = orchestrator::start_orchestrator(shoal.clone(), pode_id, jobs.clone());
@@ -179,11 +174,11 @@ pub fn swim<A: ToSocketAddrs + Display>(
 }
 
 fn register_job(
-    jobs: Arc<Mutex<Vec<Arc<Mutex<Job<bool>>>>>>,
-    lone_tasks: &mut Vec<LoneTask<bool>>,
+    jobs: Arc<Mutex<Vec<Arc<Mutex<Job>>>>>,
+    lone_tasks: &mut Vec<LoneTask>,
     job_id: usize,
     bytecode: Vec<u8>,
-) -> Vec<LoneTask<bool>> {
+) -> Vec<LoneTask> {
     let mut new_lone_tasks = Vec::with_capacity(lone_tasks.len());
 
     // TODO: multiple jobs having same id ?
@@ -221,12 +216,12 @@ fn register_job(
 fn register_task(
     shoal: ShoalReadArc,
     pode_id: usize,
-    jobs: Arc<Mutex<Vec<Arc<Mutex<Job<bool>>>>>>,
-    lone_tasks: &mut Vec<LoneTask<bool>>,
+    jobs: Arc<Mutex<Vec<Arc<Mutex<Job>>>>>,
+    lone_tasks: &mut Vec<LoneTask>,
     job_id: usize,
     task_id: usize,
     args: Arguments,
-) -> Result<bool, message::Error> {
+) -> Result<bool, net::Error> {
     //TODO: use balthajob to represent jobs and tasks and execute them there.
     //TODO: do not fail on job error
     let job_opt = match jobs
@@ -249,7 +244,7 @@ fn register_task(
             lone_tasks.push(LoneTask { job_id, task });
             shoal
                 .lock()
-                .send_to(MANAGER_ID, Message::RequestJob(job_id));
+                .send_to(MANAGER_ID, Message::RequestJob(job_id))?;
 
             true
         }

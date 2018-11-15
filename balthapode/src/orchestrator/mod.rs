@@ -10,7 +10,8 @@ use job::wasm;
 use job::Job;
 use message;
 use message::Message;
-use net::asynctest::shoal::{Pid, ShoalReadArc};
+use net;
+use net::asynctest::shoal::ShoalReadArc;
 use net::MANAGER_ID;
 
 const SLEEP_TIME_MS: u64 = 100;
@@ -23,6 +24,7 @@ pub enum Error {
     IoError(io::Error),
     WasmError(wasm::Error),
     MessageError(message::Error),
+    SendMsgError(net::Error),
 }
 
 impl From<io::Error> for Error {
@@ -43,12 +45,18 @@ impl From<message::Error> for Error {
     }
 }
 
+impl From<net::Error> for Error {
+    fn from(err: net::Error) -> Error {
+        Error::SendMsgError(err)
+    }
+}
+
 // ------------------------------------------------------------------
 
 pub fn start_orchestrator(
     shoal: ShoalReadArc,
     pode_id: usize,
-    jobs: Arc<Mutex<Vec<Arc<Mutex<Job<bool>>>>>>,
+    jobs: Arc<Mutex<Vec<Arc<Mutex<Job>>>>>,
 ) -> Receiver<bool> {
     let (tx, rx) = mpsc::sync_channel(0);
     thread::spawn(move || orchestrate(shoal, pode_id, jobs, tx));
@@ -58,7 +66,7 @@ pub fn start_orchestrator(
 pub fn orchestrate(
     shoal: ShoalReadArc,
     pode_id: usize,
-    jobs: Arc<Mutex<Vec<Arc<Mutex<Job<bool>>>>>>,
+    jobs: Arc<Mutex<Vec<Arc<Mutex<Job>>>>>,
     tx: SyncSender<bool>,
 ) -> Result<(), Error> {
     let mut last_was_nojob = false;
@@ -110,17 +118,14 @@ pub fn orchestrate(
             );
 
             //TODO: return proper error
-            let res = match res {
-                Ok(args) => Ok(args),
-                Err(_) => Err(()),
-            };
+            let res = res.map_err(|_| ());
             task.lock().unwrap().result = Some(res.clone());
 
             shoal
                 .lock()
-                .send_to(MANAGER_ID, Message::ReturnValue(job_id, task_id, res));
+                .send_to(MANAGER_ID, Message::ReturnValue(job_id, task_id, res))?;
         } else {
-            shoal.lock().send_to(MANAGER_ID, Message::Idle(NB_TASKS));
+            shoal.lock().send_to(MANAGER_ID, Message::Idle(NB_TASKS))?;
 
             tx.send(true).unwrap();
 
