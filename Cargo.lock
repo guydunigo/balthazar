@@ -16,7 +16,7 @@ name = "balthacephalo"
 version = "0.1.0"
 dependencies = [
  "balthajob 0.1.0",
- "balthernet 0.1.0",
+ "balthernet 0.2.0",
  "balthmessage 0.1.0",
 ]
 
@@ -43,7 +43,7 @@ version = "0.1.0"
 dependencies = [
  "balthacephalo 0.1.0",
  "balthapode 0.1.0",
- "balthernet 0.1.0",
+ "balthernet 0.2.0",
 ]
 
 [[package]]
@@ -51,7 +51,7 @@ name = "balthapode"
 version = "0.1.0"
 dependencies = [
  "balthajob 0.1.0",
- "balthernet 0.1.0",
+ "balthernet 0.2.0",
  "balthmessage 0.1.0",
  "parity-wasm 0.35.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "wasmi 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -59,7 +59,7 @@ dependencies = [
 
 [[package]]
 name = "balthernet"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "balthmessage 0.1.0",
  "bytes 0.4.10 (registry+https://github.com/rust-lang/crates.io-index)",
