@@ -20,6 +20,8 @@ pub mod asynctest;
 pub mod listener;
 use self::asynctest::Pid;
 
+pub const MANAGER_ID: Pid = 9000;
+
 // ------------------------------------------------------------------
 // Errors
 
@@ -40,6 +42,7 @@ pub enum Error {
     PingSendError,
     PeerNotInConnectedState(String),
     PeerNotFound(Pid),
+    ShoalMpscError,
 }
 
 impl From<message::Error> for Error {

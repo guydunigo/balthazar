@@ -1,3 +1,5 @@
+extern crate tokio;
+
 extern crate balthajob as job;
 extern crate balthernet as net;
 extern crate balthmessage as message;
@@ -8,12 +10,14 @@ mod orchestrator;
 
 //TODO: +everywhere stream or socket or ...
 
+use tokio::prelude::*;
+use tokio::runtime::Runtime;
+
 use std::convert::From;
 use std::fmt::Display;
 use std::fs::File;
 use std::io;
-use std::io::prelude::*;
-use std::net::{TcpStream, ToSocketAddrs};
+use std::net::ToSocketAddrs;
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -21,7 +25,8 @@ use job::task::arguments::Arguments;
 use job::task::{LoneTask, Task};
 use job::Job;
 use message::{de, Message, MessageReader};
-use net::initialize_pode;
+use net::asynctest::shoal::{MpscReceiverMessage, ShoalReadArc};
+use net::MANAGER_ID;
 
 // ------------------------------------------------------------------
 // Errors
@@ -63,68 +68,84 @@ impl From<de::Error> for Error {
 
 // ------------------------------------------------------------------
 
-pub fn fill<A: ToSocketAddrs + Display>(addr: A) -> Result<(), Error> {
-    let (mut socket, pode_id) = initialize_pode(addr)?;
-
+pub fn fill<A: ToSocketAddrs + Display>(
+    runtime: &mut Runtime,
+    shoal: ShoalReadArc,
+    shoal_rx: MpscReceiverMessage,
+) -> Result<(), Error> {
+    let pode_id = 0;
     {
         let mut f = File::open("main.wasm")?;
         let mut code: Vec<u8> = Vec::new();
         f.read_to_end(&mut code)?;
 
-        Message::Job(0, code).send(pode_id, &mut socket)?;
+        shoal.lock().send_to(MANAGER_ID, Message::Job(0, code));
     }
-    let job_id = {
-        let mut reader = MessageReader::new(pode_id, socket.try_clone()?);
-        match reader.next() {
-            Some(Ok(Message::JobRegisteredAt(job_id))) => job_id,
-            Some(Ok(msg)) => return Err(Error::UnexpectedReply(msg)),
-            Some(Err(err)) => return Err(Error::from(err)),
-            None => return Err(Error::NoReply),
-        }
-    };
-    {
-        let mut f = File::open("args_list.ron")?;
-        let mut args_list_txt: Vec<u8> = Vec::new();
-        f.read_to_end(&mut args_list_txt)?;
 
-        // Deserialize args_list
-        let mut args_list: Vec<Arguments> = de::from_bytes(&args_list_txt[..])?;
+    let shoal_rx_future = shoal_rx
+        .fold(None, move |job_id, msg| {
+            if let Some(job_id) = job_id {
+                let mut f = File::open("args_list.ron").unwrap();
+                let mut args_list_txt: Vec<u8> = Vec::new();
+                f.read_to_end(&mut args_list_txt).unwrap();
 
-        for args in args_list.drain(..) {
-            Message::Task(job_id, 0, args).send(pode_id, &mut socket)?;
-        }
-    }
+                // Deserialize args_list
+                let mut args_list: Vec<Arguments> = de::from_bytes(&args_list_txt[..]).unwrap();
+
+                for args in args_list.drain(..) {
+                    shoal
+                        .lock()
+                        .send_to(MANAGER_ID, Message::Task(job_id, 0, args));
+                }
+                // Then stop the receive loop:
+                Err(())
+            } else {
+                match msg {
+                    (_, Message::JobRegisteredAt(job_id)) => Ok(Some(job_id)),
+                    _ => {
+                        println!("Pode : {} : didn't receive job_id.", pode_id);
+                        Ok(None)
+                    }
+                }
+            }
+        })
+        .map(|_| ());
+
+    runtime.spawn(shoal_rx_future);
 
     Ok(())
 }
 
-pub fn swim<A: ToSocketAddrs + Display>(addr: A) -> Result<(), Error> {
-    let (socket, pode_id) = initialize_pode(addr)?;
+pub fn swim<A: ToSocketAddrs + Display>(
+    runtime: &mut Runtime,
+    shoal: ShoalReadArc,
+    shoal_rx: MpscReceiverMessage,
+) {
+    let pode_id = 0;
 
-    let mut reader = MessageReader::new(pode_id, socket.try_clone()?);
-    let result = {
-        let mut socket = Arc::new(Mutex::new(socket));
-        let mut lone_tasks: Vec<LoneTask<bool>> = Vec::new();
+    let mut lone_tasks: Vec<LoneTask<bool>> = Vec::new();
 
-        let jobs: Vec<Arc<Mutex<Job<bool>>>> = Vec::new();
-        let jobs = Arc::new(Mutex::new(jobs));
+    let jobs: Vec<Arc<Mutex<Job<bool>>>> = Vec::new();
+    let jobs = Arc::new(Mutex::new(jobs));
 
-        let rx = orchestrator::start_orchestrator(pode_id, jobs.clone(), socket.clone());
+    let rx = orchestrator::start_orchestrator(shoal.clone(), pode_id, jobs.clone());
+    let rx = Arc::new(Mutex::new(rx));
 
-        reader.for_each_until_error(|msg| match msg {
+    let shoal_rx_future = shoal_rx
+        .map_err(|_| net::Error::ShoalMpscError)
+        .for_each(move |(_, msg)| match msg {
             Message::Job(job_id, bytecode) => {
-                let (new_lone_tasks, res) =
-                    register_job(jobs.clone(), &mut lone_tasks, job_id, bytecode);
+                let new_lone_tasks = register_job(jobs.clone(), &mut lone_tasks, job_id, bytecode);
                 lone_tasks = new_lone_tasks;
-                rx.recv().unwrap();
-                res
+                rx.lock().unwrap().recv().unwrap();
+                Ok(())
             }
             Message::Task(job_id, task_id, args) => {
                 let res = register_task(
+                    shoal.clone(),
                     pode_id,
                     jobs.clone(),
                     &mut lone_tasks,
-                    socket.clone(),
                     job_id,
                     task_id,
                     args,
@@ -132,15 +153,15 @@ pub fn swim<A: ToSocketAddrs + Display>(addr: A) -> Result<(), Error> {
                 match res {
                     Ok(job_was_requested) => {
                         if !job_was_requested {
-                            rx.recv().unwrap();
+                            rx.lock().unwrap().recv().unwrap();
                         }
                         Ok(())
                     }
-                    Err(err) => Err(err),
+                    Err(err) => Err(net::Error::from(err)),
                 }
             }
             Message::NoJob => {
-                rx.recv().unwrap();
+                rx.lock().unwrap().recv().unwrap();
                 Ok(())
             }
             _ => {
@@ -151,12 +172,10 @@ pub fn swim<A: ToSocketAddrs + Display>(addr: A) -> Result<(), Error> {
                 Ok(())
             }
         })
-    };
+        .map(|_| ())
+        .map_err(|_| ());
 
-    match result {
-        Err(err) => Err(Error::from(err)),
-        Ok(_) => Ok(()),
-    }
+    runtime.spawn(shoal_rx_future);
 }
 
 fn register_job(
@@ -164,7 +183,7 @@ fn register_job(
     lone_tasks: &mut Vec<LoneTask<bool>>,
     job_id: usize,
     bytecode: Vec<u8>,
-) -> (Vec<LoneTask<bool>>, Result<(), message::Error>) {
+) -> Vec<LoneTask<bool>> {
     let mut new_lone_tasks = Vec::with_capacity(lone_tasks.len());
 
     // TODO: multiple jobs having same id ?
@@ -196,14 +215,14 @@ fn register_job(
         }
     }
 
-    (new_lone_tasks, Ok(()))
+    new_lone_tasks
 }
 
 fn register_task(
+    shoal: ShoalReadArc,
     pode_id: usize,
     jobs: Arc<Mutex<Vec<Arc<Mutex<Job<bool>>>>>>,
     lone_tasks: &mut Vec<LoneTask<bool>>,
-    socket: Arc<Mutex<TcpStream>>,
     job_id: usize,
     task_id: usize,
     args: Arguments,
@@ -228,11 +247,9 @@ fn register_task(
         None => {
             let task = Task::new(task_id, args);
             lone_tasks.push(LoneTask { job_id, task });
-            {
-                let mut socket = socket.lock().unwrap();
-                // TODO: If no answer, ask later ?
-                Message::RequestJob(job_id).send(pode_id, &mut *socket)?;
-            }
+            shoal
+                .lock()
+                .send_to(MANAGER_ID, Message::RequestJob(job_id));
 
             true
         }

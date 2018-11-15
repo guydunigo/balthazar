@@ -1,10 +1,18 @@
-pub extern crate balthacephalo as cephalo;
-pub extern crate balthapode as pode;
-pub extern crate balthernet as net;
+extern crate balthacephalo as cephalo;
+extern crate balthapode as pode;
+extern crate balthernet as net;
+extern crate ron;
+extern crate tokio;
 
 pub mod config_parser;
 
+use tokio::prelude::*;
+use tokio::runtime::Runtime;
+
 use std::convert::From;
+use std::fs::File;
+
+use net::asynctest::Pid;
 
 // ------------------------------------------------------------------
 // Errors
@@ -15,6 +23,7 @@ pub enum Error {
     PodeError(pode::Error),
     ArgError(config_parser::ArgError),
     NetError(net::Error),
+    TokioRuntimeError,
 }
 
 impl From<cephalo::Error> for Error {
@@ -66,12 +75,28 @@ mod tests {
 // ------------------------------------------------------------------
 
 pub fn swim(config: config_parser::Config) -> Result<(), Error> {
+    let reader = File::open("./peers.ron").map_err(net::Error::from)?;
+    let addrs: Vec<String> = ron::de::from_reader(reader).unwrap();
+
+    // TODO: actual pid
+    let local_pid: Pid = config.addr.port() as Pid;
+    println!("Using pid : {}", local_pid);
+
+    let mut runtime = Runtime::new().map_err(net::Error::from)?;
+
+    let (shoal, rx) = net::asynctest::shoal::ShoalReadArc::new(local_pid, config.addr);
+
+    shoal.swim(&mut runtime, &addrs[..])?;
+
     match config.command {
-        CephalopodeType::Cephalo => cephalo::swim(config.addr)?,
-        CephalopodeType::Pode => pode::swim(config.addr)?,
-        CephalopodeType::InkPode => pode::fill(config.addr)?,
-        CephalopodeType::NetTest => net::asynctest::swim(config.addr)?,
+        CephalopodeType::Cephalo => cephalo::swim(&mut runtime, shoal, rx)?,
+        CephalopodeType::Pode => pode::swim(&mut runtime, shoal, rx)?,
+        CephalopodeType::InkPode => pode::fill(&mut runtime, shoal, rx)?,
+        _ => net::asynctest::swim(&mut runtime, shoal, rx),
     };
 
-    Ok(())
+    runtime
+        .shutdown_on_idle()
+        .wait()
+        .map_err(|_| Error::TokioRuntimeError)
 }

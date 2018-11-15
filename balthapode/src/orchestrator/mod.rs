@@ -1,5 +1,4 @@
 use std::io;
-use std::net::TcpStream;
 use std::sync::mpsc;
 use std::sync::mpsc::{Receiver, SyncSender};
 use std::sync::{Arc, Mutex};
@@ -11,6 +10,8 @@ use job::wasm;
 use job::Job;
 use message;
 use message::Message;
+use net::asynctest::shoal::{Pid, ShoalReadArc};
+use net::MANAGER_ID;
 
 const SLEEP_TIME_MS: u64 = 100;
 const NB_TASKS: usize = 1;
@@ -45,19 +46,19 @@ impl From<message::Error> for Error {
 // ------------------------------------------------------------------
 
 pub fn start_orchestrator(
+    shoal: ShoalReadArc,
     pode_id: usize,
     jobs: Arc<Mutex<Vec<Arc<Mutex<Job<bool>>>>>>,
-    cephalo: Arc<Mutex<TcpStream>>,
 ) -> Receiver<bool> {
     let (tx, rx) = mpsc::sync_channel(0);
-    thread::spawn(move || orchestrate(pode_id, jobs, cephalo, tx));
+    thread::spawn(move || orchestrate(shoal, pode_id, jobs, tx));
     rx
 }
 
 pub fn orchestrate(
+    shoal: ShoalReadArc,
     pode_id: usize,
     jobs: Arc<Mutex<Vec<Arc<Mutex<Job<bool>>>>>>,
-    cephalo: Arc<Mutex<TcpStream>>,
     tx: SyncSender<bool>,
 ) -> Result<(), Error> {
     let mut last_was_nojob = false;
@@ -104,7 +105,7 @@ pub fn orchestrate(
             };
 
             println!(
-                "{} : Executed Task #{} for Job #{}",
+                "Pode : {} : Executed Task #{} for Job #{}",
                 pode_id, task_id, job_id
             );
 
@@ -115,20 +116,16 @@ pub fn orchestrate(
             };
             task.lock().unwrap().result = Some(res.clone());
 
-            {
-                let mut cephalo = cephalo.lock().unwrap();
-                Message::ReturnValue(job_id, task_id, res).send(pode_id, &mut *cephalo)?;
-            }
+            shoal
+                .lock()
+                .send_to(MANAGER_ID, Message::ReturnValue(job_id, task_id, res));
         } else {
-            {
-                let mut cephalo = cephalo.lock().unwrap();
-                Message::Idle(NB_TASKS).send(pode_id, &mut *cephalo)?;
-            }
+            shoal.lock().send_to(MANAGER_ID, Message::Idle(NB_TASKS));
 
             tx.send(true).unwrap();
 
             if last_was_nojob {
-                println!("{} : Orchestrator sleeping...", pode_id);
+                println!("Pode: {} : Orchestrator sleeping...", pode_id);
                 thread::sleep(Duration::from_millis(SLEEP_TIME_MS));
             }
             last_was_nojob = true;

@@ -5,6 +5,7 @@ authors = ["GONI Guillaume <gdn3@live.fr>"]
 
 [dependencies]
 tokio = "0.1.11"
+ron = "0.4.0"
 
 balthacephalo = { path = "../balthacephalo" }
 balthapode = { path = "../balthapode" }

@@ -4,6 +4,7 @@ version = "0.1.0"
 authors = ["GONI Guillaume <gdn3@live.fr>"]
 
 [dependencies]
+tokio = "0.1.11"
 parity-wasm = "0.35.1"
 wasmi = "0.4.1"
 
