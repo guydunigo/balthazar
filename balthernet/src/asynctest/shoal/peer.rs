@@ -19,8 +19,8 @@ pub type ConnVote = u32;
 pub type PeerArcMut = Arc<Mutex<Peer>>;
 pub type PeersMapArcMut = Arc<Mutex<HashMap<Pid, PeerArcMut>>>;
 pub type PeerArcMutOpt = Arc<Mutex<Option<PeerArcMut>>>;
-pub type MessageTxMpsc = mpsc::Sender<Message>;
-pub type MessageRxMpsc = mpsc::Receiver<Message>;
+pub type MpscReceiverMessage = mpsc::Receiver<(Pid, Message)>;
+pub type MpscSenderMessage = mpsc::Sender<(Pid, Message)>;
 
 /// Interval between ping messages in seconds
 const PING_INTERVAL: u64 = 3;
@@ -125,6 +125,8 @@ pub struct Peer {
     // TODO: no `pub` ?
     pid: Pid,
     shoal: ShoalReadWeak,
+    // TODO: Useful to have here a separate tx ?
+    shoal_tx: MpscSenderMessage,
     pub addr: SocketAddr,
     pub ping_status: PingStatus,
     pub state: PeerState,
@@ -139,6 +141,7 @@ impl Peer {
         Peer {
             pid: peer_pid,
             shoal: shoal.downgrade(),
+            shoal_tx: shoal.lock().tx().clone(),
             addr,
             ping_status: PingStatus::new(),
             state: PeerState::NotConnected,
@@ -286,10 +289,11 @@ impl Peer {
             let framed_sock = Framed::new(socket, MessageCodec::new());
             let peer_addr = self.addr;
             let peer_clone = peer.clone();
+            let shoal_tx = self.shoal_tx.clone();
 
             let manage_future = framed_sock
                 .map_err(Error::from)
-                .for_each(move |msg| for_each_message(peer.clone(), &msg))
+                .for_each(move |msg| for_each_message(shoal_tx.clone(), peer.clone(), msg))
                 .map_err(move |err| match err {
                     // TODO: println anyway ?
                     Error::ConnectionCancelled | Error::ConnectionEnded => (),
@@ -316,41 +320,6 @@ impl Peer {
             tokio::spawn(ping_future);
         }
     }
-}
-
-fn for_each_message(peer: PeerArcMut, msg: &Message) -> Result<(), Error> {
-    // TODO: unwrap?
-    let mut peer = peer.lock().unwrap();
-
-    match msg {
-        Message::Ping => {
-            let socket = {
-                let socket = if let PeerState::Connected(socket) = &peer.state {
-                    // TODO: unwrap?
-                    socket.try_clone().unwrap()
-                } else {
-                    eprintln!("Manager : {} : Inconsistent Peer object : a message was received, but `peer.state` is not `Connected(socket)`.", peer.addr);
-                    return Err(Error::PeerNotInConnectedState(
-                        "Inconsistent Peer object : a message was received.".to_string(),
-                    ));
-                };
-
-                socket
-            };
-
-            send_message_and_spawn(socket, Message::Pong);
-        }
-        Message::Pong => {
-            peer.pong();
-            // println!("Manager : {} : received Pong ! It is alive !!!", peer.addr);
-        }
-        _ => println!(
-            "Manager : {} : received a message (but won't do anything ;) !",
-            peer.addr
-        ),
-    }
-
-    Ok(())
 }
 
 // TODO: Ping if there is already an unanswered Ping ? (in this case, override the Ping time ?)
@@ -383,4 +352,47 @@ fn ping_peer(peer: PeerArcMut) -> impl Future<Item = (), Error = Error> {
 
             Err(Error::PingSendError)
         })
+}
+
+// TODO: tx only or shoal directly
+fn for_each_message(tx: MpscSenderMessage, peer: PeerArcMut, msg: Message) -> Result<(), Error> {
+    // TODO: unwrap?
+    // TODO: lock for the whole block ?
+    let mut peer = peer.lock().unwrap();
+
+    match msg {
+        Message::Ping => {
+            let socket = {
+                let socket = if let PeerState::Connected(socket) = &peer.state {
+                    // TODO: unwrap?
+                    socket.try_clone().unwrap()
+                } else {
+                    eprintln!("Manager : {} : Inconsistent Peer object : a message was received, but `peer.state` is not `Connected(socket)`.", peer.addr);
+                    return Err(Error::PeerNotInConnectedState(
+                        "Inconsistent Peer object : a message was received.".to_string(),
+                    ));
+                };
+
+                socket
+            };
+
+            send_message_and_spawn(socket, Message::Pong);
+        }
+        Message::Pong => {
+            peer.pong();
+            // println!("Manager : {} : received Pong ! It is alive !!!", peer.addr);
+        }
+        _ => {
+            /*
+            println!(
+                "Manager : {} : received a message (but won't do anything ;) !",
+                peer.addr
+            );
+            */
+            let send_future = tx.send((peer.pid, msg)).map(|_| ()).map_err(|_| ());
+            tokio::spawn(send_future);
+        }
+    }
+
+    Ok(())
 }

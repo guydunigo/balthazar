@@ -1,3 +1,4 @@
+use futures::sync::mpsc;
 use tokio::io;
 use tokio::runtime::Runtime;
 
@@ -14,6 +15,9 @@ mod listener;
 mod peer;
 pub use self::peer::*;
 use super::super::parse_socket_addr;
+
+// TODO: think abuot this size
+const SHOAL_MPSC_SIZE: usize = 32;
 
 // TODO: Good for big messages ?
 pub type MsgsMapArcMut = Arc<Mutex<HashMap<Message, Vec<Pid>>>>;
@@ -33,6 +37,7 @@ pub type MsgsMapArcMut = Arc<Mutex<HashMap<Message, Vec<Pid>>>>;
 pub struct Shoal {
     local_pid: Pid,
     local_addr: SocketAddr,
+    tx: MpscSenderMessage,
     // TODO: peers accessor that automatically clones it ?
     peers: PeersMapArcMut,
     // TODO: Clean sometimes ?
@@ -41,13 +46,18 @@ pub struct Shoal {
 }
 
 impl Shoal {
-    pub fn new(local_pid: Pid, local_addr: SocketAddr) -> Self {
-        Shoal {
-            local_pid,
-            local_addr,
-            peers: Arc::new(Mutex::new(HashMap::new())),
-            msgs_received: Arc::new(Mutex::new(HashMap::new())),
-        }
+    pub fn new(local_pid: Pid, local_addr: SocketAddr) -> (Self, MpscReceiverMessage) {
+        let (tx, rx) = mpsc::channel(SHOAL_MPSC_SIZE);
+        (
+            Shoal {
+                local_pid,
+                local_addr,
+                tx,
+                peers: Arc::new(Mutex::new(HashMap::new())),
+                msgs_received: Arc::new(Mutex::new(HashMap::new())),
+            },
+            rx,
+        )
     }
 
     pub fn local_pid(&self) -> Pid {
@@ -64,6 +74,10 @@ impl Shoal {
 
     pub fn msgs_received(&self) -> MsgsMapArcMut {
         self.msgs_received.clone()
+    }
+
+    pub fn tx(&self) -> MpscSenderMessage {
+        self.tx.clone()
     }
 
     pub fn broadcast(&self, msg: Message, exclude: &[Pid]) {
@@ -97,10 +111,14 @@ impl From<Shoal> for ShoalReadArc {
 }
 
 impl ShoalReadArc {
-    pub fn new(local_pid: Pid, local_addr: SocketAddr) -> Self {
-        ShoalReadArc {
-            inner: Arc::new(RwLock::new(Shoal::new(local_pid, local_addr))),
-        }
+    pub fn new(local_pid: Pid, local_addr: SocketAddr) -> (Self, MpscReceiverMessage) {
+        let (shoal, rx) = Shoal::new(local_pid, local_addr);
+        (
+            ShoalReadArc {
+                inner: Arc::new(RwLock::new(shoal)),
+            },
+            rx,
+        )
     }
 
     pub fn downgrade(&self) -> ShoalReadWeak {
