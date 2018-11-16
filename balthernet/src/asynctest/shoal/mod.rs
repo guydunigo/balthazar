@@ -1,5 +1,6 @@
 use futures::sync::mpsc;
 use tokio::io;
+use tokio::prelude::*;
 use tokio::runtime::Runtime;
 
 use balthmessage::Message;
@@ -87,6 +88,26 @@ impl Shoal {
             Some(peer) => {
                 let mut peer = peer.lock().unwrap();
                 peer.send_and_spawn(msg.clone());
+                Ok(())
+            }
+            None => Err(Error::PeerNotFound(peer_pid)),
+        }
+    }
+
+    pub fn send_to_with_runtime(
+        &self,
+        runtime: &mut Runtime,
+        peer_pid: Pid,
+        msg: Message,
+    ) -> Result<(), Error> {
+        let peers = self.peers.lock().unwrap();
+
+        match peers.get(&peer_pid) {
+            Some(peer) => {
+                let mut peer = peer.lock().unwrap();
+                let send_future = peer.send(msg).map(|_| ()).map_err(|_| ());
+                runtime.spawn(send_future);
+
                 Ok(())
             }
             None => Err(Error::PeerNotFound(peer_pid)),

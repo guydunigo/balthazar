@@ -1,3 +1,4 @@
+extern crate futures;
 extern crate tokio;
 
 extern crate balthajob as job;
@@ -10,14 +11,17 @@ mod orchestrator;
 
 //TODO: +everywhere stream or socket or ...
 
+use futures::sync::mpsc::Sender;
 use tokio::prelude::*;
 use tokio::runtime::Runtime;
+use tokio::timer::Delay;
 
 use std::convert::From;
 use std::fs::File;
 use std::io;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use job::task::arguments::Arguments;
 use job::task::{LoneTask, Task};
@@ -73,38 +77,50 @@ pub fn fill(
 ) -> Result<(), Error> {
     let pode_id = 0;
     {
+        let shoal_clone = shoal.clone();
         let mut f = File::open("main.wasm")?;
         let mut code: Vec<u8> = Vec::new();
         f.read_to_end(&mut code)?;
 
-        shoal.lock().send_to(MANAGER_ID, Message::Job(0, code))?;
+        let delay_future = Delay::new(Instant::now() + Duration::from_secs(5))
+            .map_err(net::Error::from)
+            .and_then(move |_| {
+                let shoal = shoal_clone.clone();
+                let shoal = shoal.lock();
+                shoal.send_to(MANAGER_ID, Message::Job(0, code))
+            })
+            .map(|_| ())
+            .map_err(|_| ());
+
+        runtime.spawn(delay_future);
     }
 
     let shoal_rx_future = shoal_rx
-        .fold(None, move |job_id, msg| {
-            if let Some(job_id) = job_id {
-                let mut f = File::open("args_list.ron").unwrap();
-                let mut args_list_txt: Vec<u8> = Vec::new();
-                f.read_to_end(&mut args_list_txt).unwrap();
+        .for_each(move |(peer_pid, msg)| {
+            match msg {
+                Message::JobRegisteredAt(job_id) => {
+                    let mut f = File::open("args_list.ron").unwrap();
+                    let mut args_list_txt: Vec<u8> = Vec::new();
+                    f.read_to_end(&mut args_list_txt).unwrap();
 
-                // Deserialize args_list
-                let mut args_list: Vec<Arguments> = de::from_bytes(&args_list_txt[..]).unwrap();
+                    // Deserialize args_list
+                    let mut args_list: Vec<Arguments> = de::from_bytes(&args_list_txt[..]).unwrap();
 
-                for args in args_list.drain(..) {
-                    shoal
-                        .lock()
-                        .send_to(MANAGER_ID, Message::Task(job_id, 0, args))
-                        .unwrap();
-                }
-                // Then stop the receive loop:
-                Err(())
-            } else {
-                match msg {
-                    (_, Message::JobRegisteredAt(job_id)) => Ok(Some(job_id)),
-                    _ => {
-                        println!("Pode : {} : didn't receive job_id.", pode_id);
-                        Ok(None)
+                    for args in args_list.drain(..) {
+                        shoal
+                            .lock()
+                            .send_to(MANAGER_ID, Message::Task(job_id, 0, args))
+                            .unwrap();
                     }
+                    // Then stop the receive loop:
+                    Err(())
+                }
+                _ => {
+                    println!(
+                        "Pode : {} : didn't receive job_id from {}.",
+                        pode_id, peer_pid
+                    );
+                    Ok(())
                 }
             }
         })
@@ -123,47 +139,43 @@ pub fn swim(runtime: &mut Runtime, shoal: ShoalReadArc, shoal_rx: MpscReceiverMe
     let jobs: Vec<Arc<Mutex<Job>>> = Vec::new();
     let jobs = Arc::new(Mutex::new(jobs));
 
-    let rx = orchestrator::start_orchestrator(shoal.clone(), pode_id, jobs.clone());
-    let rx = Arc::new(Mutex::new(rx));
+    let tx = orchestrator::start_orchestrator(runtime, shoal.clone(), pode_id, jobs.clone());
+    let tx = Arc::new(Mutex::new(tx));
 
     let shoal_rx_future = shoal_rx
         .map_err(|_| net::Error::ShoalMpscError)
-        .for_each(move |(_, msg)| match msg {
+        .for_each(move |(peer_pid, msg)| match msg {
             Message::Job(job_id, bytecode) => {
-                let new_lone_tasks = register_job(jobs.clone(), &mut lone_tasks, job_id, bytecode);
-                lone_tasks = new_lone_tasks;
-                rx.lock().unwrap().recv().unwrap();
-                Ok(())
-            }
-            Message::Task(job_id, task_id, args) => {
-                let res = register_task(
-                    shoal.clone(),
-                    pode_id,
+                let new_lone_tasks = register_job(
                     jobs.clone(),
                     &mut lone_tasks,
+                    tx.lock().unwrap().clone(),
                     job_id,
-                    task_id,
-                    args,
+                    bytecode,
                 );
-                match res {
-                    Ok(job_was_requested) => {
-                        if !job_was_requested {
-                            rx.lock().unwrap().recv().unwrap();
-                        }
-                        Ok(())
-                    }
-                    Err(err) => Err(net::Error::from(err)),
-                }
-            }
-            Message::NoJob => {
-                rx.lock().unwrap().recv().unwrap();
+                lone_tasks = new_lone_tasks;
+
                 Ok(())
             }
+            Message::Task(job_id, task_id, args) => register_task(
+                shoal.clone(),
+                pode_id,
+                jobs.clone(),
+                &mut lone_tasks,
+                tx.lock().unwrap().clone(),
+                job_id,
+                task_id,
+                args,
+            ),
             _ => {
                 /*{
                     let mut socket = socket.lock().unwrap();
                     Message::Disconnect.send(id, &mut *socket)
                 }*/
+                println!(
+                    "Pode : {} : Received a message but won't do anything.",
+                    peer_pid
+                );
                 Ok(())
             }
         })
@@ -176,6 +188,7 @@ pub fn swim(runtime: &mut Runtime, shoal: ShoalReadArc, shoal_rx: MpscReceiverMe
 fn register_job(
     jobs: Arc<Mutex<Vec<Arc<Mutex<Job>>>>>,
     lone_tasks: &mut Vec<LoneTask>,
+    tx: Sender<(usize, usize)>,
     job_id: usize,
     bytecode: Vec<u8>,
 ) -> Vec<LoneTask> {
@@ -201,7 +214,17 @@ fn register_job(
 
             for t in lone_tasks.drain(..) {
                 if t.job_id == job_id {
+                    let task_id = t.task.id;
                     job.push_task(t.task);
+
+                    tokio::spawn(
+                        tx.clone()
+                            .send((job_id, task_id))
+                            .map(|_| ())
+                            .map_err(|err| {
+                                eprintln!("Pode : Could not send task to executor : `{:?}`.", err);
+                            }),
+                    );
                 } else {
                     new_lone_tasks.push(t);
                 }
@@ -218,10 +241,11 @@ fn register_task(
     pode_id: usize,
     jobs: Arc<Mutex<Vec<Arc<Mutex<Job>>>>>,
     lone_tasks: &mut Vec<LoneTask>,
+    tx: Sender<(usize, usize)>,
     job_id: usize,
     task_id: usize,
     args: Arguments,
-) -> Result<bool, net::Error> {
+) -> Result<(), net::Error> {
     //TODO: use balthajob to represent jobs and tasks and execute them there.
     //TODO: do not fail on job error
     let job_opt = match jobs
@@ -234,10 +258,13 @@ fn register_task(
         None => None,
     };
 
-    let job_was_requested = match job_opt {
+    match job_opt {
         Some(job) => {
             job.lock().unwrap().push_new_task(task_id, args);
-            false
+
+            tokio::spawn(tx.send((job_id, task_id)).map(|_| ()).map_err(|err| {
+                eprintln!("Pode : Could not send task to executor : `{:?}`.", err);
+            }));
         }
         None => {
             let task = Task::new(task_id, args);
@@ -245,14 +272,12 @@ fn register_task(
             shoal
                 .lock()
                 .send_to(MANAGER_ID, Message::RequestJob(job_id))?;
-
-            true
         }
-    };
+    }
 
     println!("{} : Task #{} for Job #{} saved.", pode_id, task_id, job_id);
 
-    Ok(job_was_requested)
+    Ok(())
 }
 
 #[cfg(test)]
