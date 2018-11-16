@@ -110,6 +110,7 @@ pub fn start_orchestrator(
     });
 
     // TODO: Beware not to constantly lock jobs...
+    // TODO: do not send idle if working on a job...
     let idle_watcher_future = Interval::new(
         Instant::now() + Duration::from_secs(5),
         Duration::from_secs(IDLE_CHECK_INTERVAL),
