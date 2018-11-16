@@ -82,7 +82,7 @@ pub fn fill(
         let mut code: Vec<u8> = Vec::new();
         f.read_to_end(&mut code)?;
 
-        let delay_future = Delay::new(Instant::now() + Duration::from_secs(5))
+        let delay_future = Delay::new(Instant::now() + Duration::from_secs(10))
             .map_err(net::Error::from)
             .and_then(move |_| {
                 let shoal = shoal_clone.clone();
@@ -211,25 +211,28 @@ fn register_job(
         Some(job) => job.lock().unwrap().set_bytecode(bytecode),
         None => {
             let mut job = Job::new(job_id, bytecode);
+            let mut tasks_to_send = Vec::new();
 
             for t in lone_tasks.drain(..) {
                 if t.job_id == job_id {
-                    let task_id = t.task.id;
+                    tasks_to_send.push(t.task.id);
                     job.push_task(t.task);
-
-                    tokio::spawn(
-                        tx.clone()
-                            .send((job_id, task_id))
-                            .map(|_| ())
-                            .map_err(|err| {
-                                eprintln!("Pode : Could not send task to executor : `{:?}`.", err);
-                            }),
-                    );
                 } else {
                     new_lone_tasks.push(t);
                 }
             }
+
             jobs.lock().unwrap().push(Arc::new(Mutex::new(job)));
+            tasks_to_send.iter().for_each(|task_id| {
+                tokio::spawn(
+                    tx.clone()
+                        .send((job_id, *task_id))
+                        .map(|_| ())
+                        .map_err(|err| {
+                            eprintln!("Pode : Could not send task to executor : `{:?}`.", err);
+                        }),
+                );
+            })
         }
     }
 

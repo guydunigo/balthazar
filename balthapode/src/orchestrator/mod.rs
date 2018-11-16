@@ -130,6 +130,9 @@ pub fn start_orchestrator(
     });
     runtime.spawn(idle_watcher_future);
 
+    // This channel is needed as the executor is not running on the same tokio runtime as the shoal.
+    // (The socket can't be registered in two separate runtimes)
+    // TODO: if the two runtime issue is solved, maybe remove that...
     let send_future = send_msg_rx.for_each(move |(peer_pid, msg)| {
         shoal.lock().send_to(peer_pid, msg).map_err(|err| {
             eprintln!(
@@ -151,14 +154,18 @@ pub fn orchestrate(
     task_id: usize,
     send_msg_tx: Sender<(Pid, Message)>,
 ) -> Box<Future<Item = (), Error = Error>> {
+    // println!("Time 1 : {:?}", Instant::now());
     let (bytecode, args, task) = {
         // TODO: deadlock/blocking job in case of multi-threading?
         // TODO: check job and task ids ?
         let jobs = jobs.lock().unwrap();
-        let job = jobs.get(job_id);
+        let job = jobs.iter().find(|job| job.lock().unwrap().id == job_id);
         if let Some(job) = job {
             let job = job.lock().unwrap();
-            let task = job.tasks.get(task_id);
+            let task = job
+                .tasks
+                .iter()
+                .find(|task| task.lock().unwrap().id == task_id);
             if let Some(task) = task {
                 let mut task_locked = task.lock().unwrap();
                 task_locked.set_unavailable();
@@ -166,15 +173,17 @@ pub fn orchestrate(
                 (job.bytecode.clone(), task_locked.args.clone(), task.clone())
             } else {
                 // TODO: proper error handling ?
-                eprintln!("Pode : {} : The pode sent a return value correpsonding to an unknown task, discarding...", pode_id);
+                eprintln!("Pode : {} : The pode sent a return value correpsonding to an unknown task `{}` for job `{}`, discarding...", pode_id, task_id, job_id);
                 return Box::new(future::err(Error::JobNotFound(job_id)));
             }
         } else {
             // TODO: proper error handling ?
-            eprintln!("Pode : {} : The pode sent a return value correpsonding to an unknown job, discarding...", pode_id);
+            eprintln!("Pode : {} : The pode sent a return value corresponding to an unknown job `{}`, discarding...", pode_id, job_id);
             return Box::new(future::err(Error::TaskNotFound(job_id, task_id)));
         }
     };
+
+    // println!("Time 2 : {:?}", Instant::now());
 
     // This little gymnastic is done to be able to cache job_instances.
     // TODO: There is probably a much cleaner way... :/
@@ -186,8 +195,11 @@ pub fn orchestrate(
             None => None,
         };
 
+        // println!("Time 3 : {:?}", Instant::now());
         wasm::exec_wasm(&bytecode[..], &args, instance_opt)
     };
+
+    // println!("Time 4 : {:?}", Instant::now());
 
     let res = match res {
         Ok((res, instance)) => {
@@ -210,8 +222,10 @@ pub fn orchestrate(
 
     let send_future = send_msg_tx
         .send((MANAGER_ID, Message::ReturnValue(job_id, task_id, res)))
+        .and_then(|sender| sender.send((MANAGER_ID, Message::Idle(NB_TASKS))))
         .map(|_| ())
         .map_err(|err| Error::ToShoalMpscError(err));
 
+    // println!("Time 5 : {:?}", Instant::now());
     Box::new(send_future)
 }
