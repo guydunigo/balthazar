@@ -116,10 +116,14 @@ pub fn fill(
                             .send_to(MANAGER_ID, Message::Task(job_id, 0, args))
                             .unwrap();
                     }
+
+                    // Stop the client after all is sent
+                    // TODO: use a more proper way (when all...)
                     let future = Delay::new(Instant::now() + Duration::from_secs(3))
                         .map(|_| std::process::exit(0))
                         .map_err(|_| ());
                     tokio::spawn(future);
+
                     // Then stop the receive loop:
                     Err(())
                 }
