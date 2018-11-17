@@ -18,6 +18,7 @@ pub type ConnVote = u32;
 
 // TODO: async lock?
 pub type PeerArcMut = Arc<Mutex<Peer>>;
+pub type Peers = HashMap<Pid, PeerArcMut>;
 pub type PeersMapArcMut = Arc<Mutex<HashMap<Pid, PeerArcMut>>>;
 pub type PeerArcMutOpt = Arc<Mutex<Option<PeerArcMut>>>;
 pub type MpscReceiverMessage = mpsc::Receiver<(Pid, Message)>;
@@ -307,7 +308,11 @@ impl Peer {
             )))
             */
             let peer_pid = self.pid;
-            println!("Peer : {} : Setting msg `{:?}` to be sent when peer is ready.", peer_pid, msg);
+            println!(
+                "Peer : {} : Setting msg `{:?}` to be sent when peer is ready.",
+                peer_pid,
+                &format!("{:?}", msg)[..6]
+            );
 
             let future = self
                 .ready_rx
@@ -334,6 +339,7 @@ impl Peer {
     /// // TODO: ensure that ?
     pub fn manage(&mut self, peer: PeerArcMut) {
         if let PeerState::Connected(socket) = self.state.clone() {
+            let socket_clone = socket.try_clone().unwrap();
             let framed_sock = Framed::new(socket, MessageCodec::new());
             let peer_addr = self.addr;
             let peer_clone = peer.clone();
@@ -354,7 +360,7 @@ impl Peer {
 
             tokio::spawn(manage_future);
 
-            self.send_and_spawn(Message::ConnectAck);
+            send_message_and_spawn(socket_clone.try_clone().unwrap(), Message::ConnectAck);
 
             let ping_future = Interval::new_interval(Duration::from_secs(PING_INTERVAL))
                 .inspect_err(move |err| {
