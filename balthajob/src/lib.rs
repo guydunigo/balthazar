@@ -13,19 +13,22 @@ pub mod wasm;
 use std::sync::Arc;
 use std::sync::Mutex;
 
-type Arguments = task::arguments::Arguments;
+use self::task::arguments::Arguments;
+use self::task::TaskId;
+
+pub type JobId = usize;
 
 // TODO: id with clone ?
 #[derive(Debug, Clone)]
 pub struct Job {
-    pub id: usize,
+    pub id: JobId,
     pub bytecode: Vec<u8>,
     pub tasks: Vec<Arc<Mutex<task::Task>>>,
-    next_task_id: usize,
+    next_task_id: TaskId,
 }
 
 impl Job {
-    pub fn new(id: usize, bytecode: Vec<u8>) -> Job {
+    pub fn new(id: JobId, bytecode: Vec<u8>) -> Job {
         Job {
             id,
             bytecode,
@@ -34,11 +37,11 @@ impl Job {
         }
     }
 
-    pub fn get_free_job_id(list: &[Arc<Mutex<Job>>]) -> Option<usize> {
+    pub fn get_free_job_id(list: &[Arc<Mutex<Job>>]) -> Option<JobId> {
         let mut id = 0;
 
         loop {
-            if id >= usize::max_value() {
+            if id >= JobId::max_value() {
                 break None;
             // TODO: not very efficient...
             } else if list.iter().any(|job| job.lock().unwrap().id == id) {
@@ -49,7 +52,7 @@ impl Job {
         }
     }
 
-    fn get_new_task_id(&mut self) -> usize {
+    fn get_new_task_id(&mut self) -> TaskId {
         let res = self.next_task_id;
         // TODO: usize limit ?
         self.next_task_id += 1;
@@ -60,7 +63,7 @@ impl Job {
         self.tasks.push(Arc::new(Mutex::new(task)));
     }
 
-    pub fn push_new_task(&mut self, task_id: usize, args: Arguments) {
+    pub fn push_new_task(&mut self, task_id: TaskId, args: Arguments) {
         let task = task::Task::new(task_id, args);
         self.push_task(task);
     }

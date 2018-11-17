@@ -24,11 +24,15 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use job::task::arguments::Arguments;
+use job::task::TaskId;
 use job::task::{LoneTask, Task};
 use job::Job;
+use job::JobId;
 use message::{de, Message};
 use net::asynctest::shoal::{MpscReceiverMessage, ShoalReadArc};
 use net::MANAGER_ID;
+
+pub type PodeId = u64;
 
 // ------------------------------------------------------------------
 // Errors
@@ -112,6 +116,10 @@ pub fn fill(
                             .send_to(MANAGER_ID, Message::Task(job_id, 0, args))
                             .unwrap();
                     }
+                    let future = Delay::new(Instant::now() + Duration::from_secs(3))
+                        .map(|_| std::process::exit(0))
+                        .map_err(|_| ());
+                    tokio::spawn(future);
                     // Then stop the receive loop:
                     Err(())
                 }
@@ -167,6 +175,7 @@ pub fn swim(runtime: &mut Runtime, shoal: ShoalReadArc, shoal_rx: MpscReceiverMe
                 task_id,
                 args,
             ),
+            Message::NoJob => Ok(()),
             _ => {
                 /*{
                     let mut socket = socket.lock().unwrap();
@@ -188,8 +197,8 @@ pub fn swim(runtime: &mut Runtime, shoal: ShoalReadArc, shoal_rx: MpscReceiverMe
 fn register_job(
     jobs: Arc<Mutex<Vec<Arc<Mutex<Job>>>>>,
     lone_tasks: &mut Vec<LoneTask>,
-    tx: Sender<(usize, usize)>,
-    job_id: usize,
+    tx: Sender<(JobId, TaskId)>,
+    job_id: JobId,
     bytecode: Vec<u8>,
 ) -> Vec<LoneTask> {
     let mut new_lone_tasks = Vec::with_capacity(lone_tasks.len());
@@ -241,12 +250,12 @@ fn register_job(
 
 fn register_task(
     shoal: ShoalReadArc,
-    pode_id: usize,
+    pode_id: PodeId,
     jobs: Arc<Mutex<Vec<Arc<Mutex<Job>>>>>,
     lone_tasks: &mut Vec<LoneTask>,
     tx: Sender<(usize, usize)>,
-    job_id: usize,
-    task_id: usize,
+    job_id: JobId,
+    task_id: TaskId,
     args: Arguments,
 ) -> Result<(), net::Error> {
     //TODO: use balthajob to represent jobs and tasks and execute them there.

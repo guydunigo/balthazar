@@ -11,9 +11,12 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use super::PodeId;
 use job;
+use job::task::TaskId;
 use job::wasm;
 use job::Job;
+use job::JobId;
 use message;
 use message::Message;
 use net;
@@ -35,8 +38,8 @@ pub enum Error {
     MessageError(message::Error),
     SendMsgError(net::Error),
     ExecutorMpscError,
-    JobNotFound(usize),
-    TaskNotFound(usize, usize),
+    JobNotFound(JobId),
+    TaskNotFound(JobId, TaskId),
     ToShoalMpscError(mpsc::SendError<(Pid, Message)>),
 }
 
@@ -70,9 +73,9 @@ impl From<net::Error> for Error {
 pub fn start_orchestrator(
     runtime: &mut Runtime,
     shoal: ShoalReadArc,
-    pode_id: usize,
+    pode_id: PodeId,
     jobs: Arc<Mutex<Vec<Arc<Mutex<Job>>>>>,
-) -> Sender<(usize, usize)> {
+) -> Sender<(JobId, TaskId)> {
     let (send_msg_tx, send_msg_rx) = mpsc::channel(CHANNEL_LIMIT);
     let (tasks_tx, tasks_rx) = mpsc::channel(CHANNEL_LIMIT);
     let jobs_clone = jobs.clone();
@@ -148,11 +151,11 @@ pub fn start_orchestrator(
 }
 
 pub fn orchestrate(
-    pode_id: usize,
+    pode_id: PodeId,
     jobs: Arc<Mutex<Vec<Arc<Mutex<Job>>>>>,
     job_instances: Arc<Mutex<Vec<(usize, wasm::ModuleRef)>>>,
-    job_id: usize,
-    task_id: usize,
+    job_id: JobId,
+    task_id: TaskId,
     send_msg_tx: Sender<(Pid, Message)>,
 ) -> Box<Future<Item = (), Error = Error>> {
     // println!("Time 1 : {:?}", Instant::now());

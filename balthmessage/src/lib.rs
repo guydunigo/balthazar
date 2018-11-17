@@ -17,10 +17,13 @@ use std::io::prelude::*;
 use std::iter::FusedIterator;
 
 use job::task::arguments::Arguments;
+use job::task::TaskId;
+use job::JobId;
 
 // TODO: unify with balthernet
 type Pid = u32;
 type ConnVote = u32;
+type PodeId = u32;
 
 // TODO: As parameters...
 const MESSAGE_SIZE_LIMIT: usize = 2 << 20;
@@ -77,13 +80,13 @@ pub enum Message {
     Disconnected(usize),
     MessageTooBig,
     Idle(usize),
-    RequestJob(usize),
-    InvalidJobId(usize),
-    Job(usize, Vec<u8>), // TODO: Job ids?
-    JobRegisteredAt(usize),
-    Task(usize, usize, Arguments), // TODO: Real type
+    RequestJob(JobId),
+    InvalidJobId(JobId),
+    Job(JobId, Vec<u8>), // TODO: Job ids?
+    JobRegisteredAt(JobId),
+    Task(JobId, TaskId, Arguments), // TODO: Real type
     // TODO: or tasks?
-    ReturnValue(usize, usize, Result<Arguments, ()>), // TODO: proper error
+    ReturnValue(JobId, TaskId, Result<Arguments, ()>), // TODO: proper error
     // External(E) // TODO: generic type
     NoJob,
     TestBig(Vec<u8>),
@@ -93,7 +96,7 @@ pub enum Message {
 }
 
 impl Message {
-    pub fn send<W: Write>(&self, pode_id: usize, writer: &mut W) -> Result<(), Error> {
+    pub fn send<W: Write>(&self, pode_id: PodeId, writer: &mut W) -> Result<(), Error> {
         // This prevents spending time to convert the task... :
         // TODO: same with Task ?
         if let Message::Job(_, bytecode) = self {
@@ -131,12 +134,12 @@ impl Message {
 }
 
 pub struct MessageReader<R: Read> {
-    id: usize,
+    id: Pid,
     reader: Option<R>,
 }
 
 impl<R: Read> MessageReader<R> {
-    pub fn new(id: usize, reader: R) -> MessageReader<R> {
+    pub fn new(id: Pid, reader: R) -> MessageReader<R> {
         MessageReader {
             id,
             reader: Some(reader),
@@ -336,7 +339,7 @@ mod tests {
                 vec.set_len(job_size);
             }
 
-            let msg = Message::Job(job_id, task_id, vec);
+            let msg = Message::Job(job_id, vec);
 
             match test_send_msg(msg) {
                 Ok(_) => panic!("Didn't return an error!"),
@@ -356,7 +359,7 @@ mod tests {
             ref_msg: Message,
         ) -> Result<Message, Error> {
             let mut stream = MockStream::new();
-            ref_msg.send(&mut stream).unwrap();
+            ref_msg.send(0, &mut stream).unwrap();
 
             let stream = match given_stream.take() {
                 Some(stream) => stream,
@@ -437,7 +440,7 @@ mod tests {
                 Message::MessageTooBig,
                 Message::Hello(String::from("this is a test")),
             ];
-            msgs.iter().for_each(|m| m.send(&mut stream).unwrap());
+            msgs.iter().for_each(|m| m.send(0, &mut stream).unwrap());
 
             msgs.drain(..).for_each(|m| {
                 if let Err(err) = test_receive_msg(Some(&mut stream), m) {

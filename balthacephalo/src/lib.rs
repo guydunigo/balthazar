@@ -39,12 +39,12 @@ impl From<net::Error> for Error {
 
 // ------------------------------------------------------------------
 
-// TODO: name threads
 pub fn swim(
     runtime: &mut Runtime,
     shoal: ShoalReadArc,
     shoal_rx: MpscReceiverMessage,
 ) -> Result<(), Error> {
+    // TODO: hashmap in wrapper object
     let jobs_rc = Arc::new(Mutex::new(Vec::new()));
 
     let shoal_rx_future = shoal_rx

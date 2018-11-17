@@ -1,17 +1,20 @@
 pub mod arguments;
 
 use self::arguments::Arguments;
+use super::JobId;
+
+pub type TaskId = usize;
 
 #[derive(Debug)]
 pub struct LoneTask {
-    pub job_id: usize,
+    pub job_id: JobId,
     pub task: Task,
 }
 
 // TODO: id with clone ?
 #[derive(Debug, Clone)]
 pub struct Task {
-    pub id: usize,
+    pub id: TaskId,
     pub args: Arguments, // TODO: wasm arg list ?
     pub result: Option<Result<Arguments, ()>>,
     // TODO: Pid + timestamp
@@ -20,7 +23,7 @@ pub struct Task {
 }
 
 impl Task {
-    pub fn new(id: usize, args: Arguments) -> Task {
+    pub fn new(id: TaskId, args: Arguments) -> Task {
         Task {
             id,
             args,
