@@ -307,6 +307,8 @@ impl Peer {
             )))
             */
             let peer_pid = self.pid;
+            println!("Peer : {} : Setting msg `{:?}` to be sent when peer is ready.", peer_pid, msg);
+
             let future = self
                 .ready_rx
                 .clone()

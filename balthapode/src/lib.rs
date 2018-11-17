@@ -82,7 +82,7 @@ pub fn fill(
         let mut code: Vec<u8> = Vec::new();
         f.read_to_end(&mut code)?;
 
-        let delay_future = Delay::new(Instant::now() + Duration::from_secs(10))
+        let delay_future = Delay::new(Instant::now() + Duration::from_secs(0))
             .map_err(net::Error::from)
             .and_then(move |_| {
                 let shoal = shoal_clone.clone();

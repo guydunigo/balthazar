@@ -99,7 +99,7 @@ pub fn start_orchestrator(
             .map_err(move |err| {
                 eprintln!("Executor : {} : Error : `{:?}`", pode_id, err);
             });
-        let future = Delay::new(Instant::now() + Duration::from_secs(5))
+        let future = Delay::new(Instant::now() + Duration::from_secs(0))
             .map_err(|_| ())
             .and_then(|_| future);
 

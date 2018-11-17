@@ -106,6 +106,8 @@ impl Shoal {
             }
             None => {
                 // Err(Error::PeerNotFound(peer_pid)),
+                println!("Shoal : Setting msg `{:?}` to be sent when peer `{}` is created.", msg, peer_pid);
+
                 let mut om = self.orphan_messages.lock().unwrap();
                 let ready_rx = match om.get(&peer_pid) {
                     Some((_, ready_rx)) => ready_rx.clone(),
