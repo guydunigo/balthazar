@@ -84,7 +84,7 @@ fn for_each_message_connecting(
         match msg {
             Message::Connect(peer_pid) => {
                 let peers = shoal.lock().peers();
-                let mut peers_locked = peers.lock().unwrap();
+                let peers_locked = peers.lock().unwrap();
 
                 if let Some(peer_from_peers) = peers_locked.get(&peer_pid) {
                     // println!("Listener : {} : Peer is in peers.", peer_addr);
@@ -125,12 +125,14 @@ fn for_each_message_connecting(
 
                     let peer = Peer::new(shoal.clone(), *peer_pid, peer_addr);
                     let peer_arc_mut = Arc::new(Mutex::new(peer));
-                    let mut peer = peer_arc_mut.lock().unwrap();
 
-                    peer.listener_connection_ack(peer_arc_mut.clone(), socket);
+                    {
+                        let mut peer = peer_arc_mut.lock().unwrap();
+                        peer.listener_connection_ack(peer_arc_mut.clone(), socket);
+                    }
 
                     *peer_opt = Some(peer_arc_mut.clone());
-                    peers_locked.insert(*peer_pid, peer_arc_mut.clone());
+                    shoal.lock().insert_peer(peer_arc_mut);
                 }
             }
             _ => eprintln!("Listener : received a message but it was not `Connect(pid,vote)`."),

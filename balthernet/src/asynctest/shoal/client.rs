@@ -92,7 +92,7 @@ fn for_each_message_connecting(
         match msg {
             Message::ConnectReceived(peer_pid) => {
                 let peers = shoal.lock().peers();
-                let mut peers_locked = peers.lock().unwrap();
+                let peers_locked = peers.lock().unwrap();
 
                 if let Some(peer_from_peers) = peers_locked.get(&peer_pid) {
                     // println!("Client : {} : Peer is in peers.", peer_addr);
@@ -139,7 +139,7 @@ fn for_each_message_connecting(
 
                     let peer = Arc::new(Mutex::new(peer));
                     *peer_opt = Some(peer.clone());
-                    peers_locked.insert(*peer_pid, peer);
+                    shoal.lock().insert_peer(peer);
                 }
             }
             _ => eprintln!(

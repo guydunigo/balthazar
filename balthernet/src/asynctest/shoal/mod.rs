@@ -1,4 +1,5 @@
-use futures::sync::mpsc;
+use futures::future::Shared;
+use futures::sync::{mpsc, oneshot};
 use tokio::io;
 use tokio::prelude::*;
 use tokio::runtime::Runtime;
@@ -22,6 +23,17 @@ const SHOAL_MPSC_SIZE: usize = 32;
 
 // TODO: Good for big messages ?
 pub type MsgsMapArcMut = Arc<Mutex<HashMap<Message, Vec<Pid>>>>;
+pub type OrphanMsgsMapArcMut = Arc<
+    Mutex<
+        HashMap<
+            Pid,
+            (
+                oneshot::Sender<PeerArcMut>,
+                Shared<oneshot::Receiver<PeerArcMut>>,
+            ),
+        >,
+    >,
+>;
 
 // ------------------------------------------------------------------
 /// # Shoal
@@ -44,6 +56,7 @@ pub struct Shoal {
     // TODO: Clean sometimes ?
     // TODO: have a way to monitor size ?
     msgs_received: MsgsMapArcMut,
+    orphan_messages: OrphanMsgsMapArcMut,
 }
 
 impl Shoal {
@@ -56,6 +69,7 @@ impl Shoal {
                 tx,
                 peers: Arc::new(Mutex::new(HashMap::new())),
                 msgs_received: Arc::new(Mutex::new(HashMap::new())),
+                orphan_messages: Arc::new(Mutex::new(HashMap::new())),
             },
             rx,
         )
@@ -90,7 +104,30 @@ impl Shoal {
                 peer.send_and_spawn(msg.clone());
                 Ok(())
             }
-            None => Err(Error::PeerNotFound(peer_pid)),
+            None => {
+                // Err(Error::PeerNotFound(peer_pid)),
+                let mut om = self.orphan_messages.lock().unwrap();
+                let ready_rx = match om.get(&peer_pid) {
+                    Some((_, ready_rx)) => ready_rx.clone(),
+                    None => {
+                        let (ready_tx, ready_rx) = oneshot::channel();
+                        let ready_rx = ready_rx.shared();
+
+                        om.insert(peer_pid, (ready_tx, ready_rx.clone()));
+                        ready_rx
+                    }
+                };
+
+                let future = ready_rx
+                    .map_err(|err| Error::OneShotError(err))
+                    .and_then(|peer| peer.lock().unwrap().send(msg))
+                    .map(|_| ())
+                    // TODO: discarding error, really ?
+                    .map_err(|_| ());
+                tokio::spawn(future);
+
+                Ok(())
+            }
         }
     }
 
@@ -123,6 +160,20 @@ impl Shoal {
                 peer.send_and_spawn(msg.clone());
             }
         });
+    }
+
+    pub fn insert_peer(&self, peer: PeerArcMut) {
+        let mut peers = self.peers.lock().unwrap();
+        let peer_pid = peer.lock().unwrap().pid();
+        let mut om = self.orphan_messages.lock().unwrap();
+
+        peers.insert(peer_pid, peer.clone());
+
+        if let Some((ready_tx, _)) = om.remove(&peer_pid) {
+            ready_tx
+                .send(peer)
+                .expect("Peer : Could not send peer to orphan messages.");
+        }
     }
 }
 

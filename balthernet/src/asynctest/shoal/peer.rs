@@ -1,4 +1,5 @@
-use futures::sync::mpsc;
+use futures::future::Shared;
+use futures::sync::{mpsc, oneshot};
 use rand::random;
 use tokio::codec::Framed;
 use tokio::net::TcpStream;
@@ -121,10 +122,11 @@ impl Clone for PeerState {
     }
 }
 
+#[derive(Debug)]
 pub struct Peer {
     // TODO: no `pub` ?
     pid: Pid,
-    shoal: ShoalReadWeak,
+    // shoal: ShoalReadWeak,
     // TODO: Useful to have here a separate tx ?
     shoal_tx: MpscSenderMessage,
     pub addr: SocketAddr,
@@ -134,19 +136,24 @@ pub struct Peer {
     pub client_connecting: bool,
     // TODO: set to false when listener socket error...
     pub listener_connecting: bool,
+    pub ready_rx: Shared<oneshot::Receiver<TcpStream>>,
+    ready_tx: Option<oneshot::Sender<TcpStream>>,
 }
 
 impl Peer {
     pub fn new(shoal: ShoalReadArc, peer_pid: Pid, addr: SocketAddr) -> Self {
+        let (ready_tx, ready_rx) = oneshot::channel();
         Peer {
             pid: peer_pid,
-            shoal: shoal.downgrade(),
+            // shoal: shoal.downgrade(),
             shoal_tx: shoal.lock().tx().clone(),
             addr,
             ping_status: PingStatus::new(),
             state: PeerState::NotConnected,
             client_connecting: false,
             listener_connecting: false,
+            ready_tx: Some(ready_tx),
+            ready_rx: ready_rx.shared(),
         }
     }
 
@@ -198,14 +205,36 @@ impl Peer {
         self.to_connecting()
     }
 
+    fn create_oneshot(&mut self) {
+        let (ready_tx, ready_rx) = oneshot::channel();
+        self.ready_tx = Some(ready_tx);
+        self.ready_rx = ready_rx.shared();
+    }
+
     // TODO: return Result ?
     /// **Important** : peer must be a reference to self.
     /// TODO: to a wrapper like for Shoal ?
     pub fn connected(&mut self, peer: PeerArcMut, socket: TcpStream) -> Result<(), Error> {
+        let socket_clone = socket.try_clone().unwrap();
         // TODO: other checks ?
         self.listener_connecting = false;
         self.client_connecting = false;
         self.state = PeerState::Connected(socket);
+
+        let ready_tx_sent = self.ready_tx.take();
+
+        let sender = match ready_tx_sent {
+            Some(sender) => sender,
+            None => {
+                self.create_oneshot();
+                self.ready_tx
+                    .take()
+                    .expect("The readiness oneshot was just created, it should be Some().")
+            }
+        };
+        sender
+            .send(socket_clone)
+            .expect("Peer : Couldn't send readiness to peer oneshot.");
 
         println!("Manager : {} : Connected to : `{}`", self.addr, self.pid);
 
@@ -254,6 +283,7 @@ impl Peer {
     pub fn disconnect(&mut self) {
         self.ping_status = PingStatus::NoPingYet;
         self.state = PeerState::NotConnected;
+        self.create_oneshot();
         // TODO: disconnect message ?
     }
 
@@ -267,6 +297,7 @@ impl Peer {
             // TODO: unwrap?
             Box::new(send_message(socket.try_clone().unwrap(), msg))
         } else {
+            /*
             eprintln!(
                 "Can't send `{:?}`, `peer.state` not in `Connected(socket)` !",
                 msg
@@ -274,6 +305,21 @@ impl Peer {
             Box::new(future::err(Error::PeerNotInConnectedState(
                 "Can't send message `{:?}`.".to_string(),
             )))
+            */
+            let peer_pid = self.pid;
+            let future = self
+                .ready_rx
+                .clone()
+                .map_err(|err| Error::OneShotError(err))
+                .and_then(|socket| send_message(socket.try_clone().unwrap(), msg))
+                .map_err(move |err| {
+                    // TODO: Resend the message ?
+                    panic!(
+                        "Peer : {} : Peer was supposed to be ready but it is not ! {:?}",
+                        peer_pid, err
+                    );
+                });
+            Box::new(future)
         }
     }
 

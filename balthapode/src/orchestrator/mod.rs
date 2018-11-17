@@ -22,6 +22,7 @@ use net::asynctest::Pid;
 use net::MANAGER_ID;
 
 const NB_TASKS: usize = 1;
+// TODO: good size ?
 const CHANNEL_LIMIT: usize = 64;
 const IDLE_CHECK_INTERVAL: u64 = 3;
 
@@ -36,7 +37,6 @@ pub enum Error {
     ExecutorMpscError,
     JobNotFound(usize),
     TaskNotFound(usize, usize),
-    ShoalSendMessageError(net::Error),
     ToShoalMpscError(mpsc::SendError<(Pid, Message)>),
 }
 
@@ -197,6 +197,7 @@ pub fn orchestrate(
         };
 
         // println!("Time 3 : {:?}", Instant::now());
+        // This is very slow when compiled in debug mode (much better in release)
         wasm::exec_wasm(&bytecode[..], &args, instance_opt)
     };
 
