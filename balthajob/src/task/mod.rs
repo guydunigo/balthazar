@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use self::arguments::Arguments;
 use super::JobId;
-use super::Pid;
+use super::PeerId;
 
 // Arbitrary id given by job sender or hash ?
 pub type TaskId = usize;
@@ -22,7 +22,7 @@ pub struct Task {
     pub id: TaskId,
     pub args: Arguments, // TODO: wasm arg list ?
     pub result: Option<Result<Arguments, ()>>,
-    // TODO: Pid + timestamp
+    // TODO: PeerId + timestamp
     is_available: bool,
     // TODO: date?
 }
@@ -41,11 +41,11 @@ impl Task {
         self.result.is_none() && self.is_available
     }
 
-    pub fn set_available(&mut self, _peer_pid: Pid) {
+    pub fn set_available(&mut self, _peer_pid: PeerId) {
         self.is_available = true;
     }
 
-    pub fn set_unavailable(&mut self, _peer_pid: Pid) {
+    pub fn set_unavailable(&mut self, _peer_pid: PeerId) {
         self.is_available = false;
     }
 }

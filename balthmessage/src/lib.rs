@@ -21,7 +21,7 @@ use job::task::TaskId;
 use job::JobId;
 
 // TODO: unify with balthernet
-type Pid = u32;
+type PeerId = u32;
 type ConnVote = u32;
 type PodeId = u32;
 
@@ -67,10 +67,10 @@ impl From<de::Error> for Error {
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Hash)]
 pub enum Message {
     Hello(String),
-    // TODO: use `type Pid` and `type ConnVote`
-    Connect(Pid),
+    // TODO: use `type PeerId` and `type ConnVote`
+    Connect(PeerId),
     // TODO: rename ?
-    ConnectReceived(Pid),
+    ConnectReceived(PeerId),
     Vote(ConnVote),
     ConnectAck,
     ConnectCancel,
@@ -82,7 +82,7 @@ pub enum Message {
     Idle(usize),
     RequestJob(JobId),
     InvalidJobId(JobId),
-    Job(JobId, Vec<u8>), // TODO: Job ids?
+    Job(PeerId, JobId, Vec<u8>), // TODO: more a signature than JobId
     JobRegisteredAt(JobId),
     Task(JobId, TaskId, Arguments), // TODO: Real type
     // TODO: or tasks?
@@ -99,7 +99,7 @@ impl Message {
     pub fn send<W: Write>(&self, pode_id: PodeId, writer: &mut W) -> Result<(), Error> {
         // This prevents spending time to convert the task... :
         // TODO: same with Task ?
-        if let Message::Job(_, bytecode) = self {
+        if let Message::Job(_, _, bytecode) = self {
             if bytecode.len() >= JOB_SIZE_LIMIT as usize {
                 return Err(Error::JobTooBig(bytecode.len()));
             }
@@ -109,7 +109,7 @@ impl Message {
         let len = msg_str.len();
 
         match self {
-            Message::Job(job_id, _) => {
+            Message::Job(_, job_id, _) => {
                 println!("{} : sending Job #{} of {} bytes.", pode_id, job_id, len)
             }
             Message::Task(job_id, task_id, _) => println!(
@@ -134,12 +134,12 @@ impl Message {
 }
 
 pub struct MessageReader<R: Read> {
-    id: Pid,
+    id: PeerId,
     reader: Option<R>,
 }
 
 impl<R: Read> MessageReader<R> {
-    pub fn new(id: Pid, reader: R) -> MessageReader<R> {
+    pub fn new(id: PeerId, reader: R) -> MessageReader<R> {
         MessageReader {
             id,
             reader: Some(reader),
@@ -228,7 +228,7 @@ impl<R: Read> Iterator for MessageReader<R> {
                 Ok(msg) => {
                     // TODO: same with Task ?
                     match msg {
-                        Message::Job(job_id, _) => {
+                        Message::Job(_, job_id, _) => {
                             println!("{} : received Job #{}.", self.id, job_id)
                         }
                         Message::Task(job_id, task_id, _) => println!(
@@ -269,7 +269,7 @@ mod tests {
         fn test_send_msg(msg: Message) -> Result<(), Error> {
             let mut writer = MockStream::new();
 
-            let res = msg.send(&mut writer);
+            let res = msg.send(0, &mut writer);
 
             match res {
                 Ok(()) => {
@@ -339,7 +339,7 @@ mod tests {
                 vec.set_len(job_size);
             }
 
-            let msg = Message::Job(job_id, vec);
+            let msg = Message::Job(0, job_id, vec);
 
             match test_send_msg(msg) {
                 Ok(_) => panic!("Didn't return an error!"),

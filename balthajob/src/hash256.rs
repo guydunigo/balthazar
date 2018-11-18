@@ -3,7 +3,7 @@ use sha3::{Digest, Sha3_256};
 use std::fmt;
 use std::ops::Deref;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Hash256 {
     inner: [u8; 32],
 }

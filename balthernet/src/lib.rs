@@ -20,9 +20,9 @@ use balthmessage::{Message, MessageReader};
 
 pub mod asynctest;
 pub mod listener;
-use self::asynctest::Pid;
+use self::asynctest::PeerId;
 
-pub const MANAGER_ID: Pid = 9000;
+pub const MANAGER_ID: PeerId = 9000;
 
 // ------------------------------------------------------------------
 // Errors
@@ -43,7 +43,7 @@ pub enum Error {
     ConnectionCancelled,
     PingSendError,
     PeerNotInConnectedState(String),
-    PeerNotFound(Pid),
+    PeerNotFound(PeerId),
     ShoalMpscError,
     OneShotError(SharedError<futures::Canceled>),
 }

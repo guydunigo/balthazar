@@ -13,9 +13,9 @@ use std::io;
 use std::sync::{Arc, Mutex};
 
 use job::Job;
-use job::{JobArcMut, JobsMapArcMut};
+use job::JobsMapArcMut;
 use message::Message;
-use net::asynctest::shoal::{MpscReceiverMessage, Pid, ShoalReadArc};
+use net::asynctest::shoal::{MpscReceiverMessage, PeerId, ShoalReadArc};
 
 // ------------------------------------------------------------------
 // Errors
@@ -67,7 +67,7 @@ pub fn swim(
 pub fn for_each_message(
     shoal: ShoalReadArc,
     jobs_rc: JobsMapArcMut,
-    peer_pid: Pid,
+    peer_pid: PeerId,
     msg: Message,
 ) -> Result<(), Error> {
     match msg {
@@ -81,11 +81,11 @@ pub fn for_each_message(
                         let job_id = job.lock().unwrap().id;
                         shoal
                             .lock()
-                            .send_to(peer_pid, Message::Task(job_id, task.id, task.args.clone()))?;
-                        task.set_unavailable();
+                            .send_to(peer_pid, Message::Task(job_id, task.id, task.args.clone()));
+                        task.set_unavailable(peer_pid);
                     }
                     None => {
-                        shoal.lock().send_to(peer_pid, Message::NoJob)?;
+                        shoal.lock().send_to(peer_pid, Message::NoJob);
                         break;
                     }
                 }
@@ -96,52 +96,48 @@ pub fn for_each_message(
                 .lock()
                 .unwrap()
                 .iter()
-                .find(|j| j.lock().unwrap().id == job_id)
+                .find(|(id, _)| **id == job_id)
             {
-                Some(job) => {
-                    //TODO: Don't like cloning probably big array...
+                Some((job_id, job)) => {
+                    // TODO: Don't like cloning probably big array...
                     let bytecode = job.lock().unwrap().bytecode.clone();
-                    Message::Job(job_id, bytecode)
+                    Message::Job(shoal.lock().local_pid(), *job_id, bytecode)
                 }
                 None => Message::InvalidJobId(job_id),
             };
 
-            shoal.lock().send_to(peer_pid, msg)?;
+            shoal.lock().send_to(peer_pid, msg);
         }
-        Message::Job(_, job) => {
+        Message::Job(sender_pid, _job_id, job) => {
+            // TODO: check job_id, send confirmation/error message ?
             let mut jobs = jobs_rc.lock().unwrap();
 
-            let new_job_id = Job::get_free_job_id(&jobs[..]).unwrap();
+            let mut job = Job::new(sender_pid, job);
 
-            let mut job = Job::new(new_job_id, job);
-            jobs.push(Arc::new(Mutex::new(job)));
-
-            shoal
-                .lock()
-                .send_to(peer_pid, Message::JobRegisteredAt(new_job_id))?;
+            jobs.insert(job.id, Arc::new(Mutex::new(job)));
         }
         // TODO: The pode who sends task should be the same as the one sending the job ?
-        Message::Task(job_id, _, args) => {
+        Message::Task(job_id, task_id, args) => {
             let mut jobs = jobs_rc.lock().unwrap();
-            let job = match jobs.iter().find(|j| j.lock().unwrap().id == job_id) {
-                Some(job) => job.clone(),
+            let job = match jobs.iter().find(|(id, _)| **id == job_id) {
+                Some((_, job)) => job.clone(),
                 None => return Ok(()), // TODO: Error unknown id.
             };
 
-            job.lock().unwrap().new_task(args);
+            job.lock().unwrap().add_new_task_with_id(task_id, args);
         }
         Message::ReturnValue(job_id, task_id, value) => {
             // TODO: deadlock?
             // TODO: check job and task ids ?
             let jobs = jobs_rc.lock().unwrap();
-            let job = jobs.get(job_id);
+            let job = jobs.get(&job_id);
             if let Some(job) = job {
                 let job = job.lock().unwrap();
-                let task = job.tasks.get(task_id);
+                let task = job.tasks.get(&task_id);
                 if let Some(task) = task {
                     let mut task = task.lock().unwrap();
                     task.result = Some(value);
-                    task.set_unavailable();
+                    task.set_unavailable(peer_pid);
                 } else {
                     // TODO: proper error handling ?
                     eprintln!("Cephalo : {} : The pode sent a return value correpsonding to an unknown task, discarding...", peer_pid);
@@ -153,7 +149,7 @@ pub fn for_each_message(
         }
         _ => shoal
             .lock()
-            .send_to(peer_pid, Message::Hello("Hey".to_string()))?,
+            .send_to(peer_pid, Message::Hello("Hey".to_string())),
     }
 
     Ok(())

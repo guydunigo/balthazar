@@ -12,7 +12,7 @@ use tokio::runtime::Runtime;
 use std::convert::From;
 use std::fs::File;
 
-use net::asynctest::Pid;
+use net::asynctest::PeerId;
 
 // ------------------------------------------------------------------
 // Errors
@@ -79,7 +79,7 @@ pub fn swim(config: config_parser::Config) -> Result<(), Error> {
     let addrs: Vec<String> = ron::de::from_reader(reader).unwrap();
 
     // TODO: actual pid
-    let local_pid: Pid = config.addr.port() as Pid;
+    let local_pid: PeerId = config.addr.port() as PeerId;
     println!("Using pid : {}", local_pid);
 
     let mut runtime = Runtime::new().map_err(net::Error::from)?;

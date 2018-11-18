@@ -50,7 +50,7 @@ impl Decoder for MessageCodec {
 
                 // TODO: same with Task ?
                 match msg {
-                    Message::Job(job_id, _) => println!("-- Received : Job #{}.", job_id),
+                    Message::Job(_, job_id, _) => println!("-- Received : Job #{}.", job_id),
                     Message::Task(job_id, task_id, _) => {
                         println!("-- Received : Task #{} for Job #{}.", task_id, job_id)
                     }
@@ -93,7 +93,7 @@ impl Encoder for MessageCodec {
         */
         // This prevents spending time to convert the task... :
         // TODO: same with Task ?
-        if let Message::Job(_, bytecode) = &message {
+        if let Message::Job(_, _, bytecode) = &message {
             if bytecode.len() >= JOB_SIZE_LIMIT as usize {
                 return Err(Error::JobTooBig(bytecode.len()));
             }
@@ -103,7 +103,7 @@ impl Encoder for MessageCodec {
         let len = msg_str.len();
 
         match message {
-            Message::Job(job_id, _) => println!("-- Sending Job #{} of {} bytes.", job_id, len),
+            Message::Job(_, job_id, _) => println!("-- Sending Job #{} of {} bytes.", job_id, len),
             Message::Task(job_id, task_id, _) => println!(
                 "-- Sending Task #{} for Job #{} of {} bytes.",
                 task_id, job_id, len

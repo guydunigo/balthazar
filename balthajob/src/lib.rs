@@ -22,10 +22,12 @@ use self::task::{TaskArcMut, TaskId};
 pub type JobId = Hash256;
 pub type JobArcMut = Arc<Mutex<Job>>;
 pub type JobsMap = HashMap<JobId, JobArcMut>;
+
+// TODO: wrapper to manage it, prevent overriding, ...
 pub type JobsMapArcMut = Arc<Mutex<JobsMap>>;
 
-// TODO: don't duplicate Pid...
-pub type Pid = u32;
+// TODO: don't duplicate PeerId...
+pub type PeerId = u32;
 const PID_LEN: usize = 4;
 
 pub enum Error {
@@ -38,12 +40,13 @@ pub enum Error {
 pub struct Job {
     pub id: JobId,
     pub bytecode: Vec<u8>,
+    // TODO: beware of overriding, ...
     pub tasks: HashMap<TaskId, TaskArcMut>,
 }
 
 impl Job {
     // TODO: Take as well a hash given by the sender to compare ?
-    pub fn new(sender_pid: Pid, bytecode: Vec<u8>) -> Job {
+    pub fn new(sender_pid: PeerId, bytecode: Vec<u8>) -> Job {
         let id = calculate_job_id(sender_pid, &bytecode[..]);
         Job {
             id,
@@ -89,13 +92,14 @@ impl Job {
         }
     }
 
-    fn set_bytecode(&mut self, bytecode: Vec<u8>) {
+    pub fn set_bytecode(&mut self, bytecode: Vec<u8>) {
         self.bytecode = bytecode;
     }
 }
 
+// TODO: what happens between the mutex unlock and the new lock ? return MutexGuard ?
 // TODO: get the peer id as an argument to choose which task to give, check that it doesn't have too many, ...
-pub fn get_available_task(jobs: JobsMap) -> Option<(JobArcMut, TaskArcMut)> {
+pub fn get_available_task(jobs: &JobsMap) -> Option<(JobArcMut, TaskArcMut)> {
     jobs.iter()
         .map(|(_, job)| (job, job.lock().unwrap().get_available_task()))
         .skip_while(|(_, task_option)| task_option.is_none())
@@ -114,7 +118,7 @@ pub fn get_available_task(jobs: JobsMap) -> Option<(JobArcMut, TaskArcMut)> {
 //      - The job sender would have to track which task ids and results are for each job : easy, just write it in the arguments...
 //      - OR : sender sends a uid with the job...
 // TODO: other way to get the job_id : signature sent by sender?
-fn calculate_job_id(sender_pid: Pid, bytecode: &[u8]) -> JobId {
+fn calculate_job_id(sender_pid: PeerId, bytecode: &[u8]) -> JobId {
     let pid_bytes = sender_pid.to_le_bytes();
     let mut vec = Vec::with_capacity(bytecode.len() + PID_LEN);
 

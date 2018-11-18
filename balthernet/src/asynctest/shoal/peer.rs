@@ -13,16 +13,16 @@ use std::time::{Duration, Instant};
 
 use super::*;
 
-pub type Pid = u32;
+pub type PeerId = u32;
 pub type ConnVote = u32;
 
 // TODO: async lock?
 pub type PeerArcMut = Arc<Mutex<Peer>>;
-pub type Peers = HashMap<Pid, PeerArcMut>;
-pub type PeersMapArcMut = Arc<Mutex<HashMap<Pid, PeerArcMut>>>;
+pub type Peers = HashMap<PeerId, PeerArcMut>;
+pub type PeersMapArcMut = Arc<Mutex<HashMap<PeerId, PeerArcMut>>>;
 pub type PeerArcMutOpt = Arc<Mutex<Option<PeerArcMut>>>;
-pub type MpscReceiverMessage = mpsc::Receiver<(Pid, Message)>;
-pub type MpscSenderMessage = mpsc::Sender<(Pid, Message)>;
+pub type MpscReceiverMessage = mpsc::Receiver<(PeerId, Message)>;
+pub type MpscSenderMessage = mpsc::Sender<(PeerId, Message)>;
 
 /// Interval between ping messages in seconds
 const PING_INTERVAL: u64 = 3;
@@ -129,7 +129,7 @@ impl Clone for PeerState {
 #[derive(Debug)]
 pub struct Peer {
     // TODO: no `pub` ?
-    pid: Pid,
+    pid: PeerId,
     // shoal: ShoalReadWeak,
     // TODO: Useful to have here a separate tx ?
     shoal_tx: MpscSenderMessage,
@@ -145,7 +145,7 @@ pub struct Peer {
 }
 
 impl Peer {
-    pub fn new(shoal: ShoalReadArc, peer_pid: Pid, addr: SocketAddr) -> Self {
+    pub fn new(shoal: ShoalReadArc, peer_pid: PeerId, addr: SocketAddr) -> Self {
         let (ready_tx, ready_rx) = oneshot::channel();
         Peer {
             pid: peer_pid,
@@ -181,7 +181,7 @@ impl Peer {
         self.ping_status.is_ping_sent()
     }
 
-    pub fn pid(&self) -> Pid {
+    pub fn pid(&self) -> PeerId {
         self.pid
     }
 

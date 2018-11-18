@@ -1,6 +1,8 @@
 use futures::future::Shared;
 use futures::sync::{mpsc, oneshot};
+use tokio::codec::Framed;
 use tokio::io;
+use tokio::net::TcpStream;
 use tokio::prelude::*;
 use tokio::runtime::Runtime;
 
@@ -22,11 +24,11 @@ use super::super::parse_socket_addr;
 const SHOAL_MPSC_SIZE: usize = 32;
 
 // TODO: Good for big messages ?
-pub type MsgsMapArcMut = Arc<Mutex<HashMap<Message, Vec<Pid>>>>;
+pub type MsgsMapArcMut = Arc<Mutex<HashMap<Message, Vec<PeerId>>>>;
 pub type OrphanMsgsMapArcMut = Arc<
     Mutex<
         HashMap<
-            Pid,
+            PeerId,
             (
                 oneshot::Sender<PeerArcMut>,
                 Shared<oneshot::Receiver<PeerArcMut>>,
@@ -48,7 +50,7 @@ pub type OrphanMsgsMapArcMut = Arc<
 /// > **Shoal** because this *materializes* the local *cephalopode* and its peers *swimming* together and
 /// communicating.
 pub struct Shoal {
-    local_pid: Pid,
+    local_pid: PeerId,
     local_addr: SocketAddr,
     tx: MpscSenderMessage,
     // TODO: peers accessor that automatically clones it ?
@@ -60,7 +62,7 @@ pub struct Shoal {
 }
 
 impl Shoal {
-    pub fn new(local_pid: Pid, local_addr: SocketAddr) -> (Self, MpscReceiverMessage) {
+    pub fn new(local_pid: PeerId, local_addr: SocketAddr) -> (Self, MpscReceiverMessage) {
         let (tx, rx) = mpsc::channel(SHOAL_MPSC_SIZE);
         (
             Shoal {
@@ -75,7 +77,7 @@ impl Shoal {
         )
     }
 
-    pub fn local_pid(&self) -> Pid {
+    pub fn local_pid(&self) -> PeerId {
         self.local_pid
     }
 
@@ -95,14 +97,26 @@ impl Shoal {
         self.tx.clone()
     }
 
-    pub fn send_to(&self, peer_pid: Pid, msg: Message) -> Result<(), Error> {
+    pub fn send_to(&self, peer_pid: PeerId, msg: Message) {
+        // TODO: do not discard errors ...
+        let future = self
+            .send_to_future(peer_pid, msg)
+            .map(|_| ())
+            .map_err(|_| ());
+        tokio::spawn(future);
+    }
+
+    pub fn send_to_future(
+        &self,
+        peer_pid: PeerId,
+        msg: Message,
+    ) -> Box<Future<Item = Framed<TcpStream, MessageCodec>, Error = Error> + Send> {
         let peers = self.peers.lock().unwrap();
 
         match peers.get(&peer_pid) {
             Some(peer) => {
                 let mut peer = peer.lock().unwrap();
-                peer.send_and_spawn(msg.clone());
-                Ok(())
+                Box::new(peer.send(msg.clone()))
             }
             None => {
                 // Err(Error::PeerNotFound(peer_pid)),
@@ -126,38 +140,14 @@ impl Shoal {
 
                 let future = ready_rx
                     .map_err(|err| Error::OneShotError(err))
-                    .and_then(|peer| peer.lock().unwrap().send(msg))
-                    .map(|_| ())
-                    // TODO: discarding error, really ?
-                    .map_err(|_| ());
-                tokio::spawn(future);
+                    .and_then(|peer| peer.lock().unwrap().send(msg));
 
-                Ok(())
+                Box::new(future)
             }
         }
     }
 
-    pub fn send_to_with_runtime(
-        &self,
-        runtime: &mut Runtime,
-        peer_pid: Pid,
-        msg: Message,
-    ) -> Result<(), Error> {
-        let peers = self.peers.lock().unwrap();
-
-        match peers.get(&peer_pid) {
-            Some(peer) => {
-                let mut peer = peer.lock().unwrap();
-                let send_future = peer.send(msg).map(|_| ()).map_err(|_| ());
-                runtime.spawn(send_future);
-
-                Ok(())
-            }
-            None => Err(Error::PeerNotFound(peer_pid)),
-        }
-    }
-
-    pub fn broadcast(&self, msg: Message, exclude: &[Pid]) {
+    pub fn broadcast(&self, msg: Message, exclude: &[PeerId]) {
         let peers = self.peers.lock().unwrap();
 
         peers.iter().for_each(|(pid, peer)| {
@@ -201,7 +191,7 @@ impl From<Shoal> for ShoalReadArc {
 }
 
 impl ShoalReadArc {
-    pub fn new(local_pid: Pid, local_addr: SocketAddr) -> (Self, MpscReceiverMessage) {
+    pub fn new(local_pid: PeerId, local_addr: SocketAddr) -> (Self, MpscReceiverMessage) {
         let (shoal, rx) = Shoal::new(local_pid, local_addr);
         (
             ShoalReadArc {

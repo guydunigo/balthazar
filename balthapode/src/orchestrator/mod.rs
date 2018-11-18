@@ -15,13 +15,13 @@ use super::PodeId;
 use job;
 use job::task::TaskId;
 use job::wasm;
-use job::Job;
 use job::JobId;
+use job::JobsMapArcMut;
 use message;
 use message::Message;
 use net;
 use net::asynctest::shoal::ShoalReadArc;
-use net::asynctest::Pid;
+use net::asynctest::PeerId;
 use net::MANAGER_ID;
 
 const NB_TASKS: usize = 16;
@@ -40,7 +40,7 @@ pub enum Error {
     ExecutorMpscError,
     JobNotFound(JobId),
     TaskNotFound(JobId, TaskId),
-    ToShoalMpscError(mpsc::SendError<(Pid, Message)>),
+    ToShoalMpscError(mpsc::SendError<(PeerId, Message)>),
 }
 
 impl From<io::Error> for Error {
@@ -74,7 +74,7 @@ pub fn start_orchestrator(
     runtime: &mut Runtime,
     shoal: ShoalReadArc,
     pode_id: PodeId,
-    jobs: Arc<Mutex<Vec<Arc<Mutex<Job>>>>>,
+    jobs: JobsMapArcMut,
 ) -> Sender<(JobId, TaskId)> {
     let (send_msg_tx, send_msg_rx) = mpsc::channel(CHANNEL_LIMIT);
     let (tasks_tx, tasks_rx) = mpsc::channel(CHANNEL_LIMIT);
@@ -83,7 +83,8 @@ pub fn start_orchestrator(
 
     thread::spawn(move || {
         // The wasm interpreter takes time to initialize, so we cache the "instance" for later use :
-        let job_instances: Vec<(usize, wasm::ModuleRef)> = Vec::new();
+        // TODO: use hash of code directly to avoid duplicates ?
+        let job_instances: Vec<(JobId, wasm::ModuleRef)> = Vec::new();
         // Use Rc ?
         let job_instances = Arc::new(Mutex::new(job_instances));
 
@@ -124,10 +125,11 @@ pub fn start_orchestrator(
         let jobs = jobs_clone.clone();
 
         let jobs = jobs.lock().unwrap();
-        match job::get_available_task(&jobs[..]) {
-            Some(_) => Ok(()),
-            None => shoal.lock().send_to(MANAGER_ID, Message::Idle(NB_TASKS)),
+        if job::get_available_task(&*jobs).is_none() {
+            shoal.lock().send_to(MANAGER_ID, Message::Idle(NB_TASKS));
         }
+
+        Ok(())
     })
     .map_err(|err| {
         eprintln!("Error in idle_watcher interval : {:?}", err);
@@ -138,12 +140,16 @@ pub fn start_orchestrator(
     // (The socket can't be registered in two separate runtimes)
     // TODO: if the two runtime issue is solved, maybe remove that...
     let send_future = send_msg_rx.for_each(move |(peer_pid, msg)| {
-        shoal.lock().send_to(peer_pid, msg).map_err(|err| {
-            eprintln!(
-                "Executor : {} : Error while sending msg to peer `{}` : `{:?}`.",
-                pode_id, peer_pid, err
-            );
-        })
+        shoal
+            .lock()
+            .send_to_future(peer_pid, msg)
+            .map(|_| ())
+            .map_err(move |err| {
+                eprintln!(
+                    "Executor : {} : Error while sending msg to peer `{}` : `{:?}`.",
+                    pode_id, peer_pid, err
+                );
+            })
     });
     runtime.spawn(send_future);
 
@@ -152,27 +158,24 @@ pub fn start_orchestrator(
 
 pub fn orchestrate(
     pode_id: PodeId,
-    jobs: Arc<Mutex<Vec<Arc<Mutex<Job>>>>>,
-    job_instances: Arc<Mutex<Vec<(usize, wasm::ModuleRef)>>>,
+    jobs: JobsMapArcMut,
+    job_instances: Arc<Mutex<Vec<(JobId, wasm::ModuleRef)>>>,
     job_id: JobId,
     task_id: TaskId,
-    send_msg_tx: Sender<(Pid, Message)>,
+    send_msg_tx: Sender<(PeerId, Message)>,
 ) -> Box<Future<Item = (), Error = Error>> {
     // println!("Time 1 : {:?}", Instant::now());
     let (bytecode, args, task) = {
         // TODO: deadlock/blocking job in case of multi-threading?
         // TODO: check job and task ids ?
         let jobs = jobs.lock().unwrap();
-        let job = jobs.iter().find(|job| job.lock().unwrap().id == job_id);
-        if let Some(job) = job {
+        let job = jobs.iter().find(|(id, _)| **id == job_id);
+        if let Some((_, job)) = job {
             let job = job.lock().unwrap();
-            let task = job
-                .tasks
-                .iter()
-                .find(|task| task.lock().unwrap().id == task_id);
-            if let Some(task) = task {
+            let task = job.tasks.iter().find(|(id, _)| **id == task_id);
+            if let Some((_, task)) = task {
                 let mut task_locked = task.lock().unwrap();
-                task_locked.set_unavailable();
+                task_locked.set_unavailable(0);
                 //TODO: clone bytecode?
                 (job.bytecode.clone(), task_locked.args.clone(), task.clone())
             } else {
