@@ -70,6 +70,9 @@ fn for_each_message_connecting(
                 );
 
                 // TODO: keep the same receiving frame and just transfer some channel or so...
+                peer_locked
+                    .handle_msg(msg)
+                    .expect(&format!("Client : {} : Error forwarding msg...", peer_addr)[..]);
 
                 // End the message listening loop :
                 return Err(Error::ConnectionEnded);
