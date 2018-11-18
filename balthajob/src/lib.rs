@@ -7,14 +7,14 @@ extern crate serde_derive;
 extern crate sha3;
 extern crate wasmi;
 
-pub mod hash256;
+mod hash256;
 pub mod task;
 pub mod wasm;
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use self::hash256::{hash, Hash256};
+pub use self::hash256::Hash256;
 use self::task::arguments::Arguments;
 use self::task::{TaskArcMut, TaskId};
 
@@ -39,6 +39,7 @@ pub enum Error {
 #[derive(Debug, Clone)]
 pub struct Job {
     pub id: JobId,
+    pub sender_pid: PeerId,
     pub bytecode: Vec<u8>,
     // TODO: beware of overriding, ...
     pub tasks: HashMap<TaskId, TaskArcMut>,
@@ -50,6 +51,7 @@ impl Job {
         let id = calculate_job_id(sender_pid, &bytecode[..]);
         Job {
             id,
+            sender_pid: sender_pid,
             bytecode,
             tasks: HashMap::new(),
         }
@@ -123,15 +125,9 @@ fn calculate_job_id(sender_pid: PeerId, bytecode: &[u8]) -> JobId {
     let mut vec = Vec::with_capacity(bytecode.len() + PID_LEN);
 
     vec.extend_from_slice(&pid_bytes);
-    vec.extend_from_slice(&pid_bytes);
+    vec.extend_from_slice(&bytecode);
 
-    println!(
-        "JobId size : {}, bytecode size : {}",
-        vec.len(),
-        bytecode.len()
-    );
-
-    hash(&vec[..])
+    Hash256::hash(&vec[..])
 }
 
 #[cfg(test)]

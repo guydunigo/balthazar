@@ -11,7 +11,6 @@ mod orchestrator;
 
 //TODO: +everywhere stream or socket or ...
 
-use futures::future;
 use futures::sync::mpsc::Sender;
 use tokio::codec::Framed;
 use tokio::net::TcpStream;
@@ -22,6 +21,7 @@ use std::collections::HashMap;
 use std::convert::From;
 use std::fs::File;
 use std::io;
+use std::process::exit;
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -101,24 +101,20 @@ pub fn fill(
     };
     let args_enumerated: Vec<(usize, Arguments)> = args_list.drain(..).enumerate().collect();
 
+    // TODO: just put them all in a list and wait for all at once ?
     fn send_args(
         job_id: JobId,
-        frame: Option<Framed<TcpStream, MessageCodec>>,
+        frame: Framed<TcpStream, MessageCodec>,
         mut args_enumerated: Vec<(usize, Arguments)>,
-    ) -> Box<Future<Item = Option<Framed<TcpStream, MessageCodec>>, Error = message::Error> + Send>
-    {
-        if let Some(frame) = frame {
-            if let Some((task_id, args)) = args_enumerated.pop() {
-                let future = frame
-                    .send(Message::Task(job_id, task_id, args))
-                    .map(|frame| Some(frame))
-                    .and_then(move |frame| send_args(job_id, frame, args_enumerated));
-                Box::new(future)
-            } else {
-                Box::new(future::ok(None))
-            }
+    ) -> Box<Future<Item = Framed<TcpStream, MessageCodec>, Error = message::Error> + Send> {
+        if let Some((task_id, args)) = args_enumerated.pop() {
+            let future = frame
+                .send(Message::Task(job_id, task_id, args))
+                .and_then(move |frame| send_args(job_id, frame, args_enumerated));
+            Box::new(future)
         } else {
-            Box::new(future::ok(None))
+            frame.flush().wait().unwrap();
+            exit(0);
         }
     }
 
@@ -131,9 +127,7 @@ pub fn fill(
             MANAGER_ID,
             Message::Job(shoal.lock().local_pid(), job_id, job.bytecode),
         )
-        .and_then(move |frame| {
-            send_args(job_id, Some(frame), args_enumerated).map_err(net::Error::from)
-        })
+        .and_then(move |frame| send_args(job_id, frame, args_enumerated).map_err(net::Error::from))
         .map(|_| ())
         .map_err(|_| ());
 
@@ -209,16 +203,15 @@ fn register_job(
     let mut new_lone_tasks = Vec::with_capacity(lone_tasks.len());
 
     // TODO: multiple jobs having same id ?
-    // The use of `is_none` is due to `jobs` being borrowed...
-    let jobs_locked = jobs.lock().unwrap();
-    let job_opt = match jobs_locked.iter().find(|(id, _)| **id == job_id) {
-        Some(job) => Some(job.clone()),
-        None => None,
-    };
+    let mut jobs_locked = jobs.lock().unwrap();
 
-    match job_opt {
+    match jobs_locked
+        .iter()
+        .find(|(id, _)| **id == job_id)
+        .map(|(_, job)| job.clone())
+    {
         // TODO: Useful ?
-        Some((_, job)) => job.lock().unwrap().set_bytecode(bytecode),
+        Some(job) => job.lock().unwrap().set_bytecode(bytecode),
         None => {
             let mut job = Job::new(peer_pid, bytecode);
             let mut tasks_to_send = Vec::new();
@@ -232,9 +225,8 @@ fn register_job(
                 }
             }
 
-            jobs.lock()
-                .unwrap()
-                .insert(job.id, Arc::new(Mutex::new(job)));
+            jobs_locked.insert(job.id, Arc::new(Mutex::new(job)));
+
             tasks_to_send.iter().for_each(|task_id| {
                 tokio::spawn(
                     tx.clone()
@@ -261,15 +253,9 @@ fn register_task(
     task_id: TaskId,
     args: Arguments,
 ) -> Result<(), net::Error> {
-    //TODO: use balthajob to represent jobs and tasks and execute them there.
-    //TODO: do not fail on job error
     let jobs_locked = jobs.lock().unwrap();
-    let job_opt = match jobs_locked.iter().find(|(id, _)| **id == job_id) {
-        Some(job) => Some(job.clone()),
-        None => None,
-    };
 
-    match job_opt {
+    match jobs_locked.iter().find(|(id, _)| **id == job_id) {
         Some((job_id, job)) => {
             job.lock().unwrap().add_new_task_with_id(task_id, args);
 

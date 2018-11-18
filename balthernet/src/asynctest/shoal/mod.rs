@@ -179,7 +179,7 @@ impl Shoal {
 
 #[derive(Clone)]
 pub struct ShoalReadArc {
-    inner: Arc<RwLock<Shoal>>,
+    inner: Arc<RwLock<Shoal>>, // TODO: as tuple : ShoalReadArc(inner) ?
 }
 
 impl From<Shoal> for ShoalReadArc {

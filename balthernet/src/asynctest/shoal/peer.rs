@@ -240,7 +240,7 @@ impl Peer {
             .send(socket_clone)
             .expect("Peer : Couldn't send readiness to peer oneshot.");
 
-        println!("Manager : {} : Connected to : `{}`", self.addr, self.pid);
+        println!("Manager : {} : Connected to : `{}`", self.pid, self.addr);
 
         self.manage(peer);
 
@@ -344,7 +344,7 @@ impl Peer {
         if let PeerState::Connected(socket) = self.state.clone() {
             let socket_clone = socket.try_clone().unwrap();
             let framed_sock = Framed::new(socket, MessageCodec::new());
-            let peer_addr = self.addr;
+            let peer_pid = self.pid();
             let peer_clone = peer.clone();
             let shoal_tx = self.shoal_tx.clone();
 
@@ -359,7 +359,7 @@ impl Peer {
                     Error::PeerNotInConnectedState(_) => (),
                     _ => eprintln!(
                         "Manager : {} : error when receiving a message : {:?}.",
-                        peer_addr, err
+                        peer_pid, err
                     ),
                 });
 
@@ -369,7 +369,7 @@ impl Peer {
 
             let ping_future = Interval::new_interval(Duration::from_secs(PING_INTERVAL))
                 .inspect_err(move |err| {
-                    eprintln!("Manager : {} : Ping error : {:?}", peer_addr, err)
+                    eprintln!("Manager : {} : Ping error : {:?}", peer_pid, err)
                 })
                 .map_err(Error::from)
                 .and_then(move |_| ping_peer(peer_clone.clone()))
@@ -391,7 +391,7 @@ fn ping_peer(peer: PeerArcMut) -> impl Future<Item = (), Error = Error> {
     // TODO: unwrap?
     let mut peer_locked = peer.lock().unwrap();
 
-    let peer_addr = peer_locked.addr;
+    let peer_pid = peer_locked.pid;
     let peer_clone = peer.clone();
     let peer_clone_2 = peer.clone();
 
@@ -406,7 +406,7 @@ fn ping_peer(peer: PeerArcMut) -> impl Future<Item = (), Error = Error> {
             // TODO: diagnose and reconnect if necessary...
             println!(
                 "Manager : {} : Ping : Failed, setting Peer as disconnected.",
-                peer_addr
+                peer_pid
             );
 
             // TODO: different way to reconnect ?
@@ -439,13 +439,13 @@ fn for_each_message(tx: MpscSenderMessage, peer: &mut Peer, msg: Message) -> Res
         }
         Message::Pong => {
             peer.pong();
-            // println!("Manager : {} : received Pong ! It is alive !!!", peer.addr);
+            // println!("Manager : {} : received Pong ! It is alive !!!", peer.pid);
         }
         _ => {
             /*
             println!(
                 "Manager : {} : received a message (but won't do anything ;) !",
-                peer.addr
+                peer.pid
             );
             */
             let send_future = tx.send((peer.pid, msg)).map(|_| ()).map_err(|_| ());

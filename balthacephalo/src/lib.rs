@@ -100,8 +100,8 @@ pub fn for_each_message(
             {
                 Some((job_id, job)) => {
                     // TODO: Don't like cloning probably big array...
-                    let bytecode = job.lock().unwrap().bytecode.clone();
-                    Message::Job(shoal.lock().local_pid(), *job_id, bytecode)
+                    let job = job.lock().unwrap();
+                    Message::Job(job.sender_pid, *job_id, job.bytecode.clone())
                 }
                 None => Message::InvalidJobId(job_id),
             };
