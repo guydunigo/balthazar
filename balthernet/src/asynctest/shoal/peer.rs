@@ -350,7 +350,9 @@ impl Peer {
 
             let manage_future = framed_sock
                 .map_err(Error::from)
-                .for_each(move |msg| for_each_message(shoal_tx.clone(), peer.clone(), msg))
+                .for_each(move |msg| {
+                    for_each_message(shoal_tx.clone(), &mut *peer.lock().unwrap(), msg)
+                })
                 .map_err(move |err| match err {
                     // TODO: println anyway ?
                     Error::ConnectionCancelled | Error::ConnectionEnded => (),
@@ -376,6 +378,10 @@ impl Peer {
 
             tokio::spawn(ping_future);
         }
+    }
+
+    pub fn handle_msg(&mut self, msg: Message) -> Result<(), Error> {
+        for_each_message(self.shoal_tx.clone(), self, msg)
     }
 }
 
@@ -412,11 +418,7 @@ fn ping_peer(peer: PeerArcMut) -> impl Future<Item = (), Error = Error> {
 }
 
 // TODO: tx only or shoal directly
-fn for_each_message(tx: MpscSenderMessage, peer: PeerArcMut, msg: Message) -> Result<(), Error> {
-    // TODO: unwrap?
-    // TODO: lock for the whole block ?
-    let mut peer = peer.lock().unwrap();
-
+fn for_each_message(tx: MpscSenderMessage, peer: &mut Peer, msg: Message) -> Result<(), Error> {
     match msg {
         Message::Ping => {
             let socket = {
