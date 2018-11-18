@@ -26,7 +26,7 @@ fn for_each_message_connecting(
     peer_opt: PeerArcMutOpt,
     peer_addr: SocketAddr,
     socket: TcpStream,
-    msg: &Message,
+    msg: Message,
 ) -> Result<(), Error> {
     let mut peer_opt = peer_opt.lock().unwrap();
     if let Some(ref peer) = *peer_opt {
@@ -68,12 +68,15 @@ fn for_each_message_connecting(
                     "Client : {} : `peer.state` is `Connected`, stopping connection loop.",
                     peer_addr
                 );
+
+                // TODO: keep the same receiving frame and just transfer some channel or so...
+
                 // End the message listening loop :
                 return Err(Error::ConnectionEnded);
             }
             PeerState::NotConnected => {
                 if let Message::ConnectReceived(peer_pid) = msg {
-                    if peer_locked.pid() != *peer_pid {
+                    if peer_locked.pid() != peer_pid {
                         eprintln!("Client : {} : Received a `peer_id` that differs from the already known `peer.pid` : `peer_id=={}`, `peer.peer_id=={}`.", peer_locked.addr, peer_pid, peer_locked.pid());
                         // TODO: return error and cancel connection or create new peer ?
                     }
@@ -108,7 +111,7 @@ fn for_each_message_connecting(
                     */
                     match peer.state {
                         PeerState::NotConnected => {
-                            if peer.pid() != *peer_pid {
+                            if peer.pid() != peer_pid {
                                 eprintln!("Client : {} : Received a `peer_id` that differs from the already known `peer.pid` : `peer_id=={}`, `peer.peer_id=={}`.", peer.addr, peer_pid, peer.pid());
                                 // TODO: return error and cancel connection ?
                             }
@@ -134,7 +137,7 @@ fn for_each_message_connecting(
                 } else {
                     // println!("Client : {} : Peer is not in peers.", peer_addr);
 
-                    let mut peer = Peer::new(shoal.clone(), *peer_pid, peer_addr);
+                    let mut peer = Peer::new(shoal.clone(), peer_pid, peer_addr);
                     vote(&mut peer, socket);
 
                     let peer = Arc::new(Mutex::new(peer));
@@ -177,7 +180,7 @@ fn connect_to_peer(
                         peer_opt.clone(),
                         peer_addr,
                         socket.try_clone().unwrap(),
-                        &msg,
+                        msg,
                     )
                 })
                 .map_err(move |err| match err {

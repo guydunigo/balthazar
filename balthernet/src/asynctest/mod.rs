@@ -13,7 +13,10 @@ use self::shoal::*;
 pub fn swim(runtime: &mut Runtime, _shoal: ShoalReadArc, shoal_rx: MpscReceiverMessage) {
     let rx_future = shoal_rx
         .for_each(|(pid, msg)| {
-            println!("Shoal : {} : Received msg `{:?}`", pid, msg);
+            if let Message::Job(_, _) = msg {
+            } else {
+                println!("Shoal : {} : Received msg `{:?}`", pid, msg);
+            }
             Ok(())
         })
         .map(|_| ())

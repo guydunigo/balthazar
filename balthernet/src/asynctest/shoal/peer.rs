@@ -39,7 +39,10 @@ pub fn send_message(
     let framed_sock = Framed::new(socket, MessageCodec::new());
 
     framed_sock.send(msg.clone()).map_err(move |err| {
-        eprintln!("Error when sending message `{:?}` : `{:?}`.", msg, err);
+        if let Message::Ping = msg {
+        } else {
+            eprintln!("Error when sending message `{:?}` : `{:?}`.", msg, err);
+        }
         Error::from(err)
     })
 }
@@ -311,7 +314,7 @@ impl Peer {
             println!(
                 "Peer : {} : Setting msg `{:?}` to be sent when peer is ready.",
                 peer_pid,
-                &format!("{:?}", msg)[..6]
+                &format!("{:?}", msg)[..4]
             );
 
             let future = self
@@ -396,7 +399,7 @@ fn ping_peer(peer: PeerArcMut) -> impl Future<Item = (), Error = Error> {
         .or_else(move |_| {
             // TODO: diagnose and reconnect if necessary...
             println!(
-                "Manager : {} : Ping : Failed, triggering reconnection...",
+                "Manager : {} : Ping : Failed, setting Peer as disconnected.",
                 peer_addr
             );
 

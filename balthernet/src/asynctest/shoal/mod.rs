@@ -108,7 +108,7 @@ impl Shoal {
                 // Err(Error::PeerNotFound(peer_pid)),
                 println!(
                     "Shoal : Setting msg `{:?}` to be sent when peer `{}` is created.",
-                    &format!("{:?}", msg)[..6],
+                    &format!("{:?}", msg)[..4],
                     peer_pid
                 );
 
