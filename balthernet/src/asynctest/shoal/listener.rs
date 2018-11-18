@@ -127,7 +127,7 @@ fn for_each_message_connecting(
                         }
                     }
                 } else {
-                    // println!("Client : {} : Peer is not in peers.", peer_addr);
+                    // println!("Listener : {} : Peer is not in peers.", peer_addr);
 
                     let peer = Peer::new(shoal.clone(), peer_pid, peer_addr);
                     let peer_arc_mut = Arc::new(Mutex::new(peer));
@@ -161,7 +161,7 @@ pub fn listen(shoal: ShoalReadArc, listener: TcpListener) -> impl Future<Item = 
             let peer_addr = socket.peer_addr()?;
             println!("Listener : Asked for connection : `{}`", peer_addr);
 
-            let peer = Arc::new(Mutex::new(None));
+            let peer_opt = Arc::new(Mutex::new(None));
 
             let send_future =
                 send_message(socket.try_clone()?, Message::ConnectReceived(local_pid))
@@ -171,7 +171,7 @@ pub fn listen(shoal: ShoalReadArc, listener: TcpListener) -> impl Future<Item = 
                             .for_each(move |msg| {
                                 for_each_message_connecting(
                                     shoal.clone(),
-                                    peer.clone(),
+                                    peer_opt.clone(),
                                     peer_addr,
                                     // TODO: unwrap?
                                     socket.try_clone().unwrap(),

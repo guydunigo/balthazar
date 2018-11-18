@@ -12,6 +12,7 @@ extern crate balthajob as job;
 pub mod mock_stream;
 
 pub use ron::{de, ser};
+use std::fmt;
 use std::io;
 use std::io::prelude::*;
 use std::iter::FusedIterator;
@@ -93,6 +94,16 @@ pub enum Message {
     // TODO: Ping/Pong with Instants ? (latency, ...)
     Ping, // (Instant),
     Pong, // (Instant),
+}
+
+impl fmt::Display for Message {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let debug = format!("{:?}", self);
+
+        let len = if debug.len() < 10 { debug.len() } else { 10 };
+
+        write!(f, "{}", &debug[..len])
+    }
 }
 
 impl Message {
