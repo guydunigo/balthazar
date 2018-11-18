@@ -91,7 +91,7 @@ pub fn fill(
             .and_then(move |_| {
                 let shoal = shoal_clone.clone();
                 let shoal = shoal.lock();
-                shoal.send_to(MANAGER_ID, Message::Job(0, code))
+                shoal.send_to(MANAGER_ID, Message::Job(shoal.local_pid() as usize, code))
             })
             .map(|_| ())
             .map_err(|_| ());
@@ -119,7 +119,7 @@ pub fn fill(
 
                     // Stop the client after all is sent
                     // TODO: use a more proper way (when all...)
-                    let future = Delay::new(Instant::now() + Duration::from_secs(3))
+                    let future = Delay::new(Instant::now() + Duration::from_secs(1))
                         .map(|_| std::process::exit(0))
                         .map_err(|_| ());
                     tokio::spawn(future);
@@ -129,8 +129,8 @@ pub fn fill(
                 }
                 _ => {
                     println!(
-                        "Pode : {} : didn't receive job_id from {}.",
-                        pode_id, peer_pid
+                        "Pode : {} : didn't receive job_id from {}, received {:?}.",
+                        pode_id, peer_pid, msg
                     );
                     Ok(())
                 }

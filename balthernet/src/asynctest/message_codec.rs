@@ -59,6 +59,7 @@ impl Decoder for MessageCodec {
                         task_id, job_id
                     ),
                     Message::Ping | Message::Pong => (),
+                    Message::Idle(_) | Message::NoJob => (),
                     _ => println!("-- Received : `{:?}`.", msg),
                 }
 
@@ -112,6 +113,7 @@ impl Encoder for MessageCodec {
                 task_id, job_id, len
             ),
             Message::Ping | Message::Pong => (),
+            Message::Idle(_) | Message::NoJob => (),
             _ => println!("-- Sending : `{}` of {} bytes.", msg_str, len),
         }
 

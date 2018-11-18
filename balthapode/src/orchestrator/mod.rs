@@ -24,7 +24,7 @@ use net::asynctest::shoal::ShoalReadArc;
 use net::asynctest::Pid;
 use net::MANAGER_ID;
 
-const NB_TASKS: usize = 1;
+const NB_TASKS: usize = 16;
 // TODO: good size ?
 const CHANNEL_LIMIT: usize = 64;
 const IDLE_CHECK_INTERVAL: u64 = 3;
@@ -227,7 +227,7 @@ pub fn orchestrate(
 
     let send_future = send_msg_tx
         .send((MANAGER_ID, Message::ReturnValue(job_id, task_id, res)))
-        .and_then(|sender| sender.send((MANAGER_ID, Message::Idle(NB_TASKS))))
+        .and_then(|sender| sender.send((MANAGER_ID, Message::Idle(1))))
         .map(|_| ())
         .map_err(|err| Error::ToShoalMpscError(err));
 
