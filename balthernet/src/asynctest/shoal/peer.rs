@@ -36,7 +36,7 @@ pub fn send_message(
     socket: TcpStream,
     msg: Message,
 ) -> impl Future<Item = Framed<TcpStream, MessageCodec>, Error = Error> {
-    let framed_sock = Framed::new(socket, MessageCodec::new());
+    let framed_sock = Framed::new(socket, MessageCodec::new(None));
 
     framed_sock.send(msg.clone()).map_err(move |err| {
         if let Message::Ping = msg {
@@ -312,9 +312,8 @@ impl Peer {
             */
             let peer_pid = self.pid;
             println!(
-                "Peer : {} : Setting msg `{:?}` to be sent when peer is ready.",
-                peer_pid,
-                &format!("{:?}", msg)[..4]
+                "Peer : {} : Setting msg `{}` to be sent when peer is ready.",
+                peer_pid, msg
             );
 
             let future = self
@@ -342,16 +341,43 @@ impl Peer {
     /// // TODO: ensure that ?
     pub fn manage(&mut self, peer: PeerArcMut) {
         if let PeerState::Connected(socket) = self.state.clone() {
-            let socket_clone = socket.try_clone().unwrap();
-            let framed_sock = Framed::new(socket, MessageCodec::new());
+            let framed_sock = Framed::new(socket, MessageCodec::new(Some(self.pid())));
             let peer_pid = self.pid();
             let peer_clone = peer.clone();
             let shoal_tx = self.shoal_tx.clone();
 
             let manage_future = framed_sock
+                .send(Message::ConnectAck)
                 .map_err(Error::from)
-                .for_each(move |msg| {
-                    for_each_message(shoal_tx.clone(), &mut *peer.lock().unwrap(), msg)
+                .and_then(move |frame| {
+                    let ping_future = Interval::new_interval(Duration::from_secs(PING_INTERVAL))
+                        .inspect_err(move |err| {
+                            eprintln!("Manager : {} : Ping error : {:?}", peer_pid, err)
+                        })
+                        .map_err(Error::from)
+                        .and_then(move |_| ping_peer(peer_clone.clone()))
+                        .for_each(|_| Ok(()))
+                        .map_err(|_| ());
+                    tokio::spawn(ping_future);
+
+                    // TODO: performance of locking for every message ?
+                    let acked = Arc::new(Mutex::new(false));
+
+                    frame.map_err(Error::from).for_each(move |msg| {
+                        let mut acked = acked.lock().unwrap();
+                        if *acked {
+                            for_each_message(shoal_tx.clone(), &mut *peer.lock().unwrap(), msg)
+                        } else {
+                            if let Message::ConnectAck = msg {
+                                *acked = true;
+                            } else {
+                                // TODO: postpone the processing of the messages to when acked is received?
+                                eprintln!("Manager : {} : Waiting for `ConnectAck` but received another message : {}, sending a new `ConnectAck`...", peer_pid, msg);
+                                peer.lock().unwrap().send_and_spawn(Message::ConnectAck);
+                            }
+                            Ok(())
+                        }
+                    })
                 })
                 .map_err(move |err| match err {
                     // TODO: println anyway ?
@@ -364,19 +390,6 @@ impl Peer {
                 });
 
             tokio::spawn(manage_future);
-
-            send_message_and_spawn(socket_clone.try_clone().unwrap(), Message::ConnectAck);
-
-            let ping_future = Interval::new_interval(Duration::from_secs(PING_INTERVAL))
-                .inspect_err(move |err| {
-                    eprintln!("Manager : {} : Ping error : {:?}", peer_pid, err)
-                })
-                .map_err(Error::from)
-                .and_then(move |_| ping_peer(peer_clone.clone()))
-                .for_each(|_| Ok(()))
-                .map_err(|_| ());
-
-            tokio::spawn(ping_future);
         }
     }
 
