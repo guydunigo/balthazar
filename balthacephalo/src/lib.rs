@@ -7,11 +7,13 @@ extern crate balthmessage as message;
 use tokio::prelude::*;
 use tokio::runtime::Runtime;
 
+use std::collections::HashMap;
 use std::convert::From;
 use std::io;
 use std::sync::{Arc, Mutex};
 
 use job::Job;
+use job::{JobArcMut, JobsMapArcMut};
 use message::Message;
 use net::asynctest::shoal::{MpscReceiverMessage, Pid, ShoalReadArc};
 
@@ -45,7 +47,7 @@ pub fn swim(
     shoal_rx: MpscReceiverMessage,
 ) -> Result<(), Error> {
     // TODO: hashmap in wrapper object
-    let jobs_rc = Arc::new(Mutex::new(Vec::new()));
+    let jobs_rc = Arc::new(Mutex::new(HashMap::new()));
 
     let shoal_rx_future = shoal_rx
         .map_err(|_| Error::NetError(net::Error::ShoalMpscError))
@@ -64,16 +66,12 @@ pub fn swim(
 
 pub fn for_each_message(
     shoal: ShoalReadArc,
-    jobs_rc: Arc<Mutex<Vec<Arc<Mutex<Job>>>>>,
+    jobs_rc: JobsMapArcMut,
     peer_pid: Pid,
     msg: Message,
 ) -> Result<(), Error> {
     match msg {
         Message::Idle(i) => {
-            // TODO: check if the pode doesn't already have a task:
-            //      - Free the previous task
-            //      - Send again the previous task
-            //      - Send error
             for _ in 0..i {
                 let mut jobs = jobs_rc.lock().unwrap();
                 match job::get_available_task(&*jobs) {

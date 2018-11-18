@@ -5,7 +5,6 @@ authors = ["GONI Guillaume <gdn3@live.fr>"]
 edition = "2018"
 
 [dependencies]
-balthmessage = { path = "../balthmessage" }
 serde = "1.0.80"
 ron = "0.4.0"
 tokio = "0.1.11"
@@ -13,3 +12,5 @@ futures = "0.1.25"
 bytes = "0.4.10"
 rand= "0.5.5"
 libsecp256k1= "0.1.14"
+
+balthmessage = { path = "../balthmessage" }

@@ -1,6 +1,5 @@
 pub mod argument_kind;
-
-type ArgumentKind = argument_kind::ArgumentKind;
+use self::argument_kind::ArgumentKind;
 
 use std::default::Default;
 
