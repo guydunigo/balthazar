@@ -34,6 +34,8 @@ fn handle_vote(
     Ok(())
 }
 
+// TODO: take care of ConnectCancel from client ?
+// TODO: handle message in EVERY branches ?
 fn for_each_message_connecting(
     shoal: ShoalReadArc,
     peer_opt: PeerArcMutOpt,

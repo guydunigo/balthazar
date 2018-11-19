@@ -360,23 +360,8 @@ impl Peer {
                         .map_err(|_| ());
                     tokio::spawn(ping_future);
 
-                    // TODO: performance of locking for every message ?
-                    let acked = Arc::new(Mutex::new(false));
-
                     frame.map_err(Error::from).for_each(move |msg| {
-                        let mut acked = acked.lock().unwrap();
-                        if *acked {
-                            for_each_message(shoal_tx.clone(), &mut *peer.lock().unwrap(), msg)
-                        } else {
-                            if let Message::ConnectAck = msg {
-                                *acked = true;
-                            } else {
-                                // TODO: postpone the processing of the messages to when acked is received?
-                                eprintln!("Manager : {} : Waiting for `ConnectAck` but received another message : {}, sending a new `ConnectAck`...", peer_pid, msg);
-                                peer.lock().unwrap().send_and_spawn(Message::ConnectAck);
-                            }
-                            Ok(())
-                        }
+                        for_each_message(shoal_tx.clone(), &mut *peer.lock().unwrap(), msg)
                     })
                 })
                 .map_err(move |err| match err {
