@@ -170,6 +170,22 @@ impl Shoal {
                 .expect("Peer : Could not send peer to orphan messages.");
         }
     }
+
+    pub fn peer_connection_cancelled(&self, peer_pid: PeerId) {
+        match self.peers.lock().unwrap().get(&peer_pid) {
+            Some(peer) => {
+                let mut peer = peer.lock().unwrap();
+                peer.connected_cancelled();
+            }
+            None => {
+                panic!("Shoal : {} : Peer not found in peers.", peer_pid);
+            }
+        }
+    }
+
+    pub fn shutdown(&self) {
+        unimplemented!();
+    }
 }
 
 // ------------------------------------------------------------------

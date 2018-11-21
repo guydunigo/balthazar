@@ -103,23 +103,30 @@ pub fn fill(
 
     // TODO: just put them all in a list and wait for all at once ?
     fn send_args(
+        shoal: ShoalReadArc,
         job_id: JobId,
         frame: Framed<TcpStream, MessageCodec>,
         mut args_enumerated: Vec<(usize, Arguments)>,
-    ) -> Box<Future<Item = Framed<TcpStream, MessageCodec>, Error = message::Error> + Send> {
+    ) -> Box<Future<Item = Framed<TcpStream, MessageCodec>, Error = net::Error> + Send> {
         if let Some((task_id, args)) = args_enumerated.pop() {
             let future = frame
                 .send(Message::Task(job_id, task_id, args))
-                .and_then(move |frame| send_args(job_id, frame, args_enumerated));
+                .map_err(net::Error::from)
+                .and_then(move |frame| send_args(shoal, job_id, frame, args_enumerated));
             Box::new(future)
         } else {
-            frame.flush().wait().unwrap();
-            exit(0);
+            let future = shoal
+                .lock()
+                .send_to_future(MANAGER_ID, Message::ConnectCancel)
+                .and_then(|frame| frame.flush().map(|_| ()).map_err(net::Error::from))
+                .map(|_| exit(0));
+            Box::new(future)
         }
     }
 
     let job = Job::new(shoal.lock().local_pid(), code);
     let job_id = job.id;
+    let shoal_clone = shoal.clone();
 
     let future = shoal
         .lock()
@@ -127,7 +134,9 @@ pub fn fill(
             MANAGER_ID,
             Message::Job(shoal.lock().local_pid(), job_id, job.bytecode),
         )
-        .and_then(move |frame| send_args(job_id, frame, args_enumerated).map_err(net::Error::from))
+        .and_then(move |frame| {
+            send_args(shoal_clone, job_id, frame, args_enumerated).map_err(net::Error::from)
+        })
         .map(|_| ())
         .map_err(|_| ());
 

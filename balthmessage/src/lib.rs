@@ -82,7 +82,8 @@ pub enum Message {
     MessageTooBig,
     Idle(usize),
     RequestJob(JobId),
-    InvalidJobId(JobId),
+    UnknownJobId(JobId),
+    UnknownTaskId(JobId, TaskId),
     Job(PeerId, JobId, Vec<u8>), // TODO: more a signature than JobId
     JobRegisteredAt(JobId),
     Task(JobId, TaskId, Arguments), // TODO: Real type

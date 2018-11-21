@@ -46,7 +46,6 @@ pub fn swim(
     shoal: ShoalReadArc,
     shoal_rx: MpscReceiverMessage,
 ) -> Result<(), Error> {
-    // TODO: hashmap in wrapper object
     let jobs_rc = Arc::new(Mutex::new(HashMap::new()));
 
     let shoal_rx_future = shoal_rx
@@ -76,34 +75,38 @@ pub fn for_each_message(
                 let mut jobs = jobs_rc.lock().unwrap();
                 match job::get_available_task(&*jobs) {
                     Some((job, task)) => {
-                        let mut task = task.lock().unwrap();
-                        // If the sending fails, we don't register the task.
+                        let task_cloned = task.clone();
+                        let mut task_locked = task_cloned.lock().unwrap();
                         let job_id = job.lock().unwrap().id;
-                        shoal
+                        let future = shoal
                             .lock()
-                            .send_to(peer_pid, Message::Task(job_id, task.id, task.args.clone()));
-                        task.set_unavailable(peer_pid);
+                            .send_to_future(peer_pid, Message::Task(job_id, task_locked.id, task_locked.args.clone()))
+                            // If the sending fails, we free the task:
+                            .map_err(move |err| {
+                                eprintln!("Cephalo : {} : Error when sending task, setting it as available : `{:?}`.", peer_pid, err);
+                                task.lock().unwrap().set_available(peer_pid);
+                                ()
+                            })
+                            .map(|_| ());
+                        tokio::spawn(future);
+
+                        task_locked.set_unavailable(peer_pid);
                     }
                     None => {
                         shoal.lock().send_to(peer_pid, Message::NoJob);
                         break;
                     }
                 }
-            } // TODO: else send error ?
+            }
         }
         Message::RequestJob(job_id) => {
-            let msg = match jobs_rc
-                .lock()
-                .unwrap()
-                .iter()
-                .find(|(id, _)| **id == job_id)
-            {
-                Some((job_id, job)) => {
+            let msg = match jobs_rc.lock().unwrap().get(&job_id) {
+                Some(job) => {
                     // TODO: Don't like cloning probably big array...
                     let job = job.lock().unwrap();
-                    Message::Job(job.sender_pid, *job_id, job.bytecode.clone())
+                    Message::Job(job.sender_pid, job_id, job.bytecode.clone())
                 }
-                None => Message::InvalidJobId(job_id),
+                None => Message::UnknownJobId(job_id),
             };
 
             shoal.lock().send_to(peer_pid, msg);
@@ -111,41 +114,60 @@ pub fn for_each_message(
         Message::Job(sender_pid, _job_id, job) => {
             // TODO: check job_id, send confirmation/error message ?
             let mut jobs = jobs_rc.lock().unwrap();
-
-            let mut job = Job::new(sender_pid, job);
+            // for now, cephalo takes ownership of job
+            let job = Job::new(sender_pid, job);
 
             jobs.insert(job.id, Arc::new(Mutex::new(job)));
         }
         // TODO: The pode who sends task should be the same as the one sending the job ?
         Message::Task(job_id, task_id, args) => {
             let mut jobs = jobs_rc.lock().unwrap();
-            let job = match jobs.iter().find(|(id, _)| **id == job_id) {
-                Some((_, job)) => job.clone(),
-                None => return Ok(()), // TODO: Error unknown id.
+            let job = match jobs.get(&job_id) {
+                Some(job) => job.clone(),
+                None => {
+                    shoal
+                        .lock()
+                        .send_to(peer_pid, Message::UnknownJobId(job_id));
+                    return Ok(());
+                }
             };
 
             job.lock().unwrap().add_new_task_with_id(task_id, args);
         }
         Message::ReturnValue(job_id, task_id, value) => {
-            // TODO: deadlock?
-            // TODO: check job and task ids ?
+            // TODO: check job, task ids and sender ?
             let jobs = jobs_rc.lock().unwrap();
             let job = jobs.get(&job_id);
             if let Some(job) = job {
                 let job = job.lock().unwrap();
                 let task = job.tasks.get(&task_id);
                 if let Some(task) = task {
+                    // TODO: check if already result ?
                     let mut task = task.lock().unwrap();
                     task.result = Some(value);
                     task.set_unavailable(peer_pid);
                 } else {
                     // TODO: proper error handling ?
-                    eprintln!("Cephalo : {} : The pode sent a return value correpsonding to an unknown task, discarding...", peer_pid);
+                    eprintln!("Cephalo : {} : The pode sent a return value correpsonding to an unknown task ({}), discarding...", peer_pid, task_id);
+                    shoal
+                        .lock()
+                        .send_to(peer_pid, Message::UnknownTaskId(job_id, task_id));
                 }
             } else {
                 // TODO: proper error handling ?
-                eprintln!("Cephalo : {} : The pode sent a return value correpsonding to an unknown job, discarding...", peer_pid);
+                eprintln!("Cephalo : {} : The pode sent a return value correpsonding to an unknown job ({}), discarding...", peer_pid, job_id);
+                shoal
+                    .lock()
+                    .send_to(peer_pid, Message::UnknownJobId(job_id));
             }
+        }
+        Message::ConnectCancel => {
+            println!(
+                "Cephalo : {} : Received `ConnectCancel`, closing connection...",
+                peer_pid
+            );
+            shoal.lock().peer_connection_cancelled(peer_pid);
+            return Err(Error::NetError(net::Error::ConnectionCancelled));
         }
         _ => shoal
             .lock()

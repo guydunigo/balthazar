@@ -57,6 +57,7 @@ impl Job {
         }
     }
 
+    // TODO: check if id already exists : deal with collision
     pub fn add_task(&mut self, task: task::Task) {
         self.tasks.insert(task.id, Arc::new(Mutex::new(task)));
     }

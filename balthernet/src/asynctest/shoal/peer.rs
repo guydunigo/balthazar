@@ -284,6 +284,27 @@ impl Peer {
         }
     }
 
+    /// Should only be called when peer is `PeerState::Connected()`.
+    pub fn connected_cancelled(&mut self) {
+        if let PeerState::Connected(socket) = &self.state {
+            socket.shutdown(Shutdown::Both).unwrap();
+            self.state = PeerState::NotConnected;
+        } else {
+            // TODO: can this happen sometime else ?
+            // TODO: just mute the error ? or provide a method for all cases ?
+            panic!("`Peer : {} : Peer.connected_cancelled` should only be called on a `Connected` peer.", self.pid);
+        }
+    }
+
+    pub fn connected_cancel(&mut self) {
+        // TODO: Wait ?
+        self.send(Message::ConnectCancel)
+            .map(|_| ())
+            .wait()
+            .unwrap_or_default();
+        self.connected_cancelled();
+    }
+
     pub fn disconnect(&mut self) {
         self.ping_status = PingStatus::NoPingYet;
         self.state = PeerState::NotConnected;
