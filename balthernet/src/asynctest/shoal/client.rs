@@ -168,8 +168,6 @@ fn connect_to_peer(
     peer_addr: SocketAddr,
 ) -> impl Future<Item = (), Error = Error> {
     let local_pid = shoal.lock().local_pid();
-    // me_connecting is here to detect if it is this client who set to connecting or if it is another one...
-    let me_connecting = Arc::new(Mutex::new(false));
 
     TcpStream::connect(&peer_addr)
         .map_err(Error::from)

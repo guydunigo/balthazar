@@ -175,7 +175,7 @@ impl Shoal {
         match self.peers.lock().unwrap().get(&peer_pid) {
             Some(peer) => {
                 let mut peer = peer.lock().unwrap();
-                peer.connected_cancelled();
+                peer.disconnect();
             }
             None => {
                 panic!("Shoal : {} : Peer not found in peers.", peer_pid);

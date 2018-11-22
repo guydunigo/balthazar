@@ -161,7 +161,8 @@ impl Peer {
         }
     }
 
-    pub fn _is_connected(&self) -> bool {
+    // TODO: is state directly
+    pub fn is_connected(&self) -> bool {
         if let PeerState::Connected(_) = self.state {
             true
         } else {
@@ -284,32 +285,26 @@ impl Peer {
         }
     }
 
-    /// Should only be called when peer is `PeerState::Connected()`.
-    pub fn connected_cancelled(&mut self) {
-        if let PeerState::Connected(socket) = &self.state {
-            socket.shutdown(Shutdown::Both).unwrap();
-            self.state = PeerState::NotConnected;
-        } else {
-            // TODO: can this happen sometime else ?
-            // TODO: just mute the error ? or provide a method for all cases ?
-            panic!("`Peer : {} : Peer.connected_cancelled` should only be called on a `Connected` peer.", self.pid);
-        }
-    }
-
     pub fn connected_cancel(&mut self) {
         // TODO: Wait ?
         self.send(Message::ConnectCancel)
             .map(|_| ())
             .wait()
             .unwrap_or_default();
-        self.connected_cancelled();
+        self.disconnect();
     }
 
     pub fn disconnect(&mut self) {
         self.ping_status = PingStatus::NoPingYet;
-        self.state = PeerState::NotConnected;
+        self.client_connecting = false;
+        self.listener_connecting = false;
         self.create_oneshot();
         // TODO: disconnect message ?
+
+        if let PeerState::Connected(socket) = &self.state {
+            socket.shutdown(Shutdown::Both).unwrap();
+        }
+        self.state = PeerState::NotConnected;
     }
 
     /// Don't forget to spawn that...
@@ -321,16 +316,11 @@ impl Peer {
         if let PeerState::Connected(socket) = &self.state {
             // TODO: unwrap?
             Box::new(send_message(socket.try_clone().unwrap(), msg))
+        // TODO: other messages that sohuldn't be registered ?
+        } else if let Message::Ping = msg {
+            // Don't register Pings...
+            Box::new(future::err(Error::PingSendError))
         } else {
-            /*
-            eprintln!(
-                "Can't send `{:?}`, `peer.state` not in `Connected(socket)` !",
-                msg
-            );
-            Box::new(future::err(Error::PeerNotInConnectedState(
-                "Can't send message `{:?}`.".to_string(),
-            )))
-            */
             let peer_pid = self.pid;
             println!(
                 "Peer : {} : Setting msg `{}` to be sent when peer is ready.",
@@ -343,11 +333,12 @@ impl Peer {
                 .map_err(|err| Error::OneShotError(err))
                 .and_then(|socket| send_message(socket.try_clone().unwrap(), msg))
                 .map_err(move |err| {
-                    // TODO: Resend the message ?
-                    panic!(
-                        "Peer : {} : Peer was supposed to be ready but it is not ! {:?}",
+                    // TODO: Resend the message ? Don't panic ?
+                    eprintln!(
+                        "Peer : {} : Peer was supposed to be ready but it is not : `{:?}`",
                         peer_pid, err
                     );
+                    err
                 });
             Box::new(future)
         }
@@ -372,9 +363,6 @@ impl Peer {
                 .map_err(Error::from)
                 .and_then(move |frame| {
                     let ping_future = Interval::new_interval(Duration::from_secs(PING_INTERVAL))
-                        .inspect_err(move |err| {
-                            eprintln!("Manager : {} : Ping error : {:?}", peer_pid, err)
-                        })
                         .map_err(Error::from)
                         .and_then(move |_| ping_peer(peer_clone.clone()))
                         .for_each(|_| Ok(()))
@@ -406,34 +394,35 @@ impl Peer {
 
 // TODO: Ping if there is already an unanswered Ping ? (in this case, override the Ping time ?)
 // TODO: can also use some "last time a message was sent..." to test if necessary, ...
-fn ping_peer(peer: PeerArcMut) -> impl Future<Item = (), Error = Error> {
-    // TODO: unwrap?
+fn ping_peer(peer: PeerArcMut) -> Box<Future<Item = (), Error = Error> + Send> {
     let mut peer_locked = peer.lock().unwrap();
 
-    let peer_pid = peer_locked.pid;
-    let peer_clone = peer.clone();
-    let peer_clone_2 = peer.clone();
+    if peer_locked.is_connected() {
+        let peer_pid = peer_locked.pid;
+        let peer_clone = peer.clone();
+        let peer_clone_2 = peer.clone();
 
-    peer_locked
-        .send(Message::Ping)
-        .map(move |_| {
-            // TODO: unwrap?
-            peer_clone.lock().unwrap().ping();
-        })
-        .map_err(Error::from)
-        .or_else(move |_| {
-            // TODO: diagnose and reconnect if necessary...
-            println!(
-                "Manager : {} : Ping : Failed, setting Peer as disconnected.",
-                peer_pid
-            );
+        let future = peer_locked
+            .send(Message::Ping)
+            .map(move |_| {
+                peer_clone.lock().unwrap().ping();
+            })
+            .map_err(Error::from)
+            .or_else(move |_| {
+                // TODO: diagnose and reconnect if necessary...
+                println!(
+                    "Manager : {} : Ping : Failed, setting Peer as disconnected.",
+                    peer_pid
+                );
 
-            // TODO: different way to reconnect ?
-            // TODO: unwrap?
-            peer_clone_2.lock().unwrap().disconnect();
+                peer_clone_2.lock().unwrap().disconnect();
 
-            Err(Error::PingSendError)
-        })
+                Err(Error::PingSendError)
+            });
+        Box::new(future)
+    } else {
+        Box::new(future::err(Error::PingSendError))
+    }
 }
 
 // TODO: tx only or shoal directly
