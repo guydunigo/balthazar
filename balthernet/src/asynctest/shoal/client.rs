@@ -175,11 +175,12 @@ fn connect_to_peer(
             println!("Client : {} : starting connection...", peer_addr);
             send_message(socket, Message::Connect(local_pid))
         })
+        .map_err(Error::from)
         .and_then(move |framed_sock| {
             let shoal = shoal.clone();
             let socket = framed_sock.get_ref().try_clone().unwrap();
 
-            let manager = framed_sock
+            framed_sock
                 .map_err(Error::from)
                 .for_each(move |msg| {
                     for_each_message_connecting(
@@ -190,18 +191,17 @@ fn connect_to_peer(
                         msg,
                     )
                 })
-                .map_err(move |err| match err {
-                    // TODO: println anyway ?
-                    Error::ConnectionCancelled | Error::ConnectionEnded => (),
-                    _ => eprintln!(
-                        "Client : {} : error when receiving a message : {:?}.",
-                        peer_addr, err
-                    ),
-                });
-
-            tokio::spawn(manager);
-
-            Ok(())
+                .map_err(move |err| {
+                    match err {
+                        // TODO: println anyway ?
+                        Error::ConnectionCancelled | Error::ConnectionEnded => (),
+                        _ => eprintln!(
+                            "Client : {} : error when receiving a message : {:?}.",
+                            peer_addr, err
+                        ),
+                    }
+                    err
+                })
         })
 }
 
