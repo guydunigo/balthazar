@@ -302,7 +302,7 @@ impl Peer {
         // TODO: disconnect message ?
 
         if let PeerState::Connected(socket) = &self.state {
-            socket.shutdown(Shutdown::Both).unwrap();
+            socket.shutdown(Shutdown::Both).unwrap_or_default();
         }
         self.state = PeerState::NotConnected;
     }
