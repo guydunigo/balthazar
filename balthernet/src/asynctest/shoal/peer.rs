@@ -234,7 +234,7 @@ impl Peer {
                 self.create_oneshot();
                 self.ready_tx
                     .take()
-                    .expect("The readiness oneshot was just created, it should be Some().")
+                    .expect("The readiness oneshot has just been created, it should be Some().")
             }
         };
         sender
@@ -302,6 +302,7 @@ impl Peer {
         // TODO: disconnect message ?
 
         if let PeerState::Connected(socket) = &self.state {
+            // TODO: Flush before ?
             socket.shutdown(Shutdown::Both).unwrap_or_default();
         }
         self.state = PeerState::NotConnected;

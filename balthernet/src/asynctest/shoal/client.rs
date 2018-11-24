@@ -254,10 +254,13 @@ pub fn try_connecting_at_interval(
                     Box::new(
                         connect_to_peer(shoal.clone(), peer_opt.clone(), peer_addr).or_else(
                             move |err| {
-                                eprintln!(
+                                match err {
+                                    Error::ConnectionEnded | Error::ConnectionCancelled => (),
+                                    _ => eprintln!(
                                     "Client : {} : Error while connecting : `{:?}`. Retrying in {} seconds...",
                                     peer_addr, err, CONNECTION_INTERVAL
-                                );
+                                )
+                                }
 
                                 *(is_a_client_connecting.lock().unwrap()) = false;
                                 Ok(())

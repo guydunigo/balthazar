@@ -141,6 +141,8 @@ fn for_each_message_connecting(
 
                     *peer_opt = Some(peer_arc_mut.clone());
                     shoal.lock().insert_peer(&mut peers_locked, peer_arc_mut);
+
+                    return Err(Error::ConnectionEnded);
                 }
             }
             _ => eprintln!("Listener : received a message but it was not `Connect(pid,vote)`."),

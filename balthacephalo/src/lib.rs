@@ -54,7 +54,7 @@ pub fn swim(
             for_each_message(shoal.clone(), jobs_rc.clone(), peer_pid, msg)
         })
         .map(|_| ())
-        .map_err(|_| ());
+        .map_err(|err| eprintln!("Cephalo : Fatal error : `{:?}`", err));
 
     runtime.spawn(shoal_rx_future);
 
@@ -111,15 +111,17 @@ pub fn for_each_message(
 
             shoal.lock().send_to(peer_pid, msg);
         }
+        // TODO: check conflicts ?
         Message::Job(sender_pid, _job_id, job) => {
             // TODO: check job_id, send confirmation/error message ?
             let mut jobs = jobs_rc.lock().unwrap();
-            // for now, cephalo takes ownership of job
             let job = Job::new(sender_pid, job);
 
             jobs.insert(job.id, Arc::new(Mutex::new(job)));
         }
         // TODO: The pode who sends task should be the same as the one sending the job ?
+        // TODO: check conflicts ?
+        // register tasks even when job hasn't been sent ?
         Message::Task(job_id, task_id, args) => {
             let mut jobs = jobs_rc.lock().unwrap();
             let job = match jobs.get(&job_id) {
@@ -167,7 +169,6 @@ pub fn for_each_message(
                 peer_pid
             );
             shoal.lock().peer_connection_cancelled(peer_pid);
-            return Err(Error::NetError(net::Error::ConnectionCancelled));
         }
         _ => shoal
             .lock()

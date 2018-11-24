@@ -48,7 +48,9 @@ impl Decoder for MessageCodec {
 
             // TODO: same with Task ?
             match msg {
-                Message::Job(_, job_id, _) => println!("-- Received : Job #{}.", job_id),
+                Message::Job(_, job_id, _) => {
+                    println!("-- {:?} : Received : Job #{}.", self.peer_pid, job_id)
+                }
                 Message::Task(job_id, task_id, _) => println!(
                     "-- {:?} : Received : Task #{} for Job #{}.",
                     self.peer_pid, task_id, job_id
