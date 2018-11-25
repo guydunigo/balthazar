@@ -1,0 +1,8 @@
+(
+    pid: 9003,
+    addr: "localhost:9003",
+    command: Pode,
+    peers: [
+        "localhost:9002",
+    ],
+)

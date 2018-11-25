@@ -1,0 +1,8 @@
+(
+    pid: 3000,
+    addr: "localhost:3000",
+    command: InkPode,
+    peers: [
+        "localhost:9000",
+    ],
+)
