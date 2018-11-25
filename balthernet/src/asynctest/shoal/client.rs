@@ -64,7 +64,7 @@ fn for_each_message_connecting(
                             unimplemented!();
                         }
                     },
-                    Message::ConnectReceived(_) => {
+                    Message::Connect(_) => {
                         // TODO: might mean that it is already connecting (listener in vote or other client)...
                         // TODO: check if same id...
                     }
@@ -86,7 +86,7 @@ fn for_each_message_connecting(
                 return Err(Error::ConnectionEnded);
             }
             PeerState::NotConnected => {
-                if let Message::ConnectReceived(peer_pid) = msg {
+                if let Message::Connect(peer_pid) = msg {
                     if peer_locked.pid() != peer_pid {
                         eprintln!("Client : {} : Received a `peer_id` that differs from the already known `peer.pid` : `peer_id=={}`, `peer.peer_id=={}`.", peer_locked.addr, peer_pid, peer_locked.pid());
                         // TODO: return error and cancel connection or create new peer ?
@@ -99,7 +99,7 @@ fn for_each_message_connecting(
     } else {
         // println!("Client : {} : `peer_opt` is `None`.", peer_addr);
         match msg {
-            Message::ConnectReceived(peer_pid) => {
+            Message::Connect(peer_pid) => {
                 let peers = shoal.lock().peers();
                 let mut peers_locked = peers.lock().unwrap();
 

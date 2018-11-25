@@ -8,7 +8,8 @@ use tokio::runtime::Runtime;
 
 use balthmessage::Message;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::fmt;
 use std::net::SocketAddr;
 use std::ops::Deref;
 use std::sync::{Arc, Mutex, RwLock, Weak};
@@ -36,6 +37,7 @@ pub type OrphanMsgsMapArcMut = Arc<
         >,
     >,
 >;
+pub type ReceivedMsgsSetArcMut = Arc<Mutex<HashSet<(PeerId, Message)>>>;
 
 // ------------------------------------------------------------------
 /// # Shoal
@@ -49,6 +51,7 @@ pub type OrphanMsgsMapArcMut = Arc<
 ///
 /// > **Shoal** because this *materializes* the local *cephalopode* and its peers *swimming* together and
 /// communicating.
+#[derive(Debug)]
 pub struct Shoal {
     local_pid: PeerId,
     local_addr: SocketAddr,
@@ -59,6 +62,7 @@ pub struct Shoal {
     // TODO: have a way to monitor size ?
     msgs_received: MsgsMapArcMut,
     orphan_messages: OrphanMsgsMapArcMut,
+    received_messages: ReceivedMsgsSetArcMut,
 }
 
 impl Shoal {
@@ -72,6 +76,7 @@ impl Shoal {
                 peers: Arc::new(Mutex::new(HashMap::new())),
                 msgs_received: Arc::new(Mutex::new(HashMap::new())),
                 orphan_messages: Arc::new(Mutex::new(HashMap::new())),
+                received_messages: Arc::new(Mutex::new(HashSet::new())),
             },
             rx,
         )
@@ -147,15 +152,27 @@ impl Shoal {
         }
     }
 
-    pub fn broadcast(&self, msg: Message, exclude: &[PeerId]) {
+    /// This function send `msg` to all connected peers only if it wasn't already broadcasted.
+    pub fn broadcast(&self, from: PeerId, msg: Message) {
         let peers = self.peers.lock().unwrap();
+        let mut received_messages = self.received_messages.lock().unwrap();
 
-        peers.iter().for_each(|(pid, peer)| {
-            let mut peer = peer.lock().unwrap();
-            if exclude.iter().find(|expid| *expid == pid).is_none() {
-                peer.send_and_spawn(msg.clone());
-            }
-        });
+        let from_msg = (from, msg);
+
+        if received_messages.get(&from_msg).is_some() {
+            peers.iter().for_each(|(pid, peer)| {
+                let mut peer = peer.lock().unwrap();
+                if *pid != from {
+                    // TODO: Cloning a big message ?
+                    let msg = Message::Broadcast(self.local_pid(), Box::new(from_msg.1.clone()));
+                    peer.send_and_spawn(msg);
+                }
+            });
+
+            received_messages.insert(from_msg);
+        } else {
+            eprintln!("Msg already broadcasted...");
+        }
     }
 
     pub fn insert_peer(&self, peers: &mut Peers, peer: PeerArcMut) {
@@ -203,6 +220,12 @@ impl From<Shoal> for ShoalReadArc {
         ShoalReadArc {
             inner: Arc::new(RwLock::new(s)),
         }
+    }
+}
+
+impl fmt::Debug for ShoalReadArc {
+    fn fmt(&self, writer: &mut fmt::Formatter) -> fmt::Result {
+        write!(writer, "{:?}", &*self.lock())
     }
 }
 
@@ -273,11 +296,17 @@ pub struct ShoalReadWeak {
     inner: Weak<RwLock<Shoal>>,
 }
 
+impl fmt::Debug for ShoalReadWeak {
+    fn fmt(&self, writer: &mut fmt::Formatter) -> fmt::Result {
+        write!(writer, "{:?}", &*self.upgrade().lock())
+    }
+}
+
 impl ShoalReadWeak {
     fn upgrade(&self) -> ShoalReadArc {
         ShoalReadArc {
             inner: self.inner.upgrade().expect(
-                "Could not upgrade reference, it has been dropped (which should not happen).",
+                "Could not upgrade Shoal reference, it has been dropped (which should not happen).",
             ),
         }
     }

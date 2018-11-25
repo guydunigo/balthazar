@@ -130,9 +130,7 @@ impl Clone for PeerState {
 pub struct Peer {
     // TODO: no `pub` ?
     pid: PeerId,
-    // shoal: ShoalReadWeak,
-    // TODO: Useful to have here a separate tx ?
-    shoal_tx: MpscSenderMessage,
+    shoal: ShoalReadWeak,
     pub addr: SocketAddr,
     pub ping_status: PingStatus,
     pub state: PeerState,
@@ -150,7 +148,7 @@ impl Peer {
         Peer {
             pid: peer_pid,
             // shoal: shoal.downgrade(),
-            shoal_tx: shoal.lock().tx().clone(),
+            shoal: shoal.downgrade(),
             addr,
             ping_status: PingStatus::new(),
             state: PeerState::NotConnected,
@@ -357,7 +355,7 @@ impl Peer {
             let framed_sock = Framed::new(socket, MessageCodec::new(Some(self.pid())));
             let peer_pid = self.pid();
             let peer_clone = peer.clone();
-            let shoal_tx = self.shoal_tx.clone();
+            let shoal = self.shoal.clone();
 
             let manage_future = framed_sock
                 .send(Message::ConnectAck)
@@ -371,7 +369,7 @@ impl Peer {
                     tokio::spawn(ping_future);
 
                     frame.map_err(Error::from).for_each(move |msg| {
-                        for_each_message(shoal_tx.clone(), &mut *peer.lock().unwrap(), msg)
+                        for_each_message(shoal.upgrade(), &mut *peer.lock().unwrap(), msg)
                     })
                 })
                 .map_err(move |err| match err {
@@ -389,7 +387,7 @@ impl Peer {
     }
 
     pub fn handle_msg(&mut self, msg: Message) -> Result<(), Error> {
-        for_each_message(self.shoal_tx.clone(), self, msg)
+        for_each_message(self.shoal.upgrade(), self, msg)
     }
 }
 
@@ -426,8 +424,8 @@ fn ping_peer(peer: PeerArcMut) -> Box<Future<Item = (), Error = Error> + Send> {
     }
 }
 
-// TODO: tx only or shoal directly
-fn for_each_message(tx: MpscSenderMessage, peer: &mut Peer, msg: Message) -> Result<(), Error> {
+fn for_each_message(shoal: ShoalReadArc, peer: &mut Peer, msg: Message) -> Result<(), Error> {
+    let shoal = shoal.lock();
     match msg {
         Message::Ping => {
             let socket = {
@@ -450,6 +448,9 @@ fn for_each_message(tx: MpscSenderMessage, peer: &mut Peer, msg: Message) -> Res
             peer.pong();
             // println!("Manager : {} : received Pong ! It is alive !!!", peer.pid);
         }
+        Message::Broadcast(from, msg) => {
+            shoal.broadcast(from, *msg);
+        }
         _ => {
             /*
             println!(
@@ -457,7 +458,7 @@ fn for_each_message(tx: MpscSenderMessage, peer: &mut Peer, msg: Message) -> Res
                 peer.pid
             );
             */
-            let send_future = tx.send((peer.pid, msg)).map(|_| ()).map_err(|_| ());
+            let send_future = shoal.tx().send((peer.pid, msg)).map(|_| ()).map_err(|_| ());
             tokio::spawn(send_future);
         }
     }

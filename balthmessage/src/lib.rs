@@ -68,18 +68,6 @@ impl From<de::Error> for Error {
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Hash)]
 pub enum Message {
     Hello(String),
-    // TODO: use `type PeerId` and `type ConnVote`
-    Connect(PeerId),
-    // TODO: rename ?
-    ConnectReceived(PeerId),
-    Vote(ConnVote),
-    ConnectAck,
-    ConnectCancel,
-    Connected(usize),
-    // TODO: Useful to annouce deconnection ?
-    Disconnect,
-    Disconnected(usize),
-    MessageTooBig,
     Idle(usize),
     RequestJob(JobId),
     UnknownJobId(JobId),
@@ -91,10 +79,25 @@ pub enum Message {
     ReturnValue(JobId, TaskId, Result<Arguments, ()>), // TODO: proper error
     // External(E) // TODO: generic type
     NoJob,
-    TestBig(Vec<u8>),
+
+    // Network control :
+    // TODO: Possibly in another type ?
+    MessageTooBig,
+    Connect(PeerId),
+    Vote(ConnVote),
+    ConnectAck,
+    ConnectCancel,
+    Connected(usize),
     // TODO: Ping/Pong with Instants ? (latency, ...)
-    Ping, // (Instant),
-    Pong, // (Instant),
+    Ping,                            // (Instant),
+    Pong,                            // (Instant),
+    Broadcast(PeerId, Box<Message>), // Broadcast(from, msg)
+    TestBig(Vec<u8>),
+
+    // Legacy
+    // TODO: delete ?
+    Disconnect,
+    Disconnected(usize),
 }
 
 impl fmt::Display for Message {

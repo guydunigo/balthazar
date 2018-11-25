@@ -167,35 +167,33 @@ pub fn listen(shoal: ShoalReadArc, listener: TcpListener) -> impl Future<Item = 
 
             let peer_opt = Arc::new(Mutex::new(None));
 
-            let send_future =
-                send_message(socket.try_clone()?, Message::ConnectReceived(local_pid))
-                    .and_then(move |framed_sock| {
-                        let manager = framed_sock
-                            .map_err(Error::from)
-                            .for_each(move |msg| {
-                                for_each_message_connecting(
-                                    shoal.clone(),
-                                    peer_opt.clone(),
-                                    peer_addr,
-                                    // TODO: unwrap?
-                                    socket.try_clone().unwrap(),
-                                    msg,
-                                )
-                            })
-                            .map_err(move |err| match err {
-                                // TODO: println anyway ?
-                                Error::ConnectionCancelled | Error::ConnectionEnded => (),
-                                _ => eprintln!(
-                                    "Listener : error when receiving a message : {:?}.",
-                                    err
-                                ),
-                            });
+            let send_future = send_message(socket.try_clone()?, Message::Connect(local_pid))
+                .and_then(move |framed_sock| {
+                    let manager = framed_sock
+                        .map_err(Error::from)
+                        .for_each(move |msg| {
+                            for_each_message_connecting(
+                                shoal.clone(),
+                                peer_opt.clone(),
+                                peer_addr,
+                                // TODO: unwrap?
+                                socket.try_clone().unwrap(),
+                                msg,
+                            )
+                        })
+                        .map_err(move |err| match err {
+                            // TODO: println anyway ?
+                            Error::ConnectionCancelled | Error::ConnectionEnded => (),
+                            _ => {
+                                eprintln!("Listener : error when receiving a message : {:?}.", err)
+                            }
+                        });
 
-                        tokio::spawn(manager);
+                    tokio::spawn(manager);
 
-                        Ok(())
-                    })
-                    .map_err(|_| ());
+                    Ok(())
+                })
+                .map_err(|_| ());
 
             tokio::spawn(send_future);
 
