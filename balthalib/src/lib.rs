@@ -1,7 +1,11 @@
 extern crate balthacephalo as cephalo;
 extern crate balthapode as pode;
 extern crate balthernet as net;
+
+#[macro_use]
+extern crate serde_derive;
 extern crate ron;
+extern crate serde;
 extern crate tokio;
 
 pub mod config_parser;
@@ -10,9 +14,9 @@ use tokio::prelude::*;
 use tokio::runtime::Runtime;
 
 use std::convert::From;
-use std::fs::File;
+use std::io;
 
-use net::asynctest::PeerId;
+use config_parser::{CephalopodeType, Config};
 
 // ------------------------------------------------------------------
 // Errors
@@ -24,6 +28,9 @@ pub enum Error {
     ArgError(config_parser::ArgError),
     NetError(net::Error),
     TokioRuntimeError,
+    IoError(io::Error),
+    ConfigFileDeserializationError(ron::de::Error),
+    LocalAddressParsingError(net::Error),
 }
 
 impl From<cephalo::Error> for Error {
@@ -50,19 +57,19 @@ impl From<net::Error> for Error {
     }
 }
 
-// ------------------------------------------------------------------
-
-// pub trait Mollusque {
-//     // Can't run with tentacles...
-//     fn swim(&mut self) -> io::Result<()>;
-// }
-
-pub enum CephalopodeType {
-    Cephalo,
-    Pode,
-    InkPode,
-    NetTest,
+impl From<io::Error> for Error {
+    fn from(err: io::Error) -> Error {
+        Error::IoError(err)
+    }
 }
+
+impl From<ron::de::Error> for Error {
+    fn from(err: ron::de::Error) -> Error {
+        Error::ConfigFileDeserializationError(err)
+    }
+}
+
+// ------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
@@ -74,19 +81,14 @@ mod tests {
 
 // ------------------------------------------------------------------
 
-pub fn swim(config: config_parser::Config) -> Result<(), Error> {
-    let reader = File::open("./peers.ron").map_err(net::Error::from)?;
-    let addrs: Vec<String> = ron::de::from_reader(reader).unwrap();
-
-    // TODO: actual pid
-    let local_pid: PeerId = config.addr.port() as PeerId;
-    println!("Using pid : {}", local_pid);
+pub fn swim(config: Config) -> Result<(), Error> {
+    println!("Using pid : {}", config.pid);
 
     let mut runtime = Runtime::new().map_err(net::Error::from)?;
 
-    let (shoal, rx) = net::asynctest::shoal::ShoalReadArc::new(local_pid, config.addr);
+    let (shoal, rx) = net::asynctest::shoal::ShoalReadArc::new(config.pid, config.addr);
 
-    shoal.swim(&mut runtime, &addrs[..])?;
+    shoal.swim(&mut runtime, &config.peers[..])?;
 
     match config.command {
         CephalopodeType::Cephalo => cephalo::swim(&mut runtime, shoal, rx)?,

@@ -1,49 +1,29 @@
 mod config;
 
-use net;
 use std::env;
 
-pub use self::config::Config;
-use super::CephalopodeType;
+pub use self::config::{CephalopodeType, Config};
+pub use super::Error;
 
 // ------------------------------------------------------------------
 // Errors
 
 #[derive(Debug)]
 pub enum ArgError {
-    NoCommand,
-    NoAddress,
-    UnknownCommand(String),
-    InvalidAddress(net::Error),
+    NoConfigFile,
 }
 
 // ------------------------------------------------------------------
 
-pub fn parse_config(mut args: env::Args) -> Result<Config, ArgError> {
+pub fn parse_config(mut args: env::Args) -> Result<Config, Error> {
     args.next();
 
-    let command = match args.next() {
+    let conf_filename = match args.next() {
         Some(cmd) => cmd,
-        None => return Err(ArgError::NoCommand),
+        None => return Err(Error::from(ArgError::NoConfigFile)),
     };
 
-    let command = match &command[..] {
-        "c" | "cephalo" => CephalopodeType::Cephalo,
-        "p" | "pode" => CephalopodeType::Pode,
-        "i" | "inkpode" => CephalopodeType::InkPode,
-        "n" | "netTest" => CephalopodeType::NetTest,
-        cmd => return Err(ArgError::UnknownCommand(cmd.to_string())),
-    };
+    println!("Using config file : `{}`.", conf_filename);
 
-    let addr_res = match args.next() {
-        Some(addr) => net::parse_socket_addr(addr),
-        None => return Err(ArgError::NoAddress),
-    };
-
-    let addr = match addr_res {
-        Ok(addr) => addr,
-        Err(err) => return Err(ArgError::InvalidAddress(err)),
-    };
-
-    Ok(Config { command, addr })
+    Config::from_file(conf_filename)
 }

@@ -19,7 +19,6 @@ mod client;
 mod listener;
 mod peer;
 pub use self::peer::*;
-use super::super::parse_socket_addr;
 
 // TODO: think abuot this size
 const SHOAL_MPSC_SIZE: usize = 32;
@@ -153,6 +152,7 @@ impl Shoal {
     }
 
     /// This function send `msg` to all connected peers only if it wasn't already broadcasted.
+    // TODO: what happens if someone wants to broadcast the same msg twice (`Idle` for instance) ? maybe use a counter (nonce) to identify messages from peers ?
     pub fn broadcast(&self, from: PeerId, msg: Message) {
         let peers = self.peers.lock().unwrap();
         let mut received_messages = self.received_messages.lock().unwrap();
@@ -252,21 +252,13 @@ impl ShoalReadArc {
             .expect("Could not lock the Shaol object for reading.")
     }
 
-    pub fn start_clients(&self, runtime: &mut Runtime, addrs: &[String]) {
+    pub fn start_clients(&self, runtime: &mut Runtime, addrs: &[SocketAddr]) {
         let shoal = self.lock();
         addrs
             .iter()
-            .map(parse_socket_addr)
-            .filter_map(|addr| match addr {
-                Ok(addr) => Some(addr),
-                Err(err) => {
-                    eprintln!("{:?}", err);
-                    None
-                }
-            })
-            .filter(|peer_addr| *peer_addr != shoal.local_addr)
+            .filter(|peer_addr| **peer_addr != shoal.local_addr)
             .for_each(|peer_addr| {
-                let client_future = client::try_connecting_at_interval(self.clone(), peer_addr);
+                let client_future = client::try_connecting_at_interval(self.clone(), *peer_addr);
                 runtime.spawn(client_future);
             });
     }
@@ -281,7 +273,7 @@ impl ShoalReadArc {
         Ok(())
     }
 
-    pub fn swim(&self, runtime: &mut Runtime, addrs: &[String]) -> Result<(), Error> {
+    pub fn swim(&self, runtime: &mut Runtime, addrs: &[SocketAddr]) -> Result<(), Error> {
         self.start_clients(runtime, addrs);
         self.start_listener(runtime)?;
 
