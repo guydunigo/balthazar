@@ -1,8 +1,6 @@
 use futures::future::Shared;
 use futures::sync::{mpsc, oneshot};
-use tokio::codec::Framed;
 use tokio::io;
-use tokio::net::TcpStream;
 use tokio::prelude::*;
 use tokio::runtime::Runtime;
 
@@ -62,7 +60,6 @@ pub struct Shoal {
     // TODO: have a way to monitor size ?
     msgs_received: MsgsMapArcMut,
     orphan_messages: OrphanMsgsMapArcMut,
-    received_messages: ReceivedMsgsSetArcMut,
 }
 
 impl Shoal {
@@ -76,7 +73,6 @@ impl Shoal {
                 peers: Arc::new(Mutex::new(HashMap::new())),
                 msgs_received: Arc::new(Mutex::new(HashMap::new())),
                 orphan_messages: Arc::new(Mutex::new(HashMap::new())),
-                received_messages: Arc::new(Mutex::new(HashSet::new())),
             },
             rx,
         )
@@ -115,39 +111,45 @@ impl Shoal {
         &self,
         peer_pid: PeerId,
         msg: Message,
-    ) -> Box<Future<Item = Framed<TcpStream, MessageCodec>, Error = Error> + Send> {
+    ) -> Box<Future<Item = (), Error = Error> + Send> {
         let peers = self.peers.lock().unwrap();
 
         match peers.get(&peer_pid) {
             Some(peer) => {
                 let mut peer = peer.lock().unwrap();
-                Box::new(peer.send(msg.clone()))
+                Box::new(peer.send(msg.clone()).map(|_| ()))
             }
             None => {
-                // Err(Error::PeerNotFound(peer_pid)),
+                /*
                 println!(
                     "Shoal : Setting msg `{:?}` to be sent when peer `{}` is created.",
                     &format!("{:?}", msg)[..4],
                     peer_pid
                 );
-
+                
                 let mut om = self.orphan_messages.lock().unwrap();
                 let ready_rx = match om.get(&peer_pid) {
                     Some((_, ready_rx)) => ready_rx.clone(),
                     None => {
                         let (ready_tx, ready_rx) = oneshot::channel();
                         let ready_rx = ready_rx.shared();
-
+                
                         om.insert(peer_pid, (ready_tx, ready_rx.clone()));
                         ready_rx
                     }
                 };
-
+                
                 let future = ready_rx
                     .map_err(|err| Error::OneShotError(err))
                     .and_then(|peer| peer.lock().unwrap().send(msg));
-
+                
                 Box::new(future)
+                */
+                println!("Shoal : Peer `{}` is not a direct peer, sending a `ForwardTo` message to other peers...", peer_pid);
+
+                self.forward(peer_pid, Vec::new(), msg);
+                // TODO: future that resolves only when receiving some ack from target ?
+                Box::new(future::ok(()))
             }
         }
     }
@@ -164,12 +166,13 @@ impl Shoal {
         if route_list
             .iter()
             .find(|pid| **pid == self.local_pid)
-            .is_some()
+            .is_none()
         {
             route_list.push(self.local_pid());
             peers.iter().for_each(|(pid, peer)| {
                 let mut peer = peer.lock().unwrap();
-                if route_list.iter().find(|p| **p == *pid).is_some() {
+                // TODO: check if connected ?
+                if route_list.iter().find(|p| **p == *pid).is_none() {
                     // TODO: Cloning a big message and big route_list ?
                     let msg = Message::Broadcast(route_list.clone(), Box::new(msg.clone()));
                     peer.send_and_spawn(msg);
@@ -181,6 +184,59 @@ impl Shoal {
             eprintln!("Msg already broadcasted...");
         }
     }
+
+    // TODO: send Found/NotFound ?
+    pub fn forward(&self, to: PeerId, mut route_list: Vec<PeerId>, msg: Message) {
+        let peers = self.peers.lock().unwrap();
+
+        if to == self.local_pid() {
+            if route_list.len() == 0 {
+                eprintln!(
+                "The route list is empty, which can mean : 1. The Shoal is trying to send the message to itself or 2. a `ForwardTo` with no sender has been sent."
+            );
+            }
+
+            // TODO: take care of the message: directly forward to upper layer ?
+            // TODO: save the route to the sender peer ? and re-use it next time ?
+            let future = self
+                .tx()
+                .send((route_list[0], msg))
+                .map(|_| ())
+                .map_err(|_| ());
+            tokio::spawn(future);
+        } else if let Some((_, peer)) = peers.iter().find(|(pid, _)| **pid == to) {
+            let mut peer = peer.lock().unwrap();
+
+            route_list.push(self.local_pid());
+
+            // TODO: Cloning a big message and big route_list ?
+            let msg = Message::ForwardTo(to, route_list.clone(), Box::new(msg.clone()));
+            peer.send_and_spawn(msg);
+        // TODO: better way to find ?
+        } else if route_list
+            .iter()
+            .find(|pid| **pid == self.local_pid)
+            .is_none()
+        {
+            route_list.push(self.local_pid());
+
+            peers.iter().for_each(|(pid, peer)| {
+                let mut peer = peer.lock().unwrap();
+                // TODO: check if connected ?
+                if route_list.iter().find(|p| **p == *pid).is_none() {
+                    // TODO: Cloning a big message and big route_list ?
+                    let msg = Message::ForwardTo(to, route_list.clone(), Box::new(msg.clone()));
+                    peer.send_and_spawn(msg);
+                } else {
+                    eprintln!("Message already gone through peer `{}`", pid);
+                }
+            });
+        } else {
+            eprintln!("Message already forwarded...");
+        }
+    }
+
+    // TODO: forward with prefered route
 
     pub fn insert_peer(&self, peers: &mut Peers, peer: PeerArcMut) {
         let peer_pid = peer.lock().unwrap().pid();

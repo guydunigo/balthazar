@@ -10,8 +10,6 @@ extern crate wasmi;
 mod orchestrator;
 
 use futures::sync::mpsc::Sender;
-use tokio::codec::Framed;
-use tokio::net::TcpStream;
 use tokio::prelude::*;
 use tokio::runtime::Runtime;
 
@@ -27,7 +25,6 @@ use job::task::{LoneTask, Task, TaskId};
 use job::{Job, JobId, JobsMapArcMut};
 use message::{de, Message};
 use net::asynctest::shoal::{MpscReceiverMessage, ShoalReadArc};
-use net::asynctest::MessageCodec;
 use net::asynctest::PeerId;
 use net::MANAGER_ID;
 
@@ -98,21 +95,22 @@ pub fn fill(
     // TODO: just put them all in a list and wait for all at once ?
     fn send_args(
         shoal: ShoalReadArc,
+        peer_pid: PeerId,
         job_id: JobId,
-        frame: Framed<TcpStream, MessageCodec>,
         mut args_enumerated: Vec<(usize, Arguments)>,
-    ) -> Box<Future<Item = Framed<TcpStream, MessageCodec>, Error = net::Error> + Send> {
+    ) -> Box<Future<Item = (), Error = net::Error> + Send> {
         if let Some((task_id, args)) = args_enumerated.pop() {
-            let future = frame
-                .send(Message::Task(job_id, task_id, args))
-                .map_err(net::Error::from)
-                .and_then(move |frame| send_args(shoal, job_id, frame, args_enumerated));
-            Box::new(future)
+            let shoal_clone = shoal.clone();
+            let shoal_lock = shoal_clone.lock();
+            Box::new(
+                shoal_lock
+                    .send_to_future(peer_pid, Message::Task(job_id, task_id, args))
+                    .and_then(move |_| send_args(shoal, peer_pid, job_id, args_enumerated)),
+            )
         } else {
             let future = shoal
                 .lock()
                 .send_to_future(MANAGER_ID, Message::ConnectCancel)
-                .and_then(|frame| frame.flush().map(|_| ()).map_err(net::Error::from))
                 .map(|_| exit(0));
             Box::new(future)
         }
@@ -128,8 +126,8 @@ pub fn fill(
             MANAGER_ID,
             Message::Job(shoal.lock().local_pid(), job_id, job.bytecode),
         )
-        .and_then(move |frame| {
-            send_args(shoal_clone, job_id, frame, args_enumerated).map_err(net::Error::from)
+        .and_then(move |_| {
+            send_args(shoal_clone, MANAGER_ID, job_id, args_enumerated).map_err(net::Error::from)
         })
         .map(|_| ())
         .map_err(|_| ());

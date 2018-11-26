@@ -305,7 +305,6 @@ impl Peer {
         self.state = PeerState::NotConnected;
     }
 
-    /// Don't forget to spawn that...
     // TODO: if send msg error, set to not connected ?
     pub fn send(
         &mut self,

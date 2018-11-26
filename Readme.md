@@ -27,8 +27,8 @@
     - If not, forwards to every other peer (not sender) :
         - Wait for all answers : If one `Found` : return `Found`, else return `NotFound`
 
-- Keep track of the path by sending along a growing list ?
-    - Same for broadcast ?
+- Keep track of the path by sending along a growing list
+    - Same for broadcast
 
 0 - 1
   \ | 
