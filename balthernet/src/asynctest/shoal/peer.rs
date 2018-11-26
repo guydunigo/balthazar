@@ -306,24 +306,22 @@ impl Peer {
     }
 
     // TODO: if send msg error, set to not connected ?
-    pub fn send(
-        &mut self,
-        msg: Message,
-    ) -> Box<Future<Item = Framed<TcpStream, MessageCodec>, Error = Error> + Send> {
+    pub fn send(&mut self, msg: Message) -> Box<Future<Item = (), Error = Error> + Send> {
         if let PeerState::Connected(socket) = &self.state {
             // TODO: unwrap?
-            Box::new(send_message(socket.try_clone().unwrap(), msg))
+            Box::new(send_message(socket.try_clone().unwrap(), msg).map(|_| ()))
         // TODO: other messages that sohuldn't be registered ?
         } else if let Message::Ping = msg {
             // Don't register Pings...
             Box::new(future::err(Error::PingSendError))
         } else {
+            /*
             let peer_pid = self.pid;
             println!(
                 "Peer : {} : Setting msg `{}` to be sent when peer is ready.",
                 peer_pid, msg
             );
-
+            
             let future = self
                 .ready_rx
                 .clone()
@@ -337,7 +335,12 @@ impl Peer {
                     );
                     err
                 });
-            Box::new(future)
+            */
+            self.shoal
+                .upgrade()
+                .lock()
+                .forward(self.pid, Vec::new(), msg);
+            Box::new(future::ok(()))
         }
     }
 
