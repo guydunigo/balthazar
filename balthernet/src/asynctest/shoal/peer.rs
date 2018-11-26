@@ -446,8 +446,11 @@ fn for_each_message(shoal: ShoalReadArc, peer: &mut Peer, msg: Message) -> Resul
             peer.pong();
             // println!("Manager : {} : received Pong ! It is alive !!!", peer.pid);
         }
-        Message::Broadcast(from, msg) => {
-            shoal.broadcast(from, *msg);
+        Message::Broadcast(route_list, msg) => {
+            shoal.broadcast(route_list, *msg);
+        }
+        Message::ForwardTo(to, route_list, msg) => {
+            shoal.forward(to, route_list, *msg);
         }
         _ => {
             /*

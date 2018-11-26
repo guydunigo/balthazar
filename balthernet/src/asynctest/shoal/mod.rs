@@ -172,16 +172,18 @@ impl Shoal {
             peers.iter().for_each(|(pid, peer)| {
                 let mut peer = peer.lock().unwrap();
                 // TODO: check if connected ?
-                if route_list.iter().find(|p| **p == *pid).is_none() {
-                    // TODO: Cloning a big message and big route_list ?
-                    let msg = Message::Broadcast(route_list.clone(), Box::new(msg.clone()));
-                    peer.send_and_spawn(msg);
-                } else {
-                    eprintln!("Msg already gone through peer `{}`", pid);
+                if peer.is_connected() {
+                    if route_list.iter().find(|p| **p == *pid).is_none() {
+                        // TODO: Cloning a big message and big route_list ?
+                        let msg = Message::Broadcast(route_list.clone(), Box::new(msg.clone()));
+                        peer.send_and_spawn(msg);
+                    } else {
+                        eprintln!("Message already gone through peer `{}`", pid);
+                    }
                 }
             });
         } else {
-            eprintln!("Msg already broadcasted...");
+            eprintln!("Message already broadcasted...");
         }
     }
 
@@ -222,13 +224,14 @@ impl Shoal {
 
             peers.iter().for_each(|(pid, peer)| {
                 let mut peer = peer.lock().unwrap();
-                // TODO: check if connected ?
-                if route_list.iter().find(|p| **p == *pid).is_none() {
-                    // TODO: Cloning a big message and big route_list ?
-                    let msg = Message::ForwardTo(to, route_list.clone(), Box::new(msg.clone()));
-                    peer.send_and_spawn(msg);
-                } else {
-                    eprintln!("Message already gone through peer `{}`", pid);
+                if peer.is_connected() {
+                    if route_list.iter().find(|p| **p == *pid).is_none() {
+                        // TODO: Cloning a big message and big route_list ?
+                        let msg = Message::ForwardTo(to, route_list.clone(), Box::new(msg.clone()));
+                        peer.send_and_spawn(msg);
+                    } else {
+                        eprintln!("Message already gone through peer `{}`", pid);
+                    }
                 }
             });
         } else {
