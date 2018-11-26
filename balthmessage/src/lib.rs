@@ -74,7 +74,7 @@ pub enum Message {
     UnknownTaskId(JobId, TaskId),
     Job(PeerId, JobId, Vec<u8>), // TODO: more a signature than JobId
     JobRegisteredAt(JobId),
-    Task(JobId, TaskId, Arguments), // TODO: Real type
+    Task(JobId, TaskId, Arguments),
     // TODO: or tasks?
     ReturnValue(JobId, TaskId, Result<Arguments, ()>), // TODO: proper error
     // External(E) // TODO: generic type
@@ -89,9 +89,14 @@ pub enum Message {
     ConnectCancel,
     Connected(usize),
     // TODO: Ping/Pong with Instants ? (latency, ...)
-    Ping,                            // (Instant),
-    Pong,                            // (Instant),
-    Broadcast(PeerId, Box<Message>), // Broadcast(from, msg)
+    Ping, // (Instant),
+    Pong, // (Instant),
+    /// Broadcast(route_list, msg)
+    /// The original sender being the first of `route_list`
+    Broadcast(Vec<PeerId>, Box<Message>),
+    /// ForwardTo(to, route_list, msg)
+    /// The sender being the first of `route_list`.
+    ForwardTo(PeerId, Vec<PeerId>, Box<Message>),
     TestBig(Vec<u8>),
 
     // Legacy
@@ -109,6 +114,9 @@ impl fmt::Display for Message {
         write!(f, "{}", &debug[..len])
     }
 }
+
+// ------------------------------------------------------------------
+// TODO: delete below ?
 
 impl Message {
     pub fn send<W: Write>(&self, pode_id: PodeId, writer: &mut W) -> Result<(), Error> {

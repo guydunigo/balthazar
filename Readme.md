@@ -21,7 +21,7 @@
     - It can disconnect before the message is actually sent
     - How do I know it doesn't exist ?
 - Send the message in a special Forward msg to every other peers :
-    // - If the receiving peer is the target, send Ack or send the answer directly ?
+    - If the receiving peer is the target, send Ack or send the answer directly ?
     - If the receiving peer knows the target, it sends forwards directly the message to it.
         - Send `Found` back
     - If not, forwards to every other peer (not sender) :

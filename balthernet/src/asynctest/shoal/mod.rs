@@ -44,7 +44,8 @@ pub type ReceivedMsgsSetArcMut = Arc<Mutex<HashSet<(PeerId, Message)>>>;
 /// This struct stores the data needed across the network (local infos, peers, ...).
 /// It provides also methods to interract with all the peers directly (broadcast, ...).
 ///
-/// This structure is not intended to be used as mutable, because there is no need for it.
+/// This structure is not intended to be used as mutable, because there is no need for it :
+/// Each of its components are either directly `Arc<Mutex<T>>` or should not be changed.
 ///
 /// To use it in an multithreaded context, see : [`ShoalReadArc`]
 ///
@@ -151,25 +152,31 @@ impl Shoal {
         }
     }
 
-    /// This function send `msg` to all connected peers only if it wasn't already broadcasted.
-    // TODO: what happens if someone wants to broadcast the same msg twice (`Idle` for instance) ? maybe use a counter (nonce) to identify messages from peers ?
-    pub fn broadcast(&self, from: PeerId, msg: Message) {
+    /// This function send `msg` to all connected peers only if
+    /// - it doesn't appear in the route list of the `Broadcast` message.
+    /// (i.e. if it wasn't already broadcasted via this peer)
+    /// - the peer is not already in the route list
+    /// (if it hasn't already gone through this peer)
+    pub fn broadcast(&self, mut route_list: Vec<PeerId>, msg: Message) {
         let peers = self.peers.lock().unwrap();
-        let mut received_messages = self.received_messages.lock().unwrap();
 
-        let from_msg = (from, msg);
-
-        if received_messages.get(&from_msg).is_some() {
+        // TODO: better way to find ?
+        if route_list
+            .iter()
+            .find(|pid| **pid == self.local_pid)
+            .is_some()
+        {
+            route_list.push(self.local_pid());
             peers.iter().for_each(|(pid, peer)| {
                 let mut peer = peer.lock().unwrap();
-                if *pid != from {
-                    // TODO: Cloning a big message ?
-                    let msg = Message::Broadcast(self.local_pid(), Box::new(from_msg.1.clone()));
+                if route_list.iter().find(|p| **p == *pid).is_some() {
+                    // TODO: Cloning a big message and big route_list ?
+                    let msg = Message::Broadcast(route_list.clone(), Box::new(msg.clone()));
                     peer.send_and_spawn(msg);
+                } else {
+                    eprintln!("Msg already gone through peer `{}`", pid);
                 }
             });
-
-            received_messages.insert(from_msg);
         } else {
             eprintln!("Msg already broadcasted...");
         }
