@@ -31,7 +31,6 @@ fn vote() -> ConnVote {
     random()
 }
 
-/// Don't forget to spawn that...
 pub fn send_message(
     socket: TcpStream,
     msg: Message,

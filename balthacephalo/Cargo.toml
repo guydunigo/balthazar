@@ -4,7 +4,7 @@ version = "0.1.0"
 authors = ["GONI Guillaume <gdn3@live.fr>"]
 
 [dependencies]
-tokio = "0.1.13"
+tokio = "=0.1.11"
 
 balthmessage = { path = "../balthmessage" }
 balthajob = { path = "../balthajob" }
