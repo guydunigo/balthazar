@@ -9,8 +9,6 @@ extern crate wasmi;
 
 mod orchestrator;
 
-//TODO: +everywhere stream or socket or ...
-
 use futures::sync::mpsc::Sender;
 use tokio::codec::Framed;
 use tokio::net::TcpStream;
@@ -22,15 +20,11 @@ use std::convert::From;
 use std::fs::File;
 use std::io;
 use std::process::exit;
-use std::sync::Arc;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use job::task::arguments::Arguments;
-use job::task::TaskId;
-use job::task::{LoneTask, Task};
-use job::Job;
-use job::JobId;
-use job::JobsMapArcMut;
+use job::task::{LoneTask, Task, TaskId};
+use job::{Job, JobId, JobsMapArcMut};
 use message::{de, Message};
 use net::asynctest::shoal::{MpscReceiverMessage, ShoalReadArc};
 use net::asynctest::MessageCodec;

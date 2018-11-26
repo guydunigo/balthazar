@@ -41,7 +41,7 @@ pub fn send_message(
     framed_sock.send(msg.clone()).map_err(move |err| {
         if let Message::Ping = msg {
         } else {
-            eprintln!("Error when sending message `{:?}` : `{:?}`.", msg, err);
+            eprintln!("Error when sending message `{}` : `{:?}`.", msg, err);
         }
         Error::from(err)
     })

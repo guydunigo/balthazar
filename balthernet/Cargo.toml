@@ -7,10 +7,10 @@ edition = "2018"
 [dependencies]
 serde = "1.0.80"
 ron = "0.4.0"
-tokio = "0.1.11"
+tokio = "0.1.13"
 futures = "0.1.25"
-bytes = "0.4.10"
-rand= "0.5.5"
-libsecp256k1= "0.1.14"
+bytes = "0.4.11"
+rand= "0.6.1"
+libsecp256k1= "0.2.1"
 
 balthmessage = { path = "../balthmessage" }
