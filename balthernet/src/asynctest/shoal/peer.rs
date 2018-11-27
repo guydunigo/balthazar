@@ -447,6 +447,7 @@ fn ping_peer(peer: PeerArcMut) -> Box<Future<Item = (), Error = Error> + Send> {
 }
 
 fn for_each_message(shoal: ShoalReadArc, peer: &mut Peer, msg: Message) -> Result<(), Error> {
+    let shoal_clone = shoal.clone();
     let shoal = shoal.lock();
     match msg {
         Message::Ping => {
@@ -471,10 +472,20 @@ fn for_each_message(shoal: ShoalReadArc, peer: &mut Peer, msg: Message) -> Resul
             // println!("Manager : {} : received Pong ! It is alive !!!", peer.pid);
         }
         Message::Broadcast(route_list, msg) => {
-            shoal.broadcast(route_list, *msg);
+            // TODO: better way to avoid the lock ?
+            let future = future::ok(()).and_then(move |_| {
+                shoal_clone.lock().broadcast(route_list, *msg);
+                Ok(())
+            });
+            tokio::spawn(future);
         }
         Message::ForwardTo(to, route_list, msg) => {
-            shoal.forward(to, route_list, *msg);
+            // TODO: better way to avoid the lock ?
+            let future = future::ok(()).and_then(move |_| {
+                shoal_clone.lock().forward(to, route_list, *msg);
+                Ok(())
+            });
+            tokio::spawn(future);
         }
         _ => {
             /*
