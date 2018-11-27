@@ -1,6 +1,4 @@
-#![feature(int_to_from_bytes)]
 #![feature(duration_as_u128)]
-
 
 extern crate ron;
 extern crate tokio;
@@ -16,9 +14,7 @@ use futures::future::SharedError;
 
 use std::fmt::Display;
 use std::io;
-use std::net::{AddrParseError, SocketAddr, TcpStream, ToSocketAddrs};
-
-use balthmessage::{Message, MessageReader};
+use std::net::{AddrParseError, SocketAddr, ToSocketAddrs};
 
 pub mod asynctest;
 pub mod listener;
@@ -78,25 +74,6 @@ impl From<tokio::timer::Error> for Error {
     fn from(err: tokio::timer::Error) -> Error {
         Error::TokioTimerError(err)
     }
-}
-
-// ------------------------------------------------------------------
-
-pub fn initialize_pode<A: ToSocketAddrs + Display>(addr: A) -> Result<(TcpStream, usize), Error> {
-    let socket = TcpStream::connect(&addr)?;
-    println!("Connected to : `{}`", addr);
-
-    //TODO: as option
-    let pode_id = {
-        let mut init_reader = MessageReader::new(0, socket.try_clone()?);
-        match init_reader.next() {
-            Some(Ok(Message::Connected(pode_id))) => Ok(pode_id),
-            _ => Err(Error::FailedHandshake),
-        }
-    }?;
-    println!("{} : Handshake successful.", pode_id);
-
-    Ok((socket, pode_id))
 }
 
 // ------------------------------------------------------------------

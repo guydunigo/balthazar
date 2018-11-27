@@ -2,7 +2,7 @@ use tokio::net::TcpStream;
 use tokio::prelude::*;
 use tokio::timer::Interval;
 
-use balthmessage::Message;
+use balthmessage::Proto;
 
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
@@ -17,15 +17,15 @@ const CONNECTION_INTERVAL: u64 = 10;
 
 fn to_connecting(peer: &mut Peer, socket: TcpStream) {
     let local_vote = peer.client_to_connecting();
-    send_message_and_spawn(socket, Message::Vote(local_vote));
+    send_packet_and_spawn(socket, Proto::Vote(local_vote));
 }
 
-fn for_each_message_connecting(
+fn for_each_packet_connecting(
     shoal: ShoalReadArc,
     peer_opt: PeerArcMutOpt,
     peer_addr: SocketAddr,
     socket: TcpStream,
-    msg: Message,
+    pkt: Proto,
 ) -> Result<(), Error> {
     let mut peer_opt = peer_opt.lock().unwrap();
     if let Some(ref peer) = *peer_opt {
@@ -41,8 +41,8 @@ fn for_each_message_connecting(
         */
         match peer_locked.state {
             PeerState::Connecting(_) => {
-                match msg {
-                    Message::ConnectAck => {
+                match pkt {
+                    Proto::ConnectAck => {
                         if !peer_locked.listener_connecting {
                             peer_locked.client_connection_acked(peer.clone(), socket);
                         } else {
@@ -50,12 +50,12 @@ fn for_each_message_connecting(
                             unimplemented!();
                         }
                     },
-                    Message::ConnectCancel => {
+                    Proto::ConnectCancel => {
                         peer_locked.client_connection_cancelled();
-                        // End the message listening loop :
+                        // End the packet listening loop :
                         return Err(Error::ConnectionCancelled);
                     },
-                    Message::Vote(_peer_vote) => {
+                    Proto::Vote(_peer_vote) => {
                         if peer_locked.listener_connecting {
                             // TODO: send vote to listener
                             unimplemented!();
@@ -64,11 +64,11 @@ fn for_each_message_connecting(
                             unimplemented!();
                         }
                     },
-                    Message::Connect(_) => {
+                    Proto::Connect(_) => {
                         // TODO: might mean that it is already connecting (listener in vote or other client)...
                         // TODO: check if same id...
                     }
-                    _ => eprintln!("Client : {} : received a message but it was not `ConnectAck`, `ConnectCancel` or `Vote(vote)` : `{}`.", peer_addr, msg),
+                    _ => eprintln!("Client : {} : received a packet but it was not `ConnectAck`, `ConnectCancel` or `Vote(vote)` : `{}`.", peer_addr, pkt),
                 }
             }
             PeerState::Connected(_) => {
@@ -79,14 +79,14 @@ fn for_each_message_connecting(
 
                 // TODO: keep the same receiving frame and just transfer some channel or so...
                 peer_locked
-                    .handle_msg(msg)
-                    .expect(&format!("Client : {} : Error forwarding msg...", peer_addr)[..]);
+                    .handle_pkt(pkt)
+                    .expect(&format!("Client : {} : Error forwarding pkt...", peer_addr)[..]);
 
-                // End the message listening loop :
+                // End the packet listening loop :
                 return Err(Error::ConnectionEnded);
             }
             PeerState::NotConnected => {
-                if let Message::Connect(peer_pid) = msg {
+                if let Proto::Connect(peer_pid) = pkt {
                     if peer_locked.pid() != peer_pid {
                         eprintln!("Client : {} : Received a `peer_id` that differs from the already known `peer.pid` : `peer_id=={}`, `peer.peer_id=={}`.", peer_locked.addr, peer_pid, peer_locked.pid());
                         // TODO: return error and cancel connection or create new peer ?
@@ -98,8 +98,8 @@ fn for_each_message_connecting(
         }
     } else {
         // println!("Client : {} : `peer_opt` is `None`.", peer_addr);
-        match msg {
-            Message::Connect(peer_pid) => {
+        match pkt {
+            Proto::Connect(peer_pid) => {
                 let peers = shoal.lock().peers();
                 let mut peers_locked = peers.lock().unwrap();
 
@@ -125,14 +125,14 @@ fn for_each_message_connecting(
                         }
                         PeerState::Connected(_) => {
                             peer.client_connection_cancel(socket);
-                            // End the message listening loop :
+                            // End the packet listening loop :
                             return Err(Error::ConnectionCancelled);
                         }
                         PeerState::Connecting(_) => {
                             if peer.client_connecting {
                                 // eprintln!("Client : {} : Peer inconsistency or double connection tasks : `peer.state` is already `Connecting(vote)`, cancelling connection...", peer_addr);
 
-                                send_message_and_spawn(socket, Message::ConnectCancel);
+                                send_packet_and_spawn(socket, Proto::ConnectCancel);
                                 return Err(Error::ConnectionCancelled);
                             } else if peer.listener_connecting {
                                 unimplemented!("Can we arrive here ? (it would mean that listener is waiting for a vote but client was cancelled).");
@@ -154,7 +154,7 @@ fn for_each_message_connecting(
                 }
             }
             _ => eprintln!(
-                "Client : {} : received a message but it was not `ConnectReceived(pid)`.",
+                "Client : {} : received a packet but it was not `ConnectReceived(pid)`.",
                 peer_addr
             ),
         }
@@ -173,7 +173,7 @@ fn connect_to_peer(
         .map_err(Error::from)
         .and_then(move |socket| {
             println!("Client : {} : starting connection...", peer_addr);
-            send_message(socket, Message::Connect(local_pid))
+            send_packet(socket, Proto::Connect(local_pid))
         })
         .map_err(Error::from)
         .and_then(move |framed_sock| {
@@ -182,13 +182,13 @@ fn connect_to_peer(
 
             framed_sock
                 .map_err(Error::from)
-                .for_each(move |msg| {
-                    for_each_message_connecting(
+                .for_each(move |pkt| {
+                    for_each_packet_connecting(
                         shoal.clone(),
                         peer_opt.clone(),
                         peer_addr,
                         socket.try_clone().unwrap(),
-                        msg,
+                        pkt,
                     )
                 })
                 .map_err(move |err| {
@@ -196,7 +196,7 @@ fn connect_to_peer(
                         // TODO: println anyway ?
                         Error::ConnectionCancelled | Error::ConnectionEnded => (),
                         _ => eprintln!(
-                            "Client : {} : error when receiving a message : {:?}.",
+                            "Client : {} : error when receiving a packet : {:?}.",
                             peer_addr, err
                         ),
                     }

@@ -4,7 +4,7 @@ use tokio::io;
 use tokio::prelude::*;
 use tokio::runtime::Runtime;
 
-use balthmessage::Message;
+use balthmessage::{Message, Proto, ProtoCodec, M};
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -13,7 +13,7 @@ use std::ops::Deref;
 use std::sync::{Arc, Mutex, RwLock, Weak};
 use std::time::Instant;
 
-use super::{Error, MessageCodec};
+use super::Error;
 mod client;
 mod listener;
 mod peer;
@@ -115,8 +115,11 @@ impl Shoal {
     /// This method is used to prepare message that will be sent:
     /// - Add a nonce (TODO: or a timestamp ?)
     /// - TODO: Add a signature
-    fn package_msg(&self, msg: Message) -> Message {
-        Message::Unique(self.get_nonce(), Box::new(msg))
+    fn package_msg(&self, msg: Message) -> M {
+        M {
+            nonce: self.get_nonce(),
+            msg,
+        }
     }
 
     pub fn msgs_received(&self) -> MsgsMapArcMut {
@@ -172,34 +175,24 @@ impl Shoal {
             peers.get(&peer_pid).map(|peer| peer.clone())
         };
 
-        let msg = self.package_msg(msg);
+        let m = self.package_msg(msg);
 
         match peer_opt {
             Some(peer) => {
                 let mut peer = peer.lock().unwrap();
-                Box::new(peer.send_action(msg.clone(), nc_action).map(|_| ()))
+                Box::new(peer.send_action(Proto::Direct(m), nc_action).map(|_| ()))
             }
             None => {
                 match nc_action {
                     NotConnectedAction::Forward => {
-                        match msg {
-                            Message::NoJob | Message::Idle(_) => (),
-                            _ => println!("Shoal : Peer `{}` is not a direct peer, sending a `ForwardTo` of message `{}` to other peers...", peer_pid, msg)
-                        }
+                        // println!("Shoal : Peer `{}` is not a direct peer, sending a `ForwardTo` of message `{}` to other peers...", peer_pid, msg);
 
-                        self.forward(peer_pid, Vec::new(), msg);
+                        self.forward(peer_pid, Vec::new(), m);
                         // TODO: future that resolves only when receiving some ack from target ?
                         Box::new(future::ok(()))
                     }
                     NotConnectedAction::Delay => {
-                        match msg {
-                            Message::NoJob | Message::Idle(_) => (),
-                            _ => println!(
-                                "Shoal : Setting msg `{:?}` to be sent when peer `{}` is created.",
-                                &format!("{:?}", msg)[..4],
-                                peer_pid
-                            ),
-                        }
+                        // println!("Shoal : Setting msg `{}` to be sent when peer `{}` is created.", msg, peer_pid);
 
                         let mut om = self.orphan_messages.lock().unwrap();
                         let ready_rx = match om.get(&peer_pid) {
@@ -213,9 +206,14 @@ impl Shoal {
                             }
                         };
 
-                        let future = ready_rx
-                            .map_err(|err| Error::OneShotError(err))
-                            .and_then(|peer| peer.lock().unwrap().send_action(msg, nc_action));
+                        let future =
+                            ready_rx
+                                .map_err(|err| Error::OneShotError(err))
+                                .and_then(|peer| {
+                                    peer.lock()
+                                        .unwrap()
+                                        .send_action(Proto::Direct(m), nc_action)
+                                });
 
                         Box::new(future)
                     }
@@ -232,7 +230,7 @@ impl Shoal {
     /// (if it hasn't already gone through this peer)
 
     // TODO: Discard if already broadcasted
-    pub fn broadcast(&self, mut route_list: Vec<PeerId>, msg: Message) {
+    pub fn broadcast(&self, mut route_list: Vec<PeerId>, m: M) {
         let peers = self.peers.lock().unwrap();
 
         // TODO: better way to find ?
@@ -247,9 +245,9 @@ impl Shoal {
                 // TODO: check if connected ?
                 if peer.is_connected() {
                     if route_list.iter().find(|p| **p == *pid).is_none() {
-                        // TODO: Cloning a big message and big route_list ?
-                        let msg = Message::Broadcast(route_list.clone(), Box::new(msg.clone()));
-                        peer.send_and_spawn_action(msg, NotConnectedAction::Discard);
+                        // TODO: Cloning a big message and a big route_list ?
+                        let pkt = Proto::Broadcast(route_list.clone(), m.clone());
+                        peer.send_and_spawn_action(pkt, NotConnectedAction::Discard);
                     } else {
                         // eprintln!("Message `{}` already gone through peer `{}`, {:?}.", msg, pid, route_list);
                     }
@@ -262,7 +260,7 @@ impl Shoal {
 
     // TODO: Discard if already forwarded
     // TODO: send Found/NotFound ?
-    pub fn forward(&self, to: PeerId, mut route_list: Vec<PeerId>, msg: Message) {
+    pub fn forward(&self, to: PeerId, mut route_list: Vec<PeerId>, m: M) {
         let peers = self.peers.lock().unwrap();
 
         if to == self.local_pid() {
@@ -276,7 +274,7 @@ impl Shoal {
             // TODO: save the route to the sender peer ? and re-use it next time ?
             let future = self
                 .tx()
-                .send((route_list[0], msg))
+                .send((route_list[0], m.msg))
                 .map(|_| ())
                 .map_err(|_| ());
             tokio::spawn(future);
@@ -285,9 +283,8 @@ impl Shoal {
 
             route_list.push(self.local_pid());
 
-            // TODO: Cloning a big message and big route_list ?
-            let msg = Message::ForwardTo(to, route_list.clone(), Box::new(msg.clone()));
-            peer.send_and_spawn_action(msg, NotConnectedAction::Discard);
+            let pkt = Proto::ForwardTo(to, route_list.clone(), m);
+            peer.send_and_spawn_action(pkt, NotConnectedAction::Discard);
         // TODO: better way to find ?
         } else if route_list
             .iter()
@@ -300,9 +297,9 @@ impl Shoal {
                 let mut peer = peer.lock().unwrap();
                 if peer.is_connected() {
                     if route_list.iter().find(|p| **p == *pid).is_none() {
-                        // TODO: Cloning a big message and big route_list ?
-                        let msg = Message::ForwardTo(to, route_list.clone(), Box::new(msg.clone()));
-                        peer.send_and_spawn_action(msg, NotConnectedAction::Discard);
+                        // TODO: Cloning a big message and a big route_list ?
+                        let pkt = Proto::ForwardTo(to, route_list.clone(), m.clone());
+                        peer.send_and_spawn_action(pkt, NotConnectedAction::Discard);
                     } else {
                         // eprintln!("Message `{}` already gone through peer `{}`, {:?}", msg, pid, route_list);
                     }

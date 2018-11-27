@@ -16,7 +16,7 @@ name = "balthacephalo"
 version = "0.1.0"
 dependencies = [
  "balthajob 0.1.0",
- "balthernet 0.2.0",
+ "balthernet 0.3.0",
  "balthmessage 0.2.0",
  "tokio 0.1.11 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
@@ -45,7 +45,7 @@ version = "0.1.0"
 dependencies = [
  "balthacephalo 0.1.0",
  "balthapode 0.1.0",
- "balthernet 0.2.0",
+ "balthernet 0.3.0",
  "ron 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde 1.0.80 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde_derive 1.0.80 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -57,7 +57,7 @@ name = "balthapode"
 version = "0.1.0"
 dependencies = [
  "balthajob 0.1.0",
- "balthernet 0.2.0",
+ "balthernet 0.3.0",
  "balthmessage 0.2.0",
  "futures 0.1.25 (registry+https://github.com/rust-lang/crates.io-index)",
  "parity-wasm 0.35.1 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -67,7 +67,7 @@ dependencies = [
 
 [[package]]
 name = "balthernet"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "balthmessage 0.2.0",
  "bytes 0.4.11 (registry+https://github.com/rust-lang/crates.io-index)",

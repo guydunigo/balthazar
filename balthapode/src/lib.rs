@@ -112,11 +112,7 @@ pub fn fill(
                     .and_then(move |_| send_args(shoal, peer_pid, job_id, args_enumerated)),
             )
         } else {
-            let future = shoal
-                .lock()
-                .send_to_future_action(MANAGER_ID, Message::ConnectCancel, NCA::Discard)
-                .map(|_| exit(0));
-            Box::new(future)
+            exit(0);
         }
     }
 

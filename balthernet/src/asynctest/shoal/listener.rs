@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use super::*;
 // TODO: local Error
 use super::Error;
-use balthmessage::Message;
+use balthmessage::Proto;
 
 /// **Important** : peer must be a reference to self.
 fn handle_vote(
@@ -28,21 +28,20 @@ fn handle_vote(
     } else {
         println!("Listener : Vote : Equality, sending new vote...");
         let new_local_vote = peer_locked.listener_to_connecting();
-        peer_locked
-            .send_and_spawn_action(Message::Vote(new_local_vote), NotConnectedAction::Discard);
+        peer_locked.send_and_spawn_action(Proto::Vote(new_local_vote), NotConnectedAction::Discard);
     }
 
     Ok(())
 }
 
 // TODO: take care of ConnectCancel from client ?
-// TODO: handle message in EVERY branches ?
-fn for_each_message_connecting(
+// TODO: handle packet in EVERY branches ?
+fn for_each_packet_connecting(
     shoal: ShoalReadArc,
     peer_opt: PeerArcMutOpt,
     peer_addr: SocketAddr,
     socket: TcpStream,
-    msg: Message,
+    pkt: Proto,
 ) -> Result<(), Error> {
     let mut peer_opt = peer_opt.lock().unwrap();
     if let Some(ref peer) = *peer_opt {
@@ -54,21 +53,19 @@ fn for_each_message_connecting(
         match peer_locked.state {
             PeerState::Connecting(local_vote) => {
                 if peer_locked.client_connecting {
-                    match msg {
-                        Message::Vote(peer_vote) => handle_vote(
+                    match pkt {
+                        Proto::Vote(peer_vote) => handle_vote(
                             socket,
                             &mut *peer_locked,
                             peer.clone(),
                             local_vote,
                             peer_vote,
                         )?,
-                        _ => {
-                            eprintln!("Listener : received a message but it was not `Vote(vote)`.")
-                        }
+                        _ => eprintln!("Listener : received a packet but it was not `Vote(vote)`."),
                     }
                 } else {
                     peer_locked.listener_connection_ack(peer.clone(), socket);
-                    // End the message listening loop :
+                    // End the packet listening loop :
                     return Err(Error::ConnectionEnded);
                 }
             }
@@ -77,10 +74,10 @@ fn for_each_message_connecting(
 
                 // TODO: keep the same receiving frame and just transfer some channel or so...
                 peer_locked
-                    .handle_msg(msg)
-                    .expect(&format!("Client : {} : Error forwarding msg...", peer_addr)[..]);
+                    .handle_pkt(pkt)
+                    .expect(&format!("Client : {} : Error forwarding pkt...", peer_addr)[..]);
 
-                // End the message listening loop :
+                // End the packet listening loop :
                 return Err(Error::ConnectionEnded);
             }
             _ => eprintln!(
@@ -90,8 +87,8 @@ fn for_each_message_connecting(
         }
     } else {
         // println!("Listener : `peer_opt` is `None`.");
-        match msg {
-            Message::Connect(peer_pid) => {
+        match pkt {
+            Proto::Connect(peer_pid) => {
                 let peers = shoal.lock().peers();
                 let mut peers_locked = peers.lock().unwrap();
 
@@ -110,13 +107,13 @@ fn for_each_message_connecting(
                             }
 
                             peer.listener_connection_ack(peer_from_peers.clone(), socket);
-                            // End the message listening loop :
+                            // End the packet listening loop :
                             return Err(Error::ConnectionEnded);
                         }
                         PeerState::Connected(_) => {
                             // eprintln!("Listener : Someone tried to connect with pid `{}` but it is already connected (`state` is `Connected`). Cancelling...", peer_pid);
                             cancel_connection(socket);
-                            // End the message listening loop :
+                            // End the packet listening loop :
                             return Err(Error::ConnectionCancelled);
                         }
                         PeerState::Connecting(_local_vote) => {
@@ -146,7 +143,7 @@ fn for_each_message_connecting(
                     return Err(Error::ConnectionEnded);
                 }
             }
-            _ => eprintln!("Listener : received a message but it was not `Connect(pid,vote)`."),
+            _ => eprintln!("Listener : received a packet but it was not `Connect(pid,vote)`."),
         }
     }
     Ok(())
@@ -168,26 +165,24 @@ pub fn listen(shoal: ShoalReadArc, listener: TcpListener) -> impl Future<Item = 
 
             let peer_opt = Arc::new(Mutex::new(None));
 
-            let send_future = send_message(socket.try_clone()?, Message::Connect(local_pid))
+            let send_future = send_packet(socket.try_clone()?, Proto::Connect(local_pid))
                 .and_then(move |framed_sock| {
                     let manager = framed_sock
                         .map_err(Error::from)
-                        .for_each(move |msg| {
-                            for_each_message_connecting(
+                        .for_each(move |pkt| {
+                            for_each_packet_connecting(
                                 shoal.clone(),
                                 peer_opt.clone(),
                                 peer_addr,
                                 // TODO: unwrap?
                                 socket.try_clone().unwrap(),
-                                msg,
+                                pkt,
                             )
                         })
                         .map_err(move |err| match err {
                             // TODO: println anyway ?
                             Error::ConnectionCancelled | Error::ConnectionEnded => (),
-                            _ => {
-                                eprintln!("Listener : error when receiving a message : {:?}.", err)
-                            }
+                            _ => eprintln!("Listener : error when receiving a packet : {:?}.", err),
                         });
 
                     tokio::spawn(manager);

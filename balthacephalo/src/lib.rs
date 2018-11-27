@@ -163,13 +163,6 @@ pub fn for_each_message(
                     .send_to(peer_pid, Message::UnknownJobId(job_id));
             }
         }
-        Message::ConnectCancel => {
-            println!(
-                "Cephalo : {} : Received `ConnectCancel`, closing connection...",
-                peer_pid
-            );
-            shoal.lock().peer_connection_cancelled(peer_pid);
-        }
         _ => shoal
             .lock()
             .send_to(peer_pid, Message::Hello("Hey".to_string())),

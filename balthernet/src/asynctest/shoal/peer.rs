@@ -24,35 +24,35 @@ pub type PeerArcMutOpt = Arc<Mutex<Option<PeerArcMut>>>;
 pub type MpscReceiverMessage = mpsc::Receiver<(PeerId, Message)>;
 pub type MpscSenderMessage = mpsc::Sender<(PeerId, Message)>;
 
-/// Interval between ping messages in seconds
+/// Interval between ping packets in seconds
 const PING_INTERVAL: u64 = 3;
 
 fn vote() -> ConnVote {
     random()
 }
 
-pub fn send_message(
+pub fn send_packet(
     socket: TcpStream,
-    msg: Message,
-) -> impl Future<Item = Framed<TcpStream, MessageCodec>, Error = Error> {
-    let framed_sock = Framed::new(socket, MessageCodec::new(None));
+    pkt: Proto,
+) -> impl Future<Item = Framed<TcpStream, ProtoCodec>, Error = Error> {
+    let framed_sock = Framed::new(socket, ProtoCodec::new(None));
 
-    framed_sock.send(msg.clone()).map_err(move |err| {
-        if let Message::Ping = msg {
+    framed_sock.send(pkt.clone()).map_err(move |err| {
+        if let Proto::Ping = pkt {
         } else {
-            eprintln!("Error when sending message `{}` : `{:?}`.", msg, err);
+            eprintln!("Error when sending packet `{}` : `{:?}`.", pkt, err);
         }
         Error::from(err)
     })
 }
 
-pub fn send_message_and_spawn(socket: TcpStream, msg: Message) {
-    let future = send_message(socket, msg).map(|_| ()).map_err(|_| ());
+pub fn send_packet_and_spawn(socket: TcpStream, pkt: Proto) {
+    let future = send_packet(socket, pkt).map(|_| ()).map_err(|_| ());
     tokio::spawn(future);
 }
 
 pub fn cancel_connection(socket: TcpStream) {
-    let future = send_message(socket, Message::ConnectCancel)
+    let future = send_packet(socket, Proto::ConnectCancel)
         .map_err(Error::from)
         .and_then(|framed_sock| {
             framed_sock
@@ -64,7 +64,7 @@ pub fn cancel_connection(socket: TcpStream) {
         .map_err(|_err| {
             /*
             eprintln!(
-                "Listener : Error when sending message `ConnectCancel` : `{:?}`.",
+                "Listener : Error when sending packet `ConnectCancel` : `{:?}`.",
                 err
             )
             */
@@ -93,7 +93,7 @@ impl PingStatus {
         }
     }
 
-    // TODO: send_message in ping ?
+    // TODO: send_packet in ping ?
     pub fn ping(&mut self) {
         *self = PingStatus::PingSent(Instant::now());
     }
@@ -270,12 +270,12 @@ impl Peer {
 
     pub fn client_connection_cancel(&mut self, socket: TcpStream) {
         self.client_connection_cancelled();
-        send_message_and_spawn(socket, Message::ConnectCancel);
+        send_packet_and_spawn(socket, Proto::ConnectCancel);
     }
 
     pub fn listener_connection_cancel(&mut self, socket: TcpStream) {
         self.listener_connecting = false;
-        send_message_and_spawn(socket, Message::ConnectCancel);
+        send_packet_and_spawn(socket, Proto::ConnectCancel);
 
         if !self.client_connecting && self.is_connecting() {
             self.state = PeerState::NotConnected;
@@ -284,7 +284,7 @@ impl Peer {
 
     pub fn connected_cancel(&mut self) {
         // TODO: Wait ?
-        self.send_action(Message::ConnectCancel, NotConnectedAction::Discard)
+        self.send_action(Proto::ConnectCancel, NotConnectedAction::Discard)
             .map(|_| ())
             .wait()
             .unwrap_or_default();
@@ -296,7 +296,7 @@ impl Peer {
         self.client_connecting = false;
         self.listener_connecting = false;
         self.create_oneshot();
-        // TODO: disconnect message ?
+        // TODO: disconnect packet ?
 
         if let PeerState::Connected(socket) = &self.state {
             // TODO: Flush before ?
@@ -305,51 +305,46 @@ impl Peer {
         self.state = PeerState::NotConnected;
     }
 
-    // TODO: if send msg error, set to not connected ?
-    /// This function sends a message to the peer.
+    // TODO: if send pkt error, set to not connected ?
+    /// This function sends a packet to the peer.
     /// If the peer is unknown or not connected, `nc_action` will be done.
     ///
     /// It returns a `Future` so that actions can be chained
-    /// (sending an ordered list of message for instance)
+    /// (sending an ordered list of packet for instance)
     // TODO: return an action in `Item` ?
     pub fn send_action(
         &mut self,
-        msg: Message,
+        pkt: Proto,
         nc_action: NotConnectedAction,
     ) -> Box<Future<Item = (), Error = Error> + Send> {
         if let PeerState::Connected(socket) = &self.state {
             // TODO: unwrap?
-            Box::new(send_message(socket.try_clone().unwrap(), msg).map(|_| ()))
+            Box::new(send_packet(socket.try_clone().unwrap(), pkt).map(|_| ()))
         // TODO: delete this branch:
-        } else if let Message::Ping = msg {
+        } else if let Proto::Ping = pkt {
             // Don't register Pings...
             Box::new(future::err(Error::PingSendError))
         } else {
             match nc_action {
                 NotConnectedAction::Forward => {
-                    self.shoal
-                        .upgrade()
-                        .lock()
-                        .forward(self.pid, Vec::new(), msg);
-
-                    // TODO: future that resolves only when receiving some ack from target ?
-                    Box::new(future::ok(()))
+                    // TODO: Shouldn't arrive here ?
+                    unimplemented!();
                 }
                 NotConnectedAction::Delay => {
                     let peer_pid = self.pid;
                     println!(
-                        "Peer : {} : Setting msg `{}` to be sent when peer is ready.",
-                        peer_pid, msg
+                        "Peer : {} : Setting pkt `{}` to be sent when peer is ready.",
+                        peer_pid, pkt
                     );
 
                     let future = self
                         .ready_rx
                         .clone()
                         .map_err(|err| Error::OneShotError(err))
-                        .and_then(|socket| send_message(socket.try_clone().unwrap(), msg))
+                        .and_then(|socket| send_packet(socket.try_clone().unwrap(), pkt))
                         .map(|_| ())
                         .map_err(move |err| {
-                            // TODO: Resend the message ? Don't panic ?
+                            // TODO: Resend the packet ? Don't panic ?
                             eprintln!(
                                 "Peer : {} : Peer was supposed to be ready but it is not : `{:?}`",
                                 peer_pid, err
@@ -365,8 +360,8 @@ impl Peer {
 
     /// This function is based on `send` but directly spawns the future
     /// (in a fire and forget way).
-    pub fn send_and_spawn_action(&mut self, msg: Message, nc_action: NotConnectedAction) {
-        let future = self.send_action(msg, nc_action).map(|_| ()).map_err(|_| ());
+    pub fn send_and_spawn_action(&mut self, pkt: Proto, nc_action: NotConnectedAction) {
+        let future = self.send_action(pkt, nc_action).map(|_| ()).map_err(|_| ());
         tokio::spawn(future);
     }
 
@@ -374,13 +369,13 @@ impl Peer {
     /// // TODO: ensure that ?
     pub fn manage(&mut self, peer: PeerArcMut) {
         if let PeerState::Connected(socket) = self.state.clone() {
-            let framed_sock = Framed::new(socket, MessageCodec::new(Some(self.pid())));
+            let framed_sock = Framed::new(socket, ProtoCodec::new(Some(self.pid())));
             let peer_pid = self.pid();
             let peer_clone = peer.clone();
             let shoal = self.shoal.clone();
 
             let manage_future = framed_sock
-                .send(Message::ConnectAck)
+                .send(Proto::ConnectAck)
                 .map_err(Error::from)
                 .and_then(move |frame| {
                     let ping_future = Interval::new_interval(Duration::from_secs(PING_INTERVAL))
@@ -390,8 +385,8 @@ impl Peer {
                         .map_err(|_| ());
                     tokio::spawn(ping_future);
 
-                    frame.map_err(Error::from).for_each(move |msg| {
-                        for_each_message(shoal.upgrade(), &mut *peer.lock().unwrap(), msg)
+                    frame.map_err(Error::from).for_each(move |pkt| {
+                        for_each_packet(shoal.upgrade(), &mut *peer.lock().unwrap(), pkt)
                     })
                 })
                 .map_err(move |err| match err {
@@ -399,7 +394,7 @@ impl Peer {
                     Error::ConnectionCancelled | Error::ConnectionEnded => (),
                     Error::PeerNotInConnectedState(_) => (),
                     _ => eprintln!(
-                        "Manager : {} : error when receiving a message : {:?}.",
+                        "Manager : {} : error when receiving a packet : {:?}.",
                         peer_pid, err
                     ),
                 });
@@ -408,13 +403,13 @@ impl Peer {
         }
     }
 
-    pub fn handle_msg(&mut self, msg: Message) -> Result<(), Error> {
-        for_each_message(self.shoal.upgrade(), self, msg)
+    pub fn handle_pkt(&mut self, pkt: Proto) -> Result<(), Error> {
+        for_each_packet(self.shoal.upgrade(), self, pkt)
     }
 }
 
 // TODO: Ping if there is already an unanswered Ping ? (in this case, override the Ping time ?)
-// TODO: can also use some "last time a message was sent..." to test if necessary, ...
+// TODO: can also use some "last time a packet was sent..." to test if necessary, ...
 fn ping_peer(peer: PeerArcMut) -> Box<Future<Item = (), Error = Error> + Send> {
     let mut peer_locked = peer.lock().unwrap();
 
@@ -424,7 +419,7 @@ fn ping_peer(peer: PeerArcMut) -> Box<Future<Item = (), Error = Error> + Send> {
         let peer_clone_2 = peer.clone();
 
         let future = peer_locked
-            .send_action(Message::Ping, NotConnectedAction::Discard)
+            .send_action(Proto::Ping, NotConnectedAction::Discard)
             .map(move |_| {
                 peer_clone.lock().unwrap().ping();
             })
@@ -446,56 +441,63 @@ fn ping_peer(peer: PeerArcMut) -> Box<Future<Item = (), Error = Error> + Send> {
     }
 }
 
-fn for_each_message(shoal: ShoalReadArc, peer: &mut Peer, msg: Message) -> Result<(), Error> {
+fn for_each_packet(shoal: ShoalReadArc, peer: &mut Peer, pkt: Proto) -> Result<(), Error> {
     let shoal_clone = shoal.clone();
     let shoal = shoal.lock();
-    match msg {
-        Message::Ping => {
+    match pkt {
+        Proto::Ping => {
             let socket = {
                 let socket = if let PeerState::Connected(socket) = &peer.state {
                     // TODO: unwrap?
                     socket.try_clone().unwrap()
                 } else {
-                    eprintln!("Manager : {} : Inconsistent Peer object : a message was received, but `peer.state` is not `Connected(socket)`.", peer.addr);
+                    eprintln!("Manager : {} : Inconsistent Peer object : a packet was received, but `peer.state` is not `Connected(socket)`.", peer.addr);
                     return Err(Error::PeerNotInConnectedState(
-                        "Inconsistent Peer object : a message was received.".to_string(),
+                        "Inconsistent Peer object : a packet was received.".to_string(),
                     ));
                 };
 
                 socket
             };
 
-            send_message_and_spawn(socket, Message::Pong);
+            send_packet_and_spawn(socket, Proto::Pong);
         }
-        Message::Pong => {
+        Proto::Pong => {
             peer.pong();
             // println!("Manager : {} : received Pong ! It is alive !!!", peer.pid);
         }
-        Message::Broadcast(route_list, msg) => {
+        Proto::Broadcast(route_list, m) => {
             // TODO: better way to avoid the lock ?
             let future = future::ok(()).and_then(move |_| {
-                shoal_clone.lock().broadcast(route_list, *msg);
+                shoal_clone.lock().broadcast(route_list, m);
                 Ok(())
             });
             tokio::spawn(future);
         }
-        Message::ForwardTo(to, route_list, msg) => {
+        Proto::ForwardTo(to, route_list, m) => {
             // TODO: better way to avoid the lock ?
             let future = future::ok(()).and_then(move |_| {
-                shoal_clone.lock().forward(to, route_list, *msg);
+                shoal_clone.lock().forward(to, route_list, m);
                 Ok(())
             });
             tokio::spawn(future);
         }
-        _ => {
+        Proto::Direct(m) => {
             /*
             println!(
-                "Manager : {} : received a message (but won't do anything ;) !",
+                "Manager : {} : received a packet, sending it upper levels.",
                 peer.pid
             );
             */
-            let send_future = shoal.tx().send((peer.pid, msg)).map(|_| ()).map_err(|_| ());
+            let send_future = shoal
+                .tx()
+                .send((peer.pid, m.msg))
+                .map(|_| ())
+                .map_err(|_| ());
             tokio::spawn(send_future);
+        }
+        _ => {
+            unimplemented!("A `Proto` packet wasn't handled : `{}`", pkt);
         }
     }
 

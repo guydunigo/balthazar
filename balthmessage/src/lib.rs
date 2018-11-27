@@ -122,8 +122,8 @@ impl Proto {
 /// Packaged message with some "metadata".
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Hash)]
 pub struct M {
-    nonce: Nonce,
-    msg: Message,
+    pub nonce: Nonce,
+    pub msg: Message,
     // TODO: later signature, ...
 }
 
