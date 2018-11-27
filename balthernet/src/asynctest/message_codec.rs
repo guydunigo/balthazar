@@ -60,8 +60,16 @@ impl Decoder for MessageCodec {
                     self.peer_pid, task_id, job_id
                 ),
                 Message::Ping | Message::Pong => (),
+                Message::ForwardTo(to, _, ref msg) => println!(
+                    "-- {:?} : Received `ForwardTo` message `{}` to `{}`.",
+                    self.peer_pid, msg, to
+                ),
+                Message::Broadcast(_, ref msg) => println!(
+                    "-- {:?} : Received `Broadcast` message `{}`.",
+                    self.peer_pid, msg
+                ),
                 Message::Idle(_) | Message::NoJob => (),
-                _ => println!("-- {:?} : Received : `{:?}`.", self.peer_pid, msg),
+                _ => println!("-- {:?} : Received : `{}`.", self.peer_pid, msg),
             }
 
             Ok(Some(msg))
@@ -115,9 +123,17 @@ impl Encoder for MessageCodec {
             ),
             Message::Ping | Message::Pong => (),
             Message::Idle(_) | Message::NoJob => (),
+            Message::ForwardTo(to, _, msg) => println!(
+                "-- {:?} : Forwarding message `{}` of {} bytes to `{}`.",
+                self.peer_pid, msg, len, to
+            ),
+            Message::Broadcast(_, ref msg) => println!(
+                "-- {:?} : Sending `Broadcast` message `{}`.",
+                self.peer_pid, msg
+            ),
             _ => println!(
                 "-- {:?} : Sending : `{}` of {} bytes.",
-                self.peer_pid, msg_str, len
+                self.peer_pid, message, len
             ),
         }
 
