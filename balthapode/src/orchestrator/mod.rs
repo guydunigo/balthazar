@@ -3,7 +3,7 @@ use futures::sync::mpsc::{self, Sender};
 use tokio::prelude::*;
 use tokio::runtime;
 use tokio::runtime::Runtime;
-use tokio::timer::{Delay, Interval};
+use tokio::timer::Interval;
 
 use std::boxed::Box;
 use std::io;
@@ -103,9 +103,6 @@ pub fn start_orchestrator(
             .map_err(move |err| {
                 eprintln!("Executor : {} : Error : `{:?}`", pode_id, err);
             });
-        let future = Delay::new(Instant::now() + Duration::from_secs(0))
-            .map_err(|_| ())
-            .and_then(|_| future);
 
         // TODO: using the same runtime as the rest ? or at least a multithreaded one to run tasks ?
         let mut runtime = runtime::current_thread::Runtime::new().unwrap();

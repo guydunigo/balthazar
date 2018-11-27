@@ -28,7 +28,8 @@ fn handle_vote(
     } else {
         println!("Listener : Vote : Equality, sending new vote...");
         let new_local_vote = peer_locked.listener_to_connecting();
-        peer_locked.send_and_spawn(Message::Vote(new_local_vote));
+        peer_locked
+            .send_and_spawn_action(Message::Vote(new_local_vote), NotConnectedAction::Discard);
     }
 
     Ok(())

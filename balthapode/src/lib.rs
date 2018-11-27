@@ -24,7 +24,7 @@ use job::task::arguments::Arguments;
 use job::task::{LoneTask, Task, TaskId};
 use job::{Job, JobId, JobsMapArcMut};
 use message::{de, Message};
-use net::asynctest::shoal::{MpscReceiverMessage, ShoalReadArc};
+use net::asynctest::shoal::{MpscReceiverMessage, NotConnectedAction as NCA, ShoalReadArc};
 use net::asynctest::PeerId;
 use net::MANAGER_ID;
 
@@ -104,13 +104,17 @@ pub fn fill(
             let shoal_lock = shoal_clone.lock();
             Box::new(
                 shoal_lock
-                    .send_to_future(peer_pid, Message::Task(job_id, task_id, args))
+                    .send_to_future_action(
+                        peer_pid,
+                        Message::Task(job_id, task_id, args),
+                        NCA::Delay,
+                    )
                     .and_then(move |_| send_args(shoal, peer_pid, job_id, args_enumerated)),
             )
         } else {
             let future = shoal
                 .lock()
-                .send_to_future(MANAGER_ID, Message::ConnectCancel)
+                .send_to_future_action(MANAGER_ID, Message::ConnectCancel, NCA::Discard)
                 .map(|_| exit(0));
             Box::new(future)
         }
@@ -122,9 +126,10 @@ pub fn fill(
 
     let future = shoal
         .lock()
-        .send_to_future(
+        .send_to_future_action(
             MANAGER_ID,
             Message::Job(shoal.lock().local_pid(), job_id, job.bytecode),
+            NCA::Delay,
         )
         .and_then(move |_| {
             send_args(shoal_clone, MANAGER_ID, job_id, args_enumerated).map_err(net::Error::from)
@@ -176,10 +181,6 @@ pub fn swim(runtime: &mut Runtime, shoal: ShoalReadArc, shoal_rx: MpscReceiverMe
             ),
             Message::NoJob => Ok(()),
             _ => {
-                /*{
-                    let mut socket = socket.lock().unwrap();
-                    Message::Disconnect.send(id, &mut *socket)
-                }*/
                 println!(
                     "Pode : {} : Received a message but won't do anything.",
                     peer_pid

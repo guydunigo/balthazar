@@ -37,6 +37,20 @@ pub type OrphanMsgsMapArcMut = Arc<
 pub type ReceivedMsgsSetArcMut = Arc<Mutex<HashSet<(PeerId, Message)>>>;
 
 // ------------------------------------------------------------------
+/// # NotConnectedAction
+///
+/// This represents what should be done when trying to send a message to an unknown or unconnected peer.
+pub enum NotConnectedAction {
+    /// The message will be forwarded through the other peers to the destination
+    /// (if it can be reached).
+    Forward,
+    /// The message will be registered to be sent when the peer is directly connected.
+    Delay,
+    /// The message will not be treated (useful for `Ping` and such)
+    Discard,
+}
+
+// ------------------------------------------------------------------
 /// # Shoal
 ///
 /// This struct stores the data needed across the network (local infos, peers, ...).
@@ -98,58 +112,92 @@ impl Shoal {
         self.tx.clone()
     }
 
+    /// This is a wrapper around `send_to_action` that forwards the message
+    /// if the peer is not found or not connected.
     pub fn send_to(&self, peer_pid: PeerId, msg: Message) {
+        self.send_to_action(peer_pid, msg, NotConnectedAction::Forward)
+    }
+
+    /// This function is based on `send_to_future_action` but directly spawns the future
+    /// (in a fire and forget way).
+    // TODO: rename to send_to_and_spawn ?
+    pub fn send_to_action(&self, peer_pid: PeerId, msg: Message, nc_action: NotConnectedAction) {
         // TODO: do not discard errors ...
         let future = self
-            .send_to_future(peer_pid, msg)
+            .send_to_future_action(peer_pid, msg, nc_action)
             .map(|_| ())
             .map_err(|_| ());
         tokio::spawn(future);
     }
 
+    /// This is a wrapper around `send_to_future_action` that forwards the message
+    /// if the peer is not found or not connected.
     pub fn send_to_future(
         &self,
         peer_pid: PeerId,
         msg: Message,
     ) -> Box<Future<Item = (), Error = Error> + Send> {
-        let peers = self.peers.lock().unwrap();
+        self.send_to_future_action(peer_pid, msg, NotConnectedAction::Forward)
+    }
 
-        match peers.get(&peer_pid) {
+    /// This function sends a message to the given peer.
+    /// If the peer is unknown or not connected, `nc_action` will be done.
+    ///
+    /// It returns a `Future` so that actions can be chained
+    /// (sending an ordered list of message for instance)
+    // TODO: return an action in `Item` ?
+    pub fn send_to_future_action(
+        &self,
+        peer_pid: PeerId,
+        msg: Message,
+        nc_action: NotConnectedAction,
+    ) -> Box<Future<Item = (), Error = Error> + Send> {
+        let peer_opt = {
+            let peers = self.peers.lock().unwrap();
+            peers.get(&peer_pid).map(|peer| peer.clone())
+        };
+
+        match peer_opt {
             Some(peer) => {
                 let mut peer = peer.lock().unwrap();
-                Box::new(peer.send(msg.clone()).map(|_| ()))
+                Box::new(peer.send_action(msg.clone(), nc_action).map(|_| ()))
             }
             None => {
-                /*
-                println!(
-                    "Shoal : Setting msg `{:?}` to be sent when peer `{}` is created.",
-                    &format!("{:?}", msg)[..4],
-                    peer_pid
-                );
-                
-                let mut om = self.orphan_messages.lock().unwrap();
-                let ready_rx = match om.get(&peer_pid) {
-                    Some((_, ready_rx)) => ready_rx.clone(),
-                    None => {
-                        let (ready_tx, ready_rx) = oneshot::channel();
-                        let ready_rx = ready_rx.shared();
-                
-                        om.insert(peer_pid, (ready_tx, ready_rx.clone()));
-                        ready_rx
-                    }
-                };
-                
-                let future = ready_rx
-                    .map_err(|err| Error::OneShotError(err))
-                    .and_then(|peer| peer.lock().unwrap().send(msg));
-                
-                Box::new(future)
-                */
-                println!("Shoal : Peer `{}` is not a direct peer, sending a `ForwardTo` message to other peers...", peer_pid);
+                match nc_action {
+                    NotConnectedAction::Forward => {
+                        println!("Shoal : Peer `{}` is not a direct peer, sending a `ForwardTo` of message `{}` to other peers...", peer_pid, msg);
 
-                self.forward(peer_pid, Vec::new(), msg);
-                // TODO: future that resolves only when receiving some ack from target ?
-                Box::new(future::ok(()))
+                        self.forward(peer_pid, Vec::new(), msg);
+                        // TODO: future that resolves only when receiving some ack from target ?
+                        Box::new(future::ok(()))
+                    }
+                    NotConnectedAction::Delay => {
+                        println!(
+                            "Shoal : Setting msg `{:?}` to be sent when peer `{}` is created.",
+                            &format!("{:?}", msg)[..4],
+                            peer_pid
+                        );
+
+                        let mut om = self.orphan_messages.lock().unwrap();
+                        let ready_rx = match om.get(&peer_pid) {
+                            Some((_, ready_rx)) => ready_rx.clone(),
+                            None => {
+                                let (ready_tx, ready_rx) = oneshot::channel();
+                                let ready_rx = ready_rx.shared();
+
+                                om.insert(peer_pid, (ready_tx, ready_rx.clone()));
+                                ready_rx
+                            }
+                        };
+
+                        let future = ready_rx
+                            .map_err(|err| Error::OneShotError(err))
+                            .and_then(|peer| peer.lock().unwrap().send_action(msg, nc_action));
+
+                        Box::new(future)
+                    }
+                    NotConnectedAction::Discard => Box::new(future::ok(())),
+                }
             }
         }
     }
@@ -176,7 +224,7 @@ impl Shoal {
                     if route_list.iter().find(|p| **p == *pid).is_none() {
                         // TODO: Cloning a big message and big route_list ?
                         let msg = Message::Broadcast(route_list.clone(), Box::new(msg.clone()));
-                        peer.send_and_spawn(msg);
+                        peer.send_and_spawn_action(msg, NotConnectedAction::Discard);
                     } else {
                         eprintln!("Message already gone through peer `{}`", pid);
                     }
@@ -213,7 +261,7 @@ impl Shoal {
 
             // TODO: Cloning a big message and big route_list ?
             let msg = Message::ForwardTo(to, route_list.clone(), Box::new(msg.clone()));
-            peer.send_and_spawn(msg);
+            peer.send_and_spawn_action(msg, NotConnectedAction::Discard);
         // TODO: better way to find ?
         } else if route_list
             .iter()
@@ -228,10 +276,12 @@ impl Shoal {
                     if route_list.iter().find(|p| **p == *pid).is_none() {
                         // TODO: Cloning a big message and big route_list ?
                         let msg = Message::ForwardTo(to, route_list.clone(), Box::new(msg.clone()));
-                        peer.send_and_spawn(msg);
+                        peer.send_and_spawn_action(msg, NotConnectedAction::Discard);
                     } else {
                         eprintln!("Message already gone through peer `{}`", pid);
                     }
+                } else {
+                    eprintln!("Peer `{}` not connected...", pid);
                 }
             });
         } else {

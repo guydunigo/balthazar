@@ -284,7 +284,7 @@ impl Peer {
 
     pub fn connected_cancel(&mut self) {
         // TODO: Wait ?
-        self.send(Message::ConnectCancel)
+        self.send_action(Message::ConnectCancel, NotConnectedAction::Discard)
             .map(|_| ())
             .wait()
             .unwrap_or_default();
@@ -306,46 +306,67 @@ impl Peer {
     }
 
     // TODO: if send msg error, set to not connected ?
-    pub fn send(&mut self, msg: Message) -> Box<Future<Item = (), Error = Error> + Send> {
+    /// This function sends a message to the peer.
+    /// If the peer is unknown or not connected, `nc_action` will be done.
+    ///
+    /// It returns a `Future` so that actions can be chained
+    /// (sending an ordered list of message for instance)
+    // TODO: return an action in `Item` ?
+    pub fn send_action(
+        &mut self,
+        msg: Message,
+        nc_action: NotConnectedAction,
+    ) -> Box<Future<Item = (), Error = Error> + Send> {
         if let PeerState::Connected(socket) = &self.state {
             // TODO: unwrap?
             Box::new(send_message(socket.try_clone().unwrap(), msg).map(|_| ()))
-        // TODO: other messages that sohuldn't be registered ?
+        // TODO: delete this branch:
         } else if let Message::Ping = msg {
             // Don't register Pings...
             Box::new(future::err(Error::PingSendError))
         } else {
-            /*
-            let peer_pid = self.pid;
-            println!(
-                "Peer : {} : Setting msg `{}` to be sent when peer is ready.",
-                peer_pid, msg
-            );
-            
-            let future = self
-                .ready_rx
-                .clone()
-                .map_err(|err| Error::OneShotError(err))
-                .and_then(|socket| send_message(socket.try_clone().unwrap(), msg))
-                .map_err(move |err| {
-                    // TODO: Resend the message ? Don't panic ?
-                    eprintln!(
-                        "Peer : {} : Peer was supposed to be ready but it is not : `{:?}`",
-                        peer_pid, err
+            match nc_action {
+                NotConnectedAction::Forward => {
+                    self.shoal
+                        .upgrade()
+                        .lock()
+                        .forward(self.pid, Vec::new(), msg);
+
+                    // TODO: future that resolves only when receiving some ack from target ?
+                    Box::new(future::ok(()))
+                }
+                NotConnectedAction::Delay => {
+                    let peer_pid = self.pid;
+                    println!(
+                        "Peer : {} : Setting msg `{}` to be sent when peer is ready.",
+                        peer_pid, msg
                     );
-                    err
-                });
-            */
-            self.shoal
-                .upgrade()
-                .lock()
-                .forward(self.pid, Vec::new(), msg);
-            Box::new(future::ok(()))
+
+                    let future = self
+                        .ready_rx
+                        .clone()
+                        .map_err(|err| Error::OneShotError(err))
+                        .and_then(|socket| send_message(socket.try_clone().unwrap(), msg))
+                        .map(|_| ())
+                        .map_err(move |err| {
+                            // TODO: Resend the message ? Don't panic ?
+                            eprintln!(
+                                "Peer : {} : Peer was supposed to be ready but it is not : `{:?}`",
+                                peer_pid, err
+                            );
+                            err
+                        });
+                    Box::new(future)
+                }
+                NotConnectedAction::Discard => Box::new(future::ok(())),
+            }
         }
     }
 
-    pub fn send_and_spawn(&mut self, msg: Message) {
-        let future = self.send(msg).map(|_| ()).map_err(|_| ());
+    /// This function is based on `send` but directly spawns the future
+    /// (in a fire and forget way).
+    pub fn send_and_spawn_action(&mut self, msg: Message, nc_action: NotConnectedAction) {
+        let future = self.send_action(msg, nc_action).map(|_| ()).map_err(|_| ());
         tokio::spawn(future);
     }
 
@@ -403,7 +424,7 @@ fn ping_peer(peer: PeerArcMut) -> Box<Future<Item = (), Error = Error> + Send> {
         let peer_clone_2 = peer.clone();
 
         let future = peer_locked
-            .send(Message::Ping)
+            .send_action(Message::Ping, NotConnectedAction::Discard)
             .map(move |_| {
                 peer_clone.lock().unwrap().ping();
             })
