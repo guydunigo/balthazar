@@ -1,36 +1,34 @@
-#![feature(int_to_from_bytes)]
 #![feature(vec_resize_default)]
 
 #[macro_use]
 extern crate serde_derive;
-
+extern crate bytes;
 extern crate ron;
 extern crate serde;
+extern crate tokio;
 
 extern crate balthajob as job;
 
+mod codec;
+mod message;
 pub mod mock_stream;
 
 pub use ron::{de, ser};
 use std::fmt;
 use std::io;
-use std::io::prelude::*;
-use std::iter::FusedIterator;
 
+pub use codec::ProtoCodec;
 use job::task::arguments::Arguments;
 use job::task::TaskId;
 use job::JobId;
+pub use message::Message;
 
 // TODO: unify with balthernet
 type PeerId = u32;
 type ConnVote = u32;
+#[allow(dead_code)]
 type PodeId = u32;
 type Nonce = u128;
-
-// TODO: As parameters...
-const MESSAGE_SIZE_LIMIT: usize = 2 << 20;
-// TODO: Is there a window between JOB_SIZE_LIMIT converted and MESSAGE_SIZE_LIMIT?
-const JOB_SIZE_LIMIT: usize = MESSAGE_SIZE_LIMIT >> 2;
 
 // ------------------------------------------------------------------
 // Errors
@@ -41,7 +39,7 @@ pub enum Error {
     SerError(ser::Error),
     DeError(de::Error),
     CouldNotGetSize,
-    MessageTooBig(usize),
+    PacketTooBig(usize),
     JobTooBig(usize),
 }
 
@@ -64,25 +62,11 @@ impl From<de::Error> for Error {
 }
 
 // ------------------------------------------------------------------
-// Message
+// Proto
 
+/// Base proto messages between to network layers.
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Hash)]
-pub enum Message {
-    Hello(String),
-    Idle(usize),
-    RequestJob(JobId),
-    UnknownJobId(JobId),
-    UnknownTaskId(JobId, TaskId),
-    Job(PeerId, JobId, Vec<u8>), // TODO: more a signature than JobId
-    JobRegisteredAt(JobId),
-    Task(JobId, TaskId, Arguments),
-    // TODO: or tasks?
-    ReturnValue(JobId, TaskId, Result<Arguments, ()>), // TODO: proper error
-    // External(E) // TODO: generic type
-    NoJob,
-
-    // Network control :
-    // TODO: Possibly in another type ?
+pub enum Proto {
     MessageTooBig,
     Connect(PeerId),
     Vote(ConnVote),
@@ -94,187 +78,58 @@ pub enum Message {
     Pong, // (Instant),
     /// Broadcast(route_list, msg)
     /// The original sender being the first of `route_list`
-    Broadcast(Vec<PeerId>, Box<Message>),
+    Broadcast(Vec<PeerId>, M),
     /// ForwardTo(to, route_list, msg)
     /// The sender being the first of `route_list`.
-    ForwardTo(PeerId, Vec<PeerId>, Box<Message>),
+    ForwardTo(PeerId, Vec<PeerId>, M),
     TestBig(Vec<u8>),
-    Unique(Nonce, Box<Message>),
-
-    // Legacy
-    // TODO: delete ?
-    Disconnect,
-    Disconnected(usize),
+    Direct(M),
 }
 
-impl fmt::Display for Message {
+impl fmt::Display for Proto {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let debug = format!("{:?}", self);
+        use Proto::*;
 
-        let len = if debug.len() < 10 { debug.len() } else { 10 };
+        match self {
+            Broadcast(_, m) => write!(f, "Broadcast : {}", m),
+            ForwardTo(to, _, m) => write!(f, "Forward : to `{}` : {}", to, m),
+            Direct(m) => write!(f, "Direct : {}", m),
+            TestBig(v) => write!(f, "TestBig of {} bytes", v.len()),
+            _ => {
+                let debug = format!("{:?}", self);
+                write!(f, "{}", &debug[..])
+            }
+        }
+    }
+}
 
-        write!(f, "{}", &debug[..len])
+impl Proto {
+    /// Get the inner message of the packet if any or return `None`.
+    pub fn get_message(&self) -> Option<&M> {
+        match self {
+            Proto::Broadcast(_, m) => Some(m),
+            Proto::ForwardTo(_, _, m) => Some(m),
+            Proto::Direct(m) => Some(m),
+            _ => None,
+        }
     }
 }
 
 // ------------------------------------------------------------------
-// TODO: delete below ?
+//
 
-impl Message {
-    pub fn send<W: Write>(&self, pode_id: PodeId, writer: &mut W) -> Result<(), Error> {
-        // This prevents spending time to convert the task... :
-        // TODO: same with Task ?
-        if let Message::Job(_, _, bytecode) = self {
-            if bytecode.len() >= JOB_SIZE_LIMIT as usize {
-                return Err(Error::JobTooBig(bytecode.len()));
-            }
-        }
-
-        let msg_str = ser::to_string(self)?;
-        let len = msg_str.len();
-
-        match self {
-            Message::Job(_, job_id, _) => {
-                println!("{} : sending Job #{} of {} bytes.", pode_id, job_id, len)
-            }
-            Message::Task(job_id, task_id, _) => println!(
-                "{} : sending Task #{} for Job #{} of {} bytes.",
-                pode_id, task_id, job_id, len
-            ),
-            Message::ReturnValue(job_id, task_id, _) => println!(
-                "{} : sending result for Task #{} for Job #{} of {} bytes.",
-                pode_id, task_id, job_id, len
-            ),
-            _ => println!("{} : sending `{}` of {} bytes.", pode_id, msg_str, len),
-        }
-
-        if len >= MESSAGE_SIZE_LIMIT as usize {
-            return Err(Error::MessageTooBig(len));
-        }
-        writer.write_all(&(len as u32).to_le_bytes())?;
-
-        writer.write_all(msg_str.as_bytes())?;
-        Ok(())
-    }
+// TODO: rename ?
+/// Packaged message with some "metadata".
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Hash)]
+pub struct M {
+    nonce: Nonce,
+    msg: Message,
+    // TODO: later signature, ...
 }
 
-pub struct MessageReader<R: Read> {
-    id: PeerId,
-    reader: Option<R>,
-}
-
-impl<R: Read> MessageReader<R> {
-    pub fn new(id: PeerId, reader: R) -> MessageReader<R> {
-        MessageReader {
-            id,
-            reader: Some(reader),
-        }
-    }
-
-    // TODO: use std::io::Error s ?
-    // TODO: tests
-    pub fn for_each_until_error<F>(&mut self, mut closure: F) -> Result<(), Error>
-    where
-        F: FnMut(Message) -> Result<(), Error>,
-    {
-        let id = self.id;
-        let res = self
-            .take_while(|result| match result {
-                Ok(Message::Disconnect) => {
-                    println!("{} : Disconnection announced.", id);
-                    false
-                }
-                Ok(Message::Disconnected(_)) => false,
-                _ => true,
-            })
-            .map(|msg_res| -> Result<(), Error> {
-                match msg_res {
-                    Ok(msg) => closure(msg),
-                    Err(err) => Err(err),
-                }
-            })
-            .skip_while(|result| result.is_ok())
-            .next();
-
-        match res {
-            Some(Err(err)) => Err(err),
-            _ => {
-                println!("{} : Disconnected socket.", id);
-                Ok(())
-            }
-        }
-    }
-}
-
-impl<R: Read> FusedIterator for MessageReader<R> {}
-
-impl<R: Read> Iterator for MessageReader<R> {
-    type Item = Result<Message, Error>;
-
-    // TODO: clean this mess... (multiple returns ...)
-    // TODO: use std::io::Error s ?
-    fn next(&mut self) -> Option<Result<Message, Error>> {
-        if let Some(mut reader) = self.reader.take() {
-            let msg_size: usize = {
-                let mut buffer: [u8; 4] = [0; 4];
-
-                match reader.read_exact(&mut buffer) {
-                    Ok(_) => {}
-                    Err(err) => {
-                        return match err.kind() {
-                            io::ErrorKind::UnexpectedEof => None,
-                            _ => Some(Err(Error::from(err))),
-                        }
-                    }
-                };
-
-                u32::from_le_bytes(buffer) as usize
-            };
-
-            if msg_size > MESSAGE_SIZE_LIMIT {
-                // TODO: notify sender ?
-                return Some(Err(Error::MessageTooBig(msg_size)));
-            }
-
-            // println!("{} : Receiving {} bytes...", self.id, msg_size);
-
-            let mut buffer: Vec<u8> = Vec::new();
-            buffer.resize_default(msg_size);
-
-            // Loops until it has the full message:
-            // TODO: use read_exact ?
-            match reader.read_exact(&mut buffer) {
-                Ok(n) => n,
-                Err(err) => return Some(Err(Error::from(err))),
-            };
-
-            let msg_res: de::Result<Message> = de::from_bytes(&buffer.as_slice());
-            let res = match msg_res {
-                Ok(msg) => {
-                    // TODO: same with Task ?
-                    match msg {
-                        Message::Job(_, job_id, _) => {
-                            println!("{} : received Job #{}.", self.id, job_id)
-                        }
-                        Message::Task(job_id, task_id, _) => println!(
-                            "{} : received Task #{} for Job #{}.",
-                            self.id, task_id, job_id
-                        ),
-                        Message::ReturnValue(job_id, task_id, _) => println!(
-                            "{} : received result for Task #{} for Job #{}.",
-                            self.id, task_id, job_id
-                        ),
-                        _ => println!("{} : received `{:?}`.", self.id, msg),
-                    }
-                    self.reader = Some(reader);
-                    Ok(msg)
-                }
-                Err(err) => Err(Error::from(err)),
-            };
-            return Some(res);
-        } else {
-            return None;
-        }
+impl fmt::Display for M {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.msg)
     }
 }
 
