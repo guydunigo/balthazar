@@ -11,6 +11,7 @@ use std::fmt;
 use std::net::SocketAddr;
 use std::ops::Deref;
 use std::sync::{Arc, Mutex, RwLock, Weak};
+use std::time::Instant;
 
 use super::{Error, MessageCodec};
 mod client;
@@ -35,6 +36,7 @@ pub type OrphanMsgsMapArcMut = Arc<
     >,
 >;
 pub type ReceivedMsgsSetArcMut = Arc<Mutex<HashSet<(PeerId, Message)>>>;
+type Nonce = u128;
 
 // ------------------------------------------------------------------
 /// # NotConnectedAction
@@ -74,6 +76,7 @@ pub struct Shoal {
     // TODO: have a way to monitor size ?
     msgs_received: MsgsMapArcMut,
     orphan_messages: OrphanMsgsMapArcMut,
+    nonce_seed: Instant,
 }
 
 impl Shoal {
@@ -87,6 +90,7 @@ impl Shoal {
                 peers: Arc::new(Mutex::new(HashMap::new())),
                 msgs_received: Arc::new(Mutex::new(HashMap::new())),
                 orphan_messages: Arc::new(Mutex::new(HashMap::new())),
+                nonce_seed: Instant::now(),
             },
             rx,
         )
@@ -102,6 +106,17 @@ impl Shoal {
 
     pub fn peers(&self) -> PeersMapArcMut {
         self.peers.clone()
+    }
+
+    fn get_nonce(&self) -> Nonce {
+        self.nonce_seed.elapsed().as_millis()
+    }
+
+    /// This method is used to prepare message that will be sent:
+    /// - Add a nonce (TODO: or a timestamp ?)
+    /// - TODO: Add a signature
+    fn package_msg(&self, msg: Message) -> Message {
+        Message::Unique(self.get_nonce(), Box::new(msg))
     }
 
     pub fn msgs_received(&self) -> MsgsMapArcMut {
@@ -156,6 +171,8 @@ impl Shoal {
             let peers = self.peers.lock().unwrap();
             peers.get(&peer_pid).map(|peer| peer.clone())
         };
+
+        let msg = self.package_msg(msg);
 
         match peer_opt {
             Some(peer) => {

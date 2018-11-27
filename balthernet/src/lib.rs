@@ -1,4 +1,6 @@
 #![feature(int_to_from_bytes)]
+#![feature(duration_as_u128)]
+
 
 extern crate ron;
 extern crate tokio;

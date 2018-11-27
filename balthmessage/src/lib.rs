@@ -25,6 +25,7 @@ use job::JobId;
 type PeerId = u32;
 type ConnVote = u32;
 type PodeId = u32;
+type Nonce = u128;
 
 // TODO: As parameters...
 const MESSAGE_SIZE_LIMIT: usize = 2 << 20;
@@ -98,6 +99,7 @@ pub enum Message {
     /// The sender being the first of `route_list`.
     ForwardTo(PeerId, Vec<PeerId>, Box<Message>),
     TestBig(Vec<u8>),
+    Unique(Nonce, Box<Message>),
 
     // Legacy
     // TODO: delete ?
