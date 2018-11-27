@@ -165,18 +165,24 @@ impl Shoal {
             None => {
                 match nc_action {
                     NotConnectedAction::Forward => {
-                        println!("Shoal : Peer `{}` is not a direct peer, sending a `ForwardTo` of message `{}` to other peers...", peer_pid, msg);
+                        match msg {
+                            Message::NoJob | Message::Idle(_) => (),
+                            _ => println!("Shoal : Peer `{}` is not a direct peer, sending a `ForwardTo` of message `{}` to other peers...", peer_pid, msg)
+                        }
 
                         self.forward(peer_pid, Vec::new(), msg);
                         // TODO: future that resolves only when receiving some ack from target ?
                         Box::new(future::ok(()))
                     }
                     NotConnectedAction::Delay => {
-                        println!(
-                            "Shoal : Setting msg `{:?}` to be sent when peer `{}` is created.",
-                            &format!("{:?}", msg)[..4],
-                            peer_pid
-                        );
+                        match msg {
+                            Message::NoJob | Message::Idle(_) => (),
+                            _ => println!(
+                                "Shoal : Setting msg `{:?}` to be sent when peer `{}` is created.",
+                                &format!("{:?}", msg)[..4],
+                                peer_pid
+                            ),
+                        }
 
                         let mut om = self.orphan_messages.lock().unwrap();
                         let ready_rx = match om.get(&peer_pid) {
@@ -207,6 +213,8 @@ impl Shoal {
     /// (i.e. if it wasn't already broadcasted via this peer)
     /// - the peer is not already in the route list
     /// (if it hasn't already gone through this peer)
+
+    // TODO: Discard if already broadcasted
     pub fn broadcast(&self, mut route_list: Vec<PeerId>, msg: Message) {
         let peers = self.peers.lock().unwrap();
 
@@ -226,15 +234,16 @@ impl Shoal {
                         let msg = Message::Broadcast(route_list.clone(), Box::new(msg.clone()));
                         peer.send_and_spawn_action(msg, NotConnectedAction::Discard);
                     } else {
-                        eprintln!("Message already gone through peer `{}`", pid);
+                        // eprintln!("Message `{}` already gone through peer `{}`, {:?}.", msg, pid, route_list);
                     }
                 }
             });
         } else {
-            eprintln!("Message already broadcasted...");
+            // eprintln!("Message `{}` already broadcasted, {:?}.", msg, route_list);
         }
     }
 
+    // TODO: Discard if already forwarded
     // TODO: send Found/NotFound ?
     pub fn forward(&self, to: PeerId, mut route_list: Vec<PeerId>, msg: Message) {
         let peers = self.peers.lock().unwrap();
@@ -278,14 +287,14 @@ impl Shoal {
                         let msg = Message::ForwardTo(to, route_list.clone(), Box::new(msg.clone()));
                         peer.send_and_spawn_action(msg, NotConnectedAction::Discard);
                     } else {
-                        eprintln!("Message already gone through peer `{}`", pid);
+                        // eprintln!("Message `{}` already gone through peer `{}`, {:?}", msg, pid, route_list);
                     }
                 } else {
-                    eprintln!("Peer `{}` not connected...", pid);
+                    // eprintln!("Peer `{}` not connected...", pid);
                 }
             });
         } else {
-            eprintln!("Message already forwarded...");
+            // eprintln!("Message `{}` already forwarded, {:?}.", msg, route_list);
         }
     }
 
