@@ -218,8 +218,6 @@ pub fn try_connecting_at_interval(
         .for_each(move |_| -> Box<Future<Item = (), Error = Error> + Send> {
             let mut is_a_client_connecting_locked = is_a_client_connecting.lock().unwrap();
             if !*is_a_client_connecting_locked {
-                *is_a_client_connecting_locked = true;
-
                 let do_connect = if let Some(ref peer) = *peer_opt.lock().unwrap() {
                     if let PeerState::NotConnected = peer.lock().unwrap().state {
                         /*
@@ -250,6 +248,8 @@ pub fn try_connecting_at_interval(
                 };
 
                 if do_connect {
+                    *is_a_client_connecting_locked = true;
+
                     let is_a_client_connecting = is_a_client_connecting.clone();
                     Box::new(
                         connect_to_peer(shoal.clone(), peer_opt.clone(), peer_addr).or_else(
@@ -271,8 +271,9 @@ pub fn try_connecting_at_interval(
                     Box::new(future::ok(()))
                 }
             } else {
+                // eprintln!("Client : {} : `is_a_client_connecting` is `true`.", peer_addr);
                 Box::new(future::ok(()))
             }
         })
-        .map_err(|_| ())
+        .map_err(move |err| panic!("Client : {} : An error occured in the connection loop, thus preventing the peer to reconnect : `{:?}`.", peer_addr, err))
 }
