@@ -4,7 +4,7 @@ use tokio::io;
 use tokio::prelude::*;
 use tokio::runtime::Runtime;
 
-use balthmessage::{Message, Proto, ProtoCodec, M};
+use message::{Message, Proto, ProtoCodec, M};
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -36,7 +36,6 @@ pub type OrphanMsgsMapArcMut = Arc<
     >,
 >;
 pub type ReceivedMsgsSetArcMut = Arc<Mutex<HashSet<(PeerId, Message)>>>;
-type Nonce = u128;
 
 // ------------------------------------------------------------------
 /// # NotConnectedAction
@@ -108,8 +107,8 @@ impl Shoal {
         self.peers.clone()
     }
 
-    fn get_nonce(&self) -> Nonce {
-        self.nonce_seed.elapsed().as_millis()
+    fn get_nonce(&self) -> message::Nonce {
+        message::get_nonce(self.nonce_seed)
     }
 
     /// This method is used to prepare message that will be sent:

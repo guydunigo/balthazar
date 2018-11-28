@@ -497,7 +497,10 @@ fn for_each_packet(shoal: ShoalReadArc, peer: &mut Peer, pkt: Proto) -> Result<(
             tokio::spawn(send_future);
         }
         _ => {
-            unimplemented!("A `Proto` packet wasn't handled : `{}`", pkt);
+            eprintln!(
+                "Manager : {} : Unhandled `Proto` packet : `{}`",
+                peer.pid, pkt
+            );
         }
     }
 

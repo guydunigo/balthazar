@@ -1,6 +1,6 @@
 [package]
 name = "balthernet"
-version = "0.3.0"
+version = "0.3.1"
 authors = ["GONI Guillaume <gdn3@live.fr>"]
 edition = "2018"
 

@@ -16,6 +16,7 @@ pub mod mock_stream;
 pub use ron::{de, ser};
 use std::fmt;
 use std::io;
+use std::time::Instant;
 
 pub use codec::ProtoCodec;
 use job::task::arguments::Arguments;
@@ -28,7 +29,7 @@ type PeerId = u32;
 type ConnVote = u32;
 #[allow(dead_code)]
 type PodeId = u32;
-type Nonce = u128;
+pub type Nonce = u64;
 
 // ------------------------------------------------------------------
 // Errors
@@ -59,6 +60,14 @@ impl From<de::Error> for Error {
     fn from(err: de::Error) -> Error {
         Error::DeError(err)
     }
+}
+
+// ------------------------------------------------------------------
+// get_nonce
+
+pub fn get_nonce(instant: Instant) -> Nonce {
+    // TODO: use millis/nanos ?
+    instant.elapsed().as_secs()
 }
 
 // ------------------------------------------------------------------
