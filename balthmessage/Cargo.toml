@@ -1,6 +1,6 @@
 [package]
 name = "balthmessage"
-version = "0.2.1"
+version = "0.2.2"
 authors = ["GONI Guillaume <gdn3@live.fr>"]
 
 [dependencies]
@@ -9,5 +9,6 @@ serde = "1.0.80"
 ron = "0.4.0"
 tokio = "=0.1.11"
 bytes = "0.4.11"
+rand= "0.6.1"
 
 balthajob = { path = "../balthajob" }

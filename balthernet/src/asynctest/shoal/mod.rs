@@ -105,18 +105,11 @@ impl Shoal {
         self.peers.clone()
     }
 
-    fn get_nonce(&self) -> message::Nonce {
-        message::get_nonce(self.nonce_seed)
-    }
-
     /// This method is used to prepare message that will be sent:
     /// - Add a nonce (TODO: or a timestamp ?)
     /// - TODO: Add a signature
     fn package_msg(&self, msg: Message) -> M {
-        M {
-            nonce: self.get_nonce(),
-            msg,
-        }
+        M::new(msg)
     }
 
     /// This is used to try if the message was already received.

@@ -3,6 +3,7 @@
 #[macro_use]
 extern crate serde_derive;
 extern crate bytes;
+extern crate rand;
 extern crate ron;
 extern crate serde;
 extern crate tokio;
@@ -18,7 +19,6 @@ use std::collections::HashSet;
 use std::fmt;
 use std::io;
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
 
 pub use codec::ProtoCodec;
 use job::task::arguments::Arguments;
@@ -32,6 +32,8 @@ type ConnVote = u32;
 #[allow(dead_code)]
 type PodeId = u32;
 pub type Nonce = u64;
+// TODO: store the hash directly ?
+// TODO: Space ? Do some cleaning ? Automatic Interval that cleans ? hashmap with received instant ?
 pub type MSetArcMut = Arc<Mutex<HashSet<(PeerId, M)>>>;
 
 // ------------------------------------------------------------------
@@ -68,9 +70,9 @@ impl From<de::Error> for Error {
 // ------------------------------------------------------------------
 // get_nonce
 
-pub fn get_nonce(instant: Instant) -> Nonce {
-    // TODO: use millis/nanos ?
-    instant.elapsed().as_secs()
+// TODO: maybe actually check that it is unique ?
+fn get_nonce() -> Nonce {
+    rand::random()
 }
 
 // ------------------------------------------------------------------
@@ -136,12 +138,22 @@ impl Proto {
 pub struct M {
     pub nonce: Nonce,
     pub msg: Message,
+    // TODO: as well the from user
     // TODO: later signature, ...
 }
 
 impl fmt::Display for M {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", self.msg)
+    }
+}
+
+impl M {
+    pub fn new(msg: Message) -> Self {
+        M {
+            nonce: get_nonce(),
+            msg,
+        }
     }
 }
 
