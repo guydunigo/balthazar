@@ -62,7 +62,7 @@ impl Encoder for ProtoCodec {
     type Item = Proto;
     type Error = Error;
 
-    fn encode(&mut self, packet: Self::Item, buf: &mut BytesMut) -> Result<(), Error> {
+    fn encode(&mut self, packet: Self::Item, buf: &mut BytesMut) -> Result<(), Self::Error> {
         /*
         // TODO: move to other plate (shoal.package ?)
         if let Proto::Job(_, _, bytecode) = &message {

@@ -26,9 +26,9 @@ fn handle_vote(
         println!("Listener : Vote : peer lost, validating connection...");
         peer_locked.listener_connection_ack(peer, socket);
     } else {
-        println!("Listener : Vote : Equality, sending new vote...");
-        let new_local_vote = peer_locked.listener_to_connecting();
-        peer_locked.send_and_spawn_action(Proto::Vote(new_local_vote), NotConnectedAction::Discard);
+        println!("Listener : Vote : Equality, cancelling connection...");
+        // TODO: cancelling was the easiest but is there a better way ?
+        peer_locked.listener_connection_cancel(socket);
     }
 
     Ok(())

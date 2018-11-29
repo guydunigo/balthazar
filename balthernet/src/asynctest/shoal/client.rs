@@ -55,15 +55,6 @@ fn for_each_packet_connecting(
                         // End the packet listening loop :
                         return Err(Error::ConnectionCancelled);
                     },
-                    Proto::Vote(_peer_vote) => {
-                        if peer_locked.listener_connecting {
-                            // TODO: send vote to listener
-                            unimplemented!();
-                        } else {
-                            // TODO: what to do ?
-                            unimplemented!();
-                        }
-                    },
                     Proto::Connect(_) => {
                         // TODO: might mean that it is already connecting (listener in vote or other client)...
                         // TODO: check if same id...
