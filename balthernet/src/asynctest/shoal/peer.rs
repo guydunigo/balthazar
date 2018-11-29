@@ -467,34 +467,50 @@ fn for_each_packet(shoal: ShoalReadArc, peer: &mut Peer, pkt: Proto) -> Result<(
             // println!("Manager : {} : received Pong ! It is alive !!!", peer.pid);
         }
         Proto::Broadcast(route_list, m) => {
-            // TODO: better way to avoid the lock ?
-            let future = future::ok(()).and_then(move |_| {
-                shoal_clone.lock().broadcast(route_list, m);
-                Ok(())
-            });
-            tokio::spawn(future);
+            if route_list.len() >= 1 {
+                let orig_sender_pid = route_list[0];
+                if shoal.try_registering_received_msg(orig_sender_pid, &m) {
+                    // TODO: better way to avoid the lock ?
+                    let future = future::ok(()).and_then(move |_| {
+                        shoal_clone.lock().broadcast(route_list, m);
+                        Ok(())
+                    });
+                    tokio::spawn(future);
+                } else {
+                    // No original sender...
+                }
+            }
         }
         Proto::ForwardTo(to, route_list, m) => {
-            // TODO: better way to avoid the lock ?
-            let future = future::ok(()).and_then(move |_| {
-                shoal_clone.lock().forward(to, route_list, m);
-                Ok(())
-            });
-            tokio::spawn(future);
+            if route_list.len() >= 1 {
+                let orig_sender_pid = route_list[0];
+                if shoal.try_registering_received_msg(orig_sender_pid, &m) {
+                    // TODO: better way to avoid the lock ?
+                    let future = future::ok(()).and_then(move |_| {
+                        shoal_clone.lock().forward(to, route_list, m);
+                        Ok(())
+                    });
+                    tokio::spawn(future);
+                }
+            } else {
+                // No original sender...
+            }
         }
         Proto::Direct(m) => {
-            /*
-            println!(
-                "Manager : {} : received a packet, sending it upper levels.",
-                peer.pid
-            );
-            */
-            let send_future = shoal
-                .tx()
-                .send((peer.pid, m.msg))
-                .map(|_| ())
-                .map_err(|_| ());
-            tokio::spawn(send_future);
+            if shoal.try_registering_received_msg(peer.pid(), &m) {
+                /*
+                println!(
+                    "Manager : {} : received a packet, sending it upper levels.",
+                    peer.pid
+                );
+                */
+                let send_future = shoal
+                    .tx()
+                    .send((peer.pid, m.msg))
+                    .map(|_| ())
+                    .map_err(|_| ());
+                tokio::spawn(send_future);
+            }
         }
         _ => {
             eprintln!(

@@ -14,8 +14,10 @@ mod message;
 pub mod mock_stream;
 
 pub use ron::{de, ser};
+use std::collections::HashSet;
 use std::fmt;
 use std::io;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 pub use codec::ProtoCodec;
@@ -30,6 +32,7 @@ type ConnVote = u32;
 #[allow(dead_code)]
 type PodeId = u32;
 pub type Nonce = u64;
+pub type MSetArcMut = Arc<Mutex<HashSet<(PeerId, M)>>>;
 
 // ------------------------------------------------------------------
 // Errors

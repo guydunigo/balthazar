@@ -4,7 +4,7 @@ use tokio::io;
 use tokio::prelude::*;
 use tokio::runtime::Runtime;
 
-use message::{Message, Proto, ProtoCodec, M};
+use message::{MSetArcMut, Message, Proto, ProtoCodec, M};
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -23,7 +23,6 @@ pub use self::peer::*;
 const SHOAL_MPSC_SIZE: usize = 32;
 
 // TODO: Good for big messages ?
-pub type MsgsMapArcMut = Arc<Mutex<HashMap<Message, Vec<PeerId>>>>;
 pub type OrphanMsgsMapArcMut = Arc<
     Mutex<
         HashMap<
@@ -35,7 +34,6 @@ pub type OrphanMsgsMapArcMut = Arc<
         >,
     >,
 >;
-pub type ReceivedMsgsSetArcMut = Arc<Mutex<HashSet<(PeerId, Message)>>>;
 
 // ------------------------------------------------------------------
 /// # NotConnectedAction
@@ -73,7 +71,7 @@ pub struct Shoal {
     peers: PeersMapArcMut,
     // TODO: Clean sometimes ?
     // TODO: have a way to monitor size ?
-    msgs_received: MsgsMapArcMut,
+    msgs_received: MSetArcMut,
     orphan_messages: OrphanMsgsMapArcMut,
     nonce_seed: Instant,
 }
@@ -87,7 +85,7 @@ impl Shoal {
                 local_addr,
                 tx,
                 peers: Arc::new(Mutex::new(HashMap::new())),
-                msgs_received: Arc::new(Mutex::new(HashMap::new())),
+                msgs_received: Arc::new(Mutex::new(HashSet::new())),
                 orphan_messages: Arc::new(Mutex::new(HashMap::new())),
                 nonce_seed: Instant::now(),
             },
@@ -121,8 +119,15 @@ impl Shoal {
         }
     }
 
-    pub fn msgs_received(&self) -> MsgsMapArcMut {
-        self.msgs_received.clone()
+    /// This is used to try if the message was already received.
+    ///
+    /// Returns `false` if message was already registered.
+    /// Returns `true` if message wasn't already registered.
+    pub fn try_registering_received_msg(&self, from: PeerId, m: &M) -> bool {
+        let mut mr = self.msgs_received.lock().unwrap();
+        // TODO: clone big message ?
+        let m = m.clone();
+        mr.insert((from, m))
     }
 
     pub fn tx(&self) -> MpscSenderMessage {

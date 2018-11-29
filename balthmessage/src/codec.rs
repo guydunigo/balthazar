@@ -50,6 +50,7 @@ impl Decoder for ProtoCodec {
 
             match pkt {
                 Proto::Ping | Proto::Pong => (),
+                Proto::ForwardTo(_, _, _) => (),
                 _ => println!("-- {:?} : Received : {}", self.peer_pid, pkt),
             }
 
@@ -77,6 +78,7 @@ impl Encoder for ProtoCodec {
 
         match packet {
             Proto::Ping | Proto::Pong => (),
+            Proto::ForwardTo(_, _, _) => (),
             _ => println!(
                 "-- {:?} : Sending : `{}` of {} bytes.",
                 self.peer_pid, packet, len
