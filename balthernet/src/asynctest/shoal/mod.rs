@@ -105,22 +105,15 @@ impl Shoal {
         self.peers.clone()
     }
 
-    /// This method is used to prepare message that will be sent:
-    /// - Add a nonce (TODO: or a timestamp ?)
-    /// - TODO: Add a signature
-    fn package_msg(&self, msg: Message) -> M {
-        M::new(msg)
-    }
-
     /// This is used to try if the message was already received.
     ///
     /// Returns `false` if message was already registered.
     /// Returns `true` if message wasn't already registered.
-    pub fn try_registering_received_msg(&self, from: PeerId, m: &M) -> bool {
+    pub fn try_registering_received_msg(&self, m: &M) -> bool {
         let mut mr = self.msgs_received.lock().unwrap();
         // TODO: clone big message ?
         let m = m.clone();
-        mr.insert((from, m))
+        mr.insert(m)
     }
 
     pub fn tx(&self) -> MpscSenderMessage {
@@ -172,19 +165,20 @@ impl Shoal {
             peers.get(&peer_pid).map(|peer| peer.clone())
         };
 
-        let m = self.package_msg(msg);
-
         match peer_opt {
             Some(peer) => {
                 let mut peer = peer.lock().unwrap();
-                Box::new(peer.send_action(Proto::Direct(m), nc_action).map(|_| ()))
+                Box::new(
+                    peer.send_action(Proto::Direct(M::new(self.local_pid(), msg)), nc_action)
+                        .map(|_| ()),
+                )
             }
             None => {
                 match nc_action {
                     NotConnectedAction::Forward => {
                         // println!("Shoal : Peer `{}` is not a direct peer, sending a `ForwardTo` of message `{}` to other peers...", peer_pid, msg);
 
-                        self.forward(peer_pid, Vec::new(), m);
+                        self.forward_msg(peer_pid, msg);
                         // TODO: future that resolves only when receiving some ack from target ?
                         Box::new(future::ok(()))
                     }
@@ -203,14 +197,14 @@ impl Shoal {
                             }
                         };
 
-                        let future =
-                            ready_rx
-                                .map_err(|err| Error::OneShotError(err))
-                                .and_then(|peer| {
-                                    peer.lock()
-                                        .unwrap()
-                                        .send_action(Proto::Direct(m), nc_action)
-                                });
+                        let local_pid = self.local_pid();
+                        let future = ready_rx.map_err(|err| Error::OneShotError(err)).and_then(
+                            move |peer| {
+                                peer.lock()
+                                    .unwrap()
+                                    .send_action(Proto::Direct(M::new(local_pid, msg)), nc_action)
+                            },
+                        );
 
                         Box::new(future)
                     }
@@ -218,6 +212,10 @@ impl Shoal {
                 }
             }
         }
+    }
+
+    pub fn broadcast_msg(&self, msg: Message) {
+        self.broadcast(Vec::new(), M::new(self.local_pid(), msg))
     }
 
     /// This function send `msg` to all connected peers only if
@@ -253,6 +251,10 @@ impl Shoal {
         } else {
             // eprintln!("Message `{}` already broadcasted, {:?}.", msg, route_list);
         }
+    }
+
+    pub fn forward_msg(&self, to: PeerId, msg: Message) {
+        self.forward(to, Vec::new(), M::new(self.local_pid(), msg))
     }
 
     // TODO: Discard if already forwarded

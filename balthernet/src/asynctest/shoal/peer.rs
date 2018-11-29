@@ -467,37 +467,28 @@ fn for_each_packet(shoal: ShoalReadArc, peer: &mut Peer, pkt: Proto) -> Result<(
             // println!("Manager : {} : received Pong ! It is alive !!!", peer.pid);
         }
         Proto::Broadcast(route_list, m) => {
-            if route_list.len() >= 1 {
-                let orig_sender_pid = route_list[0];
-                if shoal.try_registering_received_msg(orig_sender_pid, &m) {
-                    // TODO: better way to avoid the lock ?
-                    let future = future::ok(()).and_then(move |_| {
-                        shoal_clone.lock().broadcast(route_list, m);
-                        Ok(())
-                    });
-                    tokio::spawn(future);
-                } else {
-                    // No original sender...
-                }
+            if shoal.try_registering_received_msg(&m) {
+                // TODO: better way to avoid the lock ?
+                let future = future::ok(()).and_then(move |_| {
+                    shoal_clone.lock().broadcast(route_list, m);
+                    Ok(())
+                });
+                tokio::spawn(future);
             }
         }
         Proto::ForwardTo(to, route_list, m) => {
-            if route_list.len() >= 1 {
-                let orig_sender_pid = route_list[0];
-                if shoal.try_registering_received_msg(orig_sender_pid, &m) {
-                    // TODO: better way to avoid the lock ?
-                    let future = future::ok(()).and_then(move |_| {
-                        shoal_clone.lock().forward(to, route_list, m);
-                        Ok(())
-                    });
-                    tokio::spawn(future);
-                }
-            } else {
-                // No original sender...
+            if shoal.try_registering_received_msg(&m) {
+                // TODO: better way to avoid the lock ?
+                let future = future::ok(()).and_then(move |_| {
+                    shoal_clone.lock().forward(to, route_list, m);
+                    Ok(())
+                });
+                tokio::spawn(future);
             }
         }
         Proto::Direct(m) => {
-            if shoal.try_registering_received_msg(peer.pid(), &m) {
+            // TODO: check if peer.pid() == m.from_pid ?
+            if shoal.try_registering_received_msg(&m) {
                 /*
                 println!(
                     "Manager : {} : received a packet, sending it upper levels.",

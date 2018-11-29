@@ -34,7 +34,7 @@ type PodeId = u32;
 pub type Nonce = u64;
 // TODO: store the hash directly ?
 // TODO: Space ? Do some cleaning ? Automatic Interval that cleans ? hashmap with received instant ?
-pub type MSetArcMut = Arc<Mutex<HashSet<(PeerId, M)>>>;
+pub type MSetArcMut = Arc<Mutex<HashSet<M>>>;
 
 // ------------------------------------------------------------------
 // Errors
@@ -136,8 +136,9 @@ impl Proto {
 /// Packaged message with some "metadata".
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Hash)]
 pub struct M {
-    pub nonce: Nonce,
+    pub from_pid: PeerId,
     pub msg: Message,
+    pub nonce: Nonce,
     // TODO: as well the from user
     // TODO: later signature, ...
 }
@@ -149,10 +150,11 @@ impl fmt::Display for M {
 }
 
 impl M {
-    pub fn new(msg: Message) -> Self {
+    pub fn new(from_pid: PeerId, msg: Message) -> Self {
         M {
-            nonce: get_nonce(),
+            from_pid,
             msg,
+            nonce: get_nonce(),
         }
     }
 }
