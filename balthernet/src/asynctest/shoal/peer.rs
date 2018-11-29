@@ -468,12 +468,21 @@ fn for_each_packet(shoal: ShoalReadArc, peer: &mut Peer, pkt: Proto) -> Result<(
         }
         Proto::Broadcast(route_list, m) => {
             if shoal.try_registering_received_msg(&m) {
+                // TODO: cloning big msgs ?
+                let m_clone = m.clone();
                 // TODO: better way to avoid the lock ?
                 let future = future::ok(()).and_then(move |_| {
                     shoal_clone.lock().broadcast(route_list, m);
                     Ok(())
                 });
                 tokio::spawn(future);
+
+                let send_future = shoal
+                    .tx()
+                    .send((m_clone.from_pid, m_clone.msg))
+                    .map(|_| ())
+                    .map_err(|_| ());
+                tokio::spawn(send_future);
             }
         }
         Proto::ForwardTo(to, route_list, m) => {
@@ -497,7 +506,7 @@ fn for_each_packet(shoal: ShoalReadArc, peer: &mut Peer, pkt: Proto) -> Result<(
                 */
                 let send_future = shoal
                     .tx()
-                    .send((peer.pid, m.msg))
+                    .send((m.from_pid, m.msg))
                     .map(|_| ())
                     .map_err(|_| ());
                 tokio::spawn(send_future);

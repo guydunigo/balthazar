@@ -22,7 +22,6 @@ use message::Message;
 use net;
 use net::asynctest::shoal::ShoalReadArc;
 use net::asynctest::PeerId;
-use net::MANAGER_ID;
 
 const NB_TASKS: usize = 16;
 // TODO: good size ?
@@ -75,7 +74,7 @@ pub fn start_orchestrator(
     shoal: ShoalReadArc,
     pode_id: PodeId,
     jobs: JobsMapArcMut,
-) -> Sender<(JobId, TaskId)> {
+) -> Sender<(PeerId, JobId, TaskId)> {
     let (send_msg_tx, send_msg_rx) = mpsc::channel(CHANNEL_LIMIT);
     let (tasks_tx, tasks_rx) = mpsc::channel(CHANNEL_LIMIT);
     let jobs_clone = jobs.clone();
@@ -90,8 +89,9 @@ pub fn start_orchestrator(
 
         let future = tasks_rx
             .map_err(|_| Error::ExecutorMpscError)
-            .for_each(move |(job_id, task_id)| {
+            .for_each(move |(from_pid, job_id, task_id)| {
                 orchestrate(
+                    from_pid,
                     pode_id,
                     jobs.clone(),
                     job_instances.clone(),
@@ -123,7 +123,7 @@ pub fn start_orchestrator(
 
         let jobs = jobs.lock().unwrap();
         if job::get_available_task(&*jobs).is_none() {
-            shoal.lock().send_to(MANAGER_ID, Message::Idle(NB_TASKS));
+            shoal.lock().broadcast_msg(Message::Idle(NB_TASKS));
         }
 
         Ok(())
@@ -154,6 +154,7 @@ pub fn start_orchestrator(
 }
 
 pub fn orchestrate(
+    from_pid: PeerId,
     pode_id: PodeId,
     jobs: JobsMapArcMut,
     job_instances: Arc<Mutex<Vec<(JobId, wasm::ModuleRef)>>>,
@@ -226,8 +227,8 @@ pub fn orchestrate(
     task.lock().unwrap().result = Some(res.clone());
 
     let send_future = send_msg_tx
-        .send((MANAGER_ID, Message::ReturnValue(job_id, task_id, res)))
-        .and_then(|sender| sender.send((MANAGER_ID, Message::Idle(1))))
+        .send((from_pid, Message::ReturnValue(job_id, task_id, res)))
+        .and_then(move |sender| sender.send((from_pid, Message::Idle(1))))
         .map(|_| ())
         .map_err(|err| Error::ToShoalMpscError(err));
 

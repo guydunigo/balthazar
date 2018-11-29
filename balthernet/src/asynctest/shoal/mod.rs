@@ -273,7 +273,7 @@ impl Shoal {
             // TODO: save the route to the sender peer ? and re-use it next time ?
             let future = self
                 .tx()
-                .send((route_list[0], m.msg))
+                .send((m.from_pid, m.msg))
                 .map(|_| ())
                 .map_err(|_| ());
             tokio::spawn(future);

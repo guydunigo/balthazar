@@ -26,7 +26,6 @@ use job::{Job, JobId, JobsMapArcMut};
 use message::{de, Message};
 use net::asynctest::shoal::{MpscReceiverMessage, NotConnectedAction as NCA, ShoalReadArc};
 use net::asynctest::PeerId;
-use net::MANAGER_ID;
 
 pub type PodeId = u64;
 
@@ -75,6 +74,8 @@ pub fn fill(
     shoal: ShoalReadArc,
     _shoal_rx: MpscReceiverMessage,
 ) -> Result<(), Error> {
+    use net::MANAGER_ID;
+
     let code = {
         let mut f = File::open("main.wasm")?;
         let mut code: Vec<u8> = Vec::new();
@@ -167,6 +168,7 @@ pub fn swim(runtime: &mut Runtime, shoal: ShoalReadArc, shoal_rx: MpscReceiverMe
             }
             Message::Task(job_id, task_id, args) => register_task(
                 shoal.clone(),
+                peer_pid,
                 pode_id,
                 jobs.clone(),
                 &mut lone_tasks,
@@ -194,7 +196,7 @@ fn register_job(
     peer_pid: PeerId,
     jobs: JobsMapArcMut,
     lone_tasks: &mut Vec<LoneTask>,
-    tx: Sender<(JobId, TaskId)>,
+    tx: Sender<(PeerId, JobId, TaskId)>,
     job_id: JobId,
     bytecode: Vec<u8>,
 ) -> Vec<LoneTask> {
@@ -228,7 +230,7 @@ fn register_job(
             tasks_to_send.iter().for_each(|task_id| {
                 tokio::spawn(
                     tx.clone()
-                        .send((job_id, *task_id))
+                        .send((peer_pid, job_id, *task_id))
                         .map(|_| ())
                         .map_err(|err| {
                             eprintln!("Pode : Could not send task to executor : `{:?}`.", err);
@@ -243,10 +245,11 @@ fn register_job(
 
 fn register_task(
     shoal: ShoalReadArc,
+    from_pid: PeerId,
     pode_id: PodeId,
     jobs: JobsMapArcMut,
     lone_tasks: &mut Vec<LoneTask>,
-    tx: Sender<(JobId, TaskId)>,
+    tx: Sender<(PeerId, JobId, TaskId)>,
     job_id: JobId,
     task_id: TaskId,
     args: Arguments,
@@ -257,16 +260,18 @@ fn register_task(
         Some((job_id, job)) => {
             job.lock().unwrap().add_new_task_with_id(task_id, args);
 
-            tokio::spawn(tx.send((*job_id, task_id)).map(|_| ()).map_err(|err| {
-                eprintln!("Pode : Could not send task to executor : `{:?}`.", err);
-            }));
+            tokio::spawn(
+                tx.send((from_pid, *job_id, task_id))
+                    .map(|_| ())
+                    .map_err(|err| {
+                        eprintln!("Pode : Could not send task to executor : `{:?}`.", err);
+                    }),
+            );
         }
         None => {
             let task = Task::new(task_id, args);
             lone_tasks.push(LoneTask { job_id, task });
-            shoal
-                .lock()
-                .send_to(MANAGER_ID, Message::RequestJob(job_id));
+            shoal.lock().broadcast_msg(Message::RequestJob(job_id));
         }
     }
 
