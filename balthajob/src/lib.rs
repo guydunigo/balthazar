@@ -1,5 +1,3 @@
-#![feature(int_to_from_bytes)]
-
 // TODO: GENERAL: stop using usize as it might change between platforms.
 
 #[macro_use]

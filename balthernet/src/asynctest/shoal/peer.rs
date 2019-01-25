@@ -28,6 +28,7 @@ pub type MpscSenderMessage = mpsc::Sender<(PeerId, Message)>;
 const PING_INTERVAL: u64 = 3;
 
 fn vote() -> ConnVote {
+    // TODO: local node id ?
     random()
 }
 

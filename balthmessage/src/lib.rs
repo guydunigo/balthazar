@@ -90,11 +90,14 @@ pub enum Proto {
     // TODO: Ping/Pong with Instants ? (latency, ...)
     Ping, // (Instant),
     Pong, // (Instant),
-    /// Broadcast(route_list, msg)
-    /// The original sender being the first of `route_list`
+    /// Broadcast(route_list, m)
+    /// The original sender might be the first of `route_list` but you should use `M.from_pid`
+    /// TODO: scalability ?
     Broadcast(Vec<PeerId>, M),
-    /// ForwardTo(to, route_list, msg)
-    /// The sender being the first of `route_list`.
+    /// ForwardTo(to, route_list, m)
+    /// The original sender might be the first of `route_list` but you should use `M.from_pid`
+    /// TODO: prefered route to optimize communication ?
+    /// TODO: scalability ?
     ForwardTo(PeerId, Vec<PeerId>, M),
     TestBig(Vec<u8>),
     Direct(M),
