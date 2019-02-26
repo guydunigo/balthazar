@@ -1,0 +1,146 @@
+@startuml
+
+namespace shoal {
+    namespace peer {
+        PingStatus *-- std.Instant
+
+        class PingStatus {
+            + new()
+            + bool is_ping_sent()
+            + ping()
+            + pong()
+        }
+
+        PeerState --|> std.Clone
+        PeerState *-- ConnVote
+        PeerState *-- tokio.TcpStream
+
+        Peer *-- PeerId
+        Peer *-- shoal.ShoalReadWeak
+        Peer *-- std.SocketAddr
+        Peer *-- PingStatus
+        class Peer {
+            - PeerId pid
+            - ShoalReadWeak shoal
+            + SocketAddr addr
+            + PingStatus ping_status
+            + bool client_connecting
+            + bool listener_connecting
+            + Shared<oneshot::Receiver<TcpStream>> ready_rx
+            - Option<oneshot::Sender<TcpStream>> ready_tx
+
+            + new(ShoalReadArc shaol, PeerId peer_pid, SocketAddr addr)
+            + bool is_connected()
+            + bool is_connecting()
+            + bool _is_ping_sent()
+            + PeerId pid()
+            + ping()
+            + pong()
+            + ConnVote to_connecting()
+            + ConnVote listener_to_connecting()
+            + create_oneshot()
+            + Result<(), Error> connected(PeerArcMut peer, TcpStream socket)
+            + client_connection_acked(PeerArcMut peer, TcpStream socket)
+            + listener_connection_ack(PeerArcMut peer, TcpStream socket)
+            + client_connection_cancelled()
+            + client_connection_cancel(TcpStream socket)
+            + listener_connection_cancel(TcpStream socket)
+            + connected_cancel()
+            + disconnect()
+            + Box<Future<Item=(), Error=Error>+Send> send_action(Proto pkt, NotConnectedAction nc_action)
+            + send_and_spawn_action(Proto pkt, NotConnectedAction nc_action)
+            + manage(PeerArcMut peer)
+            + Result<(), Error> handle_pkt(Proto pkt)
+        }
+    }
+
+    Shoal *-- shoal.peer.PeerId
+    Shoal *-- std.SocketAddr
+    Shoal *-- MpscSenderMessage
+    Shoal *-- PeersMapArcMut
+    Shoal *-- message.MSetArcMut
+    Shoal *-- OrphanMsgsMapArcMut
+    Shoal *-- std.Instant
+
+    class Shoal {
+        - PeerId local_pid
+        - SocketAddr local_addr
+        - MpscSenderMessage tx
+        - PeersMapArcMut peers
+        - MSetArcMut msgs_received
+        - OrphanMsgsMapArcMut orphan_messages
+        - Instant nonce_seed
+
+        + new(PeerId local_pid, SocketAddr local_addr)
+        + PeerId local_pid()
+        + SocketAddr local_addr()
+        + PeersMapArcMut peers()
+        + bool try_registering_received_msg(M m)
+        + MpscSenderMessage tx()
+        + send_to(PeerId peer_pid, Message msg)
+        + send_to_action(PeerId peer_pid, Message msg, NotConnectedAction nc_action)
+        + Box<Future<Item=(),Error=Error>+Send> send_to_future(PeerId peer_pid, Message msg)
+        + Box<Future<Item=(),Error=Error>+Send> send_to_future_action(PeerId peer_pid, Message msg, NotConnectedAction nc_action)
+        + broadcast_msg(Message msg)
+        + broadcast(Vec<PeerId> route_list, M m)
+        + forward_msg(PeerId to, Message msg)
+        + forward(PeerId to, Vec<PeerId> route_list, M m)
+        + insert_peer(Peers peers, PeerArcMut peer)
+        + peer_connection_cancelled(PeerId peer_pid)
+        + shutdown()
+    }
+
+    ShoalReadArc *-- Shoal
+    class ShoalReadArc {
+        - Arc<RwLock<Shoal>> inner
+
+        + (Self, MpscReceiverMessage) new(PeerId local_pid, SocketAddr local_addr)
+        + ShoalReadWeak downgrade()
+        + impl Deref<Target=Shoal> lock()
+        + start_clients(Runtime runtime, SocketAddr[])
+        + Result<(), io::Error> start_listener(Runtime runtime)
+        + Result<(), Error> swim(Runtime runtime, SocketAddr[])
+    }
+
+    ShoalReadWeak *-- Shoal
+    class ShoalReadWeak {
+        - Weak<RwLock<Shoal>> inner
+
+        + ShoalReadArc upgrade()
+    }
+}
+
+namespace message {
+    ProtoCodec --|> std.Decoder
+    ProtoCodec --|> std.Encoder
+    ProtoCodec *-- shoal.peer.PeerId
+    class ProtoCodec {
+        - Option<PeerId> peer_pid
+
+        + new(Option<PeerId> peer_pid)
+    }
+
+    Message *-- job.JobId
+    Message *-- job.TaskId
+    Message *-- job.Arguments
+    Message *-- shoal.peer.PeerId
+
+    MSetArcMut *-- "many" M
+
+    Proto *-- shoal.peer.PeerId
+    Proto *-- M
+    class Proto {
+        + Option<M> get_message()
+    }
+
+    M *-- shoal.peer.PeerId
+    M *-- Message
+    class M {
+        - PeerId from_pid
+        - Message msg
+        - Nonce nonce
+
+        + new(PeerId from_pid, Message msg)
+    }
+}
+@enduml
