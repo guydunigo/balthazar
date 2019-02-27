@@ -2,7 +2,7 @@
 
 namespace shoal {
     namespace peer {
-        PingStatus *-- std.Instant
+        hide PingStatus *-- std.Instant
 
         class PingStatus {
             + new()
@@ -11,19 +11,20 @@ namespace shoal {
             + pong()
         }
 
-        PeerState --|> std.Clone
         PeerState *-- ConnVote
         PeerState *-- tokio.TcpStream
 
         Peer *-- PeerId
-        Peer *-- shoal.ShoalReadWeak
+        Peer o-- shoal.ShoalReadWeak
         Peer *-- std.SocketAddr
         Peer *-- PingStatus
+        Peer *-- PeerState
         class Peer {
             - PeerId pid
             - ShoalReadWeak shoal
             + SocketAddr addr
             + PingStatus ping_status
+            + PeerState state
             + bool client_connecting
             + bool listener_connecting
             + Shared<oneshot::Receiver<TcpStream>> ready_rx
@@ -52,15 +53,19 @@ namespace shoal {
             + manage(PeerArcMut peer)
             + Result<(), Error> handle_pkt(Proto pkt)
         }
+
+        PeersMapArcMut *-- "many" Peer
     }
+
+    OrphanMsgsMapArcMut *-- "many" Peer
 
     Shoal *-- shoal.peer.PeerId
     Shoal *-- std.SocketAddr
     Shoal *-- MpscSenderMessage
-    Shoal *-- PeersMapArcMut
+    Shoal *-- shoal.peer.PeersMapArcMut
     Shoal *-- message.MSetArcMut
     Shoal *-- OrphanMsgsMapArcMut
-    Shoal *-- std.Instant
+    hide Shoal *-- std.Instant
 
     class Shoal {
         - PeerId local_pid
@@ -90,7 +95,7 @@ namespace shoal {
         + shutdown()
     }
 
-    ShoalReadArc *-- Shoal
+    ShoalReadArc o-- Shoal
     class ShoalReadArc {
         - Arc<RwLock<Shoal>> inner
 
@@ -102,7 +107,7 @@ namespace shoal {
         + Result<(), Error> swim(Runtime runtime, SocketAddr[])
     }
 
-    ShoalReadWeak *-- Shoal
+    ShoalReadWeak o-- Shoal
     class ShoalReadWeak {
         - Weak<RwLock<Shoal>> inner
 
@@ -111,24 +116,24 @@ namespace shoal {
 }
 
 namespace message {
-    ProtoCodec --|> std.Decoder
-    ProtoCodec --|> std.Encoder
-    ProtoCodec *-- shoal.peer.PeerId
+    ProtoCodec --|> Decoder
+    ProtoCodec --|> Encoder
+    hide ProtoCodec *-- shoal.peer.PeerId
     class ProtoCodec {
         - Option<PeerId> peer_pid
 
         + new(Option<PeerId> peer_pid)
     }
 
-    Message *-- job.JobId
-    Message *-- job.TaskId
-    Message *-- job.Arguments
+    hide Message *-- job.JobId
+    hide Message *-- job.TaskId
+    hide Message *-- job.Arguments
     Message *-- shoal.peer.PeerId
 
     MSetArcMut *-- "many" M
 
-    Proto *-- shoal.peer.PeerId
-    Proto *-- M
+    Proto *-- "0.." shoal.peer.PeerId
+    Proto *-- "0..1" M
     class Proto {
         + Option<M> get_message()
     }
