@@ -39,7 +39,7 @@ namespace shoal {
             + pong()
             + ConnVote to_connecting()
             + ConnVote listener_to_connecting()
-            + create_oneshot()
+            - create_oneshot()
             + Result<(), Error> connected(PeerArcMut peer, TcpStream socket)
             + client_connection_acked(PeerArcMut peer, TcpStream socket)
             + listener_connection_ack(PeerArcMut peer, TcpStream socket)

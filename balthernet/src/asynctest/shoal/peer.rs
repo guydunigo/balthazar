@@ -204,7 +204,11 @@ impl Peer {
     // TODO: return Result ?
     /// **Important** : peer must be a reference to self.
     /// TODO: to a wrapper like for Shoal ?
-    pub fn connected(&mut self, peer: PeerArcMut, mpsc_tx: mpsc::Sender<Proto>) -> Result<(), Error> {
+    pub fn connected(
+        &mut self,
+        peer: PeerArcMut,
+        mpsc_tx: mpsc::Sender<Proto>,
+    ) -> Result<(), Error> {
         // TODO: other checks ?
         self.listener_connecting = false;
         self.client_connecting = false;
@@ -234,15 +238,15 @@ impl Peer {
     }
 
     /// **Important** : peer must be a reference to self.
-    pub fn client_connection_acked(&mut self, peer: PeerArcMut, socket: TcpStream) {
-        match self.connected(peer, socket) {
+    pub fn client_connection_acked(&mut self, peer: PeerArcMut, mpsc_tx: mpsc::Sender<Proto>) {
+        match self.connected(peer, mpsc_tx) {
             Ok(()) => (),
             _ => unimplemented!(),
         }
     }
 
-    pub fn listener_connection_ack(&mut self, peer: PeerArcMut, socket: TcpStream) {
-        match self.connected(peer, socket) {
+    pub fn listener_connection_ack(&mut self, peer: PeerArcMut, mpsc_tx: mpsc::Sender<Proto>) {
+        match self.connected(peer, mpsc_tx) {
             Ok(()) => (),
             _ => unimplemented!(),
         }
@@ -256,14 +260,18 @@ impl Peer {
         }
     }
 
-    pub fn client_connection_cancel(&mut self, socket: TcpStream) {
+    pub fn client_connection_cancel(&mut self, mpsc_tx: mpsc::Sender<Proto>) {
         self.client_connection_cancelled();
-        send_packet_and_spawn(socket, Proto::ConnectCancel);
+
+        let send_future = mpsc_tx.send(Proto::ConnectCancel);
+        tokio::spawn(send_future);
     }
 
-    pub fn listener_connection_cancel(&mut self, socket: TcpStream) {
+    pub fn listener_connection_cancel(&mut self, mpsc_tx: mpsc::Sender<Proto>) {
         self.listener_connecting = false;
-        send_packet_and_spawn(socket, Proto::ConnectCancel);
+
+        let send_future = mpsc_tx.send(Proto::ConnectCancel);
+        tokio::spawn(send_future);
 
         if !self.client_connecting && self.is_connecting() {
             self.state = PeerState::NotConnected;

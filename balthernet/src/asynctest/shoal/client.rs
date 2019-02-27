@@ -1,3 +1,4 @@
+use tokio::codec::FramedRead;
 use tokio::net::TcpStream;
 use tokio::prelude::*;
 use tokio::timer::Interval;
@@ -15,16 +16,18 @@ use super::*;
 /// Interval between connections tries in seconds
 const CONNECTION_INTERVAL: u64 = 10;
 
-fn to_connecting(peer: &mut Peer, socket: TcpStream) {
+fn to_connecting(peer: &mut Peer, mpsc_tx: mpsc::Sender<Proto>) {
     let local_vote = peer.client_to_connecting();
-    send_packet_and_spawn(socket, Proto::Vote(local_vote));
+
+    let send_future = mpsc_tx.send(Proto::Vote(local_vote));
+    tokio::spawn(send_future);
 }
 
 fn for_each_packet_connecting(
     shoal: ShoalReadArc,
     peer_opt: PeerArcMutOpt,
     peer_addr: SocketAddr,
-    socket: TcpStream,
+    mpsc_tx: mpsc::Sender<Proto>,
     pkt: Proto,
 ) -> Result<(), Error> {
     let mut peer_opt = peer_opt.lock().unwrap();
@@ -44,7 +47,7 @@ fn for_each_packet_connecting(
                 match pkt {
                     Proto::ConnectAck => {
                         if !peer_locked.listener_connecting {
-                            peer_locked.client_connection_acked(peer.clone(), socket);
+                            peer_locked.client_connection_acked(peer.clone(), mpsc_tx);
                         } else {
                             // TODO: find a way to check that listener cancelled, ... oneshot?
                             unimplemented!();
@@ -84,7 +87,7 @@ fn for_each_packet_connecting(
                     }
                 }
 
-                to_connecting(&mut peer_locked, socket);
+                to_connecting(&mut peer_locked, mpsc_tx);
             }
         }
     } else {
@@ -112,10 +115,10 @@ fn for_each_packet_connecting(
                                 // TODO: return error and cancel connection ?
                             }
 
-                            to_connecting(&mut peer, socket);
+                            to_connecting(&mut peer, mpsc_tx);
                         }
                         PeerState::Connected(_) => {
-                            peer.client_connection_cancel(socket);
+                            peer.client_connection_cancel(mpsc_tx);
                             // End the packet listening loop :
                             return Err(Error::ConnectionCancelled);
                         }
@@ -123,7 +126,9 @@ fn for_each_packet_connecting(
                             if peer.client_connecting {
                                 // eprintln!("Client : {} : Peer inconsistency or double connection tasks : `peer.state` is already `Connecting(vote)`, cancelling connection...", peer_addr);
 
-                                send_packet_and_spawn(socket, Proto::ConnectCancel);
+                                let send_future = mpsc_tx.send(Proto::ConnectCancel);
+                                tokio::spawn(send_future);
+
                                 return Err(Error::ConnectionCancelled);
                             } else if peer.listener_connecting {
                                 unimplemented!("Can we arrive here ? (it would mean that listener is waiting for a vote but client was cancelled).");
@@ -136,7 +141,7 @@ fn for_each_packet_connecting(
                     // println!("Client : {} : Peer is not in peers.", peer_addr);
 
                     let mut peer = Peer::new(shoal.clone(), peer_pid, peer_addr);
-                    to_connecting(&mut peer, socket);
+                    to_connecting(&mut peer, mpsc_tx);
 
                     let peer = Arc::new(Mutex::new(peer));
                     *peer_opt = Some(peer.clone());
@@ -163,35 +168,39 @@ fn connect_to_peer(
     TcpStream::connect(&peer_addr)
         .map_err(Error::from)
         .and_then(move |socket| {
-            println!("Client : {} : starting connection...", peer_addr);
-            send_packet(socket, Proto::Connect(local_pid))
-        })
-        .map_err(Error::from)
-        .and_then(move |framed_sock| {
-            let shoal = shoal.clone();
-            let socket = framed_sock.get_ref().try_clone().unwrap();
+            let (rx, tx) = socket.split();
+            let mpsc_tx = write_to_mpsc(tx);
 
-            framed_sock
+            println!("Client : {} : starting connection...", peer_addr);
+
+            mpsc_tx
+                .send(Proto::Connect(local_pid))
                 .map_err(Error::from)
-                .for_each(move |pkt| {
-                    for_each_packet_connecting(
-                        shoal.clone(),
-                        peer_opt.clone(),
-                        peer_addr,
-                        socket.try_clone().unwrap(),
-                        pkt,
-                    )
-                })
-                .map_err(move |err| {
-                    match err {
-                        // TODO: println anyway ?
-                        Error::ConnectionCancelled | Error::ConnectionEnded => (),
-                        _ => eprintln!(
-                            "Client : {} : error when receiving a packet : {:?}.",
-                            peer_addr, err
-                        ),
-                    }
-                    err
+                .and_then(move |_| {
+                    let framed_sock = FramedRead::new(rx, ProtoCodec::new(None));
+
+                    framed_sock
+                        .map_err(Error::from)
+                        .for_each(move |pkt| {
+                            for_each_packet_connecting(
+                                shoal.clone(),
+                                peer_opt.clone(),
+                                peer_addr,
+                                mpsc_tx,
+                                pkt,
+                            )
+                        })
+                        .map_err(move |err| {
+                            match err {
+                                // TODO: println anyway ?
+                                Error::ConnectionCancelled | Error::ConnectionEnded => (),
+                                _ => eprintln!(
+                                    "Client : {} : error when receiving a packet : {:?}.",
+                                    peer_addr, err
+                                ),
+                            }
+                            err
+                        })
                 })
         })
 }
