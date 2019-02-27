@@ -1,7 +1,8 @@
 use futures::future::Shared;
 use futures::sync::{mpsc, oneshot};
 use rand::random;
-use tokio::codec::Framed;
+use tokio::codec::{FramedRead, FramedWrite};
+use tokio::io::ReadHalf;
 use tokio::net::TcpStream;
 use tokio::prelude::*;
 use tokio::timer::Interval;
@@ -32,11 +33,11 @@ fn vote() -> ConnVote {
     random()
 }
 
-pub fn send_packet(
-    socket: TcpStream,
+pub fn send_packet<W: AsyncWrite>(
+    socket: W,
     pkt: Proto,
-) -> impl Future<Item = Framed<TcpStream, ProtoCodec>, Error = Error> {
-    let framed_sock = Framed::new(socket, ProtoCodec::new(None));
+) -> impl Future<Item = FramedWrite<W, ProtoCodec>, Error = Error> {
+    let framed_sock = FramedWrite::new(socket, ProtoCodec::new(None));
 
     framed_sock.send(pkt.clone()).map_err(move |err| {
         if let Proto::Ping = pkt {
@@ -47,12 +48,12 @@ pub fn send_packet(
     })
 }
 
-pub fn send_packet_and_spawn(socket: TcpStream, pkt: Proto) {
+pub fn send_packet_and_spawn<W: AsyncWrite>(socket: W, pkt: Proto) {
     let future = send_packet(socket, pkt).map(|_| ()).map_err(|_| ());
     tokio::spawn(future);
 }
 
-pub fn cancel_connection(socket: TcpStream) {
+pub fn cancel_connection<W: AsyncWrite>(socket: W) {
     let future = send_packet(socket, Proto::ConnectCancel)
         .map_err(Error::from)
         .and_then(|framed_sock| {
@@ -104,33 +105,19 @@ impl PingStatus {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum PeerState {
     NotConnected,
     Connecting(ConnVote),
-    Connected(TcpStream),
-}
-
-impl Clone for PeerState {
-    fn clone(&self) -> Self {
-        use self::PeerState::*;
-        match self {
-            NotConnected => NotConnected,
-            Connecting(connvote) => Connecting(*connvote),
-            Connected(stream) => Connected(
-                stream
-                    .try_clone()
-                    .expect("Could not clone stream when cloning PeerState"),
-            ),
-        }
-    }
+    Connected(mpsc::Sender<Proto>),
 }
 
 #[derive(Debug)]
+// TODO: no `pub` ?
 pub struct Peer {
-    // TODO: no `pub` ?
     pid: PeerId,
     shoal: ShoalReadWeak,
+    // TODO: maybe known connection ports (optional)
     pub addr: SocketAddr,
     pub ping_status: PingStatus,
     pub state: PeerState,
@@ -138,8 +125,9 @@ pub struct Peer {
     pub client_connecting: bool,
     // TODO: set to false when listener socket error...
     pub listener_connecting: bool,
-    pub ready_rx: Shared<oneshot::Receiver<TcpStream>>,
-    ready_tx: Option<oneshot::Sender<TcpStream>>,
+    // TODO: generics AsyncWrite/Read
+    pub ready_rx: Shared<oneshot::Receiver<mpsc::Sender<Proto>>>,
+    ready_tx: Option<oneshot::Sender<mpsc::Sender<Proto>>>,
 }
 
 impl Peer {
@@ -147,7 +135,6 @@ impl Peer {
         let (ready_tx, ready_rx) = oneshot::channel();
         Peer {
             pid: peer_pid,
-            // shoal: shoal.downgrade(),
             shoal: shoal.downgrade(),
             addr,
             ping_status: PingStatus::new(),
@@ -217,12 +204,11 @@ impl Peer {
     // TODO: return Result ?
     /// **Important** : peer must be a reference to self.
     /// TODO: to a wrapper like for Shoal ?
-    pub fn connected(&mut self, peer: PeerArcMut, socket: TcpStream) -> Result<(), Error> {
-        let socket_clone = socket.try_clone().unwrap();
+    pub fn connected(&mut self, peer: PeerArcMut, mpsc_tx: mpsc::Sender<Proto>) -> Result<(), Error> {
         // TODO: other checks ?
         self.listener_connecting = false;
         self.client_connecting = false;
-        self.state = PeerState::Connected(socket);
+        self.state = PeerState::Connected(mpsc_tx);
 
         let ready_tx_sent = self.ready_tx.take();
 
@@ -236,12 +222,13 @@ impl Peer {
             }
         };
         sender
-            .send(socket_clone)
+            .send(mpsc_tx)
             .expect("Peer : Couldn't send readiness to peer oneshot.");
 
         println!("Manager : {} : Connected to : `{}`", self.pid, self.addr);
 
-        self.manage(peer);
+        unimplemented!();
+        // TODO: self.manage(peer, socket_rx);
 
         Ok(())
     }
@@ -299,10 +286,8 @@ impl Peer {
         self.create_oneshot();
         // TODO: disconnect packet ?
 
-        if let PeerState::Connected(socket) = &self.state {
-            // TODO: Flush before ?
-            socket.shutdown(Shutdown::Both).unwrap_or_default();
-        }
+        // TODO: What about ReadHalf ?
+
         self.state = PeerState::NotConnected;
     }
 
@@ -318,9 +303,9 @@ impl Peer {
         pkt: Proto,
         nc_action: NotConnectedAction,
     ) -> Box<Future<Item = (), Error = Error> + Send> {
-        if let PeerState::Connected(socket) = &self.state {
+        if let PeerState::Connected(mpsc_tx) = &self.state {
             // TODO: unwrap?
-            Box::new(send_packet(socket.try_clone().unwrap(), pkt).map(|_| ()))
+            Box::new(mpsc_tx.send(pkt))
         // TODO: delete this branch:
         } else if let Proto::Ping = pkt {
             // Don't register Pings...
@@ -342,7 +327,7 @@ impl Peer {
                         .ready_rx
                         .clone()
                         .map_err(|err| Error::OneShotError(err))
-                        .and_then(|socket| send_packet(socket.try_clone().unwrap(), pkt))
+                        .and_then(|mpsc_tx| mpsc_tx.send(pkt))
                         .map(|_| ())
                         .map_err(move |err| {
                             // TODO: Resend the packet ? Don't panic ?
@@ -368,27 +353,31 @@ impl Peer {
 
     /// **Important** : peer must be a reference to self.
     /// // TODO: ensure that ?
-    pub fn manage(&mut self, peer: PeerArcMut) {
-        if let PeerState::Connected(socket) = self.state.clone() {
-            let framed_sock = Framed::new(socket, ProtoCodec::new(Some(self.pid())));
+    // TODO: manage should be called from the client or listener loop
+    // instead of creating another one
+    pub fn manage(&mut self, peer: PeerArcMut, socket_rx: ReadHalf<TcpStream>) {
+        if let PeerState::Connected(mpsc_tx) = self.state.clone() {
+            let framed_sock = FramedRead::new(socket_rx, ProtoCodec::new(Some(self.pid())));
             let peer_pid = self.pid();
             let peer_clone = peer.clone();
             let shoal = self.shoal.clone();
 
-            let manage_future = framed_sock
-                .send(Proto::ConnectAck)
-                .map_err(Error::from)
-                .and_then(move |frame| {
-                    let ping_future = Interval::new_interval(Duration::from_secs(PING_INTERVAL))
-                        .map_err(Error::from)
-                        .and_then(move |_| ping_peer(peer_clone.clone()))
-                        .for_each(|_| Ok(()))
-                        .map_err(|_| ());
-                    tokio::spawn(ping_future);
+            mpsc_tx.send(Proto::ConnectAck);
 
-                    frame.map_err(Error::from).for_each(move |pkt| {
-                        for_each_packet(shoal.upgrade(), &mut *peer.lock().unwrap(), pkt)
-                    })
+            {
+                // ping
+                let ping_future = Interval::new_interval(Duration::from_secs(PING_INTERVAL))
+                    .map_err(Error::from)
+                    .and_then(move |_| ping_peer(peer_clone.clone()))
+                    .for_each(|_| Ok(()))
+                    .map_err(|_| ());
+                tokio::spawn(ping_future);
+            }
+
+            let manage_future = framed_sock
+                .map_err(Error::from)
+                .for_each(move |pkt| {
+                    for_each_packet(shoal.upgrade(), &mut *peer.lock().unwrap(), pkt)
                 })
                 .map_err(move |err| match err {
                     // TODO: println anyway ?
@@ -522,4 +511,15 @@ fn for_each_packet(shoal: ShoalReadArc, peer: &mut Peer, pkt: Proto) -> Result<(
     }
 
     Ok(())
+}
+
+pub fn write_to_mpsc<W: AsyncWrite>(tx: W) -> mpsc::Sender<Proto> {
+    let (mpsc_tx, mpsc_rx) = mpsc::channel();
+
+    let framed_sock = FramedWrite::new(tx, ProtoCodec::new(None));
+    // TODO: don't shadow error
+    let framed_future = framed_sock.send_all(mpsc_rx).map(|_| ()).map_err(|_| ());
+    tokio::spawn(framed_future);
+
+    mpsc_tx
 }
