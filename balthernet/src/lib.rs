@@ -1,5 +1,3 @@
-#![feature(duration_as_u128)]
-
 extern crate ron;
 extern crate tokio;
 // #[macro_use]

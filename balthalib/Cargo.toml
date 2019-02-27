@@ -4,10 +4,10 @@ version = "0.1.0"
 authors = ["GONI Guillaume <gdn3@live.fr>"]
 
 [dependencies]
-tokio = "=0.1.11"
-serde_derive = "1.0.80"
-serde = "1.0.80"
-ron = "0.4.0"
+tokio = "0.1.15"
+serde_derive = "1.0.88"
+serde = "1.0.88"
+ron = "0.4.1"
 
 balthacephalo = { path = "../balthacephalo" }
 balthapode = { path = "../balthapode" }
