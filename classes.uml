@@ -57,7 +57,7 @@ namespace shoal {
         PeersMapArcMut *-- "many" Peer
     }
 
-    OrphanMsgsMapArcMut *-- "many" Peer
+    OrphanMsgsMapArcMut *-- "many" shoal.peer.Peer
 
     Shoal *-- shoal.peer.PeerId
     Shoal *-- std.SocketAddr
