@@ -1,5 +1,6 @@
+use tokio::codec::FramedRead;
 use tokio::io;
-use tokio::net::{TcpListener, TcpStream};
+use tokio::net::TcpListener;
 use tokio::prelude::*;
 
 use std::net::SocketAddr;
@@ -12,7 +13,7 @@ use balthmessage::Proto;
 
 /// **Important** : peer must be a reference to self.
 fn handle_vote(
-    socket: TcpStream,
+    mpsc_tx: mpsc::Sender<Proto>,
     peer_locked: &mut Peer,
     peer: PeerArcMut,
     local_vote: ConnVote,
@@ -20,15 +21,15 @@ fn handle_vote(
 ) -> Result<(), Error> {
     if local_vote < peer_vote {
         println!("Listener : Vote : peer won, cancelling connection...");
-        peer_locked.listener_connection_cancel(socket);
+        peer_locked.listener_connection_cancel(mpsc_tx);
         return Err(Error::ConnectionCancelled);
     } else if local_vote > peer_vote {
         println!("Listener : Vote : peer lost, validating connection...");
-        peer_locked.listener_connection_ack(peer, socket);
+        peer_locked.listener_connection_ack(peer, mpsc_tx);
     } else {
         println!("Listener : Vote : Equality, cancelling connection...");
         // TODO: cancelling was the easiest but is there a better way ?
-        peer_locked.listener_connection_cancel(socket);
+        peer_locked.listener_connection_cancel(mpsc_tx);
     }
 
     Ok(())
@@ -40,7 +41,7 @@ fn for_each_packet_connecting(
     shoal: ShoalReadArc,
     peer_opt: PeerArcMutOpt,
     peer_addr: SocketAddr,
-    socket: TcpStream,
+    mpsc_tx: mpsc::Sender<Proto>,
     pkt: Proto,
 ) -> Result<(), Error> {
     let mut peer_opt = peer_opt.lock().unwrap();
@@ -55,7 +56,7 @@ fn for_each_packet_connecting(
                 if peer_locked.client_connecting {
                     match pkt {
                         Proto::Vote(peer_vote) => handle_vote(
-                            socket,
+                            mpsc_tx,
                             &mut *peer_locked,
                             peer.clone(),
                             local_vote,
@@ -64,7 +65,7 @@ fn for_each_packet_connecting(
                         _ => eprintln!("Listener : received a packet but it was not `Vote(vote)`."),
                     }
                 } else {
-                    peer_locked.listener_connection_ack(peer.clone(), socket);
+                    peer_locked.listener_connection_ack(peer.clone(), mpsc_tx);
                     // End the packet listening loop :
                     return Err(Error::ConnectionEnded);
                 }
@@ -106,20 +107,20 @@ fn for_each_packet_connecting(
                                 // TODO: return error and cancel connection ?
                             }
 
-                            peer.listener_connection_ack(peer_from_peers.clone(), socket);
+                            peer.listener_connection_ack(peer_from_peers.clone(), mpsc_tx);
                             // End the packet listening loop :
                             return Err(Error::ConnectionEnded);
                         }
                         PeerState::Connected(_) => {
                             // eprintln!("Listener : Someone tried to connect with pid `{}` but it is already connected (`state` is `Connected`). Cancelling...", peer_pid);
-                            cancel_connection(socket);
+                            cancel_connection(mpsc_tx);
                             // End the packet listening loop :
                             return Err(Error::ConnectionCancelled);
                         }
                         PeerState::Connecting(_local_vote) => {
                             if peer.listener_connecting {
                                 // eprintln!("Listener : Someone tried to connect with pid `{}` but it is in connection with a listener (`state` is `Connected` and `listener_connecting` is `true`). Cancelling...", peer_pid);
-                                cancel_connection(socket);
+                                cancel_connection(mpsc_tx);
                                 return Err(Error::ConnectionCancelled);
                             } else if !peer.client_connecting {
                                 panic!("Listener : Peer inconsistency : `state` is `Connecting` but `listener_connecting` and `client_connecting` are both false.");
@@ -134,7 +135,7 @@ fn for_each_packet_connecting(
 
                     {
                         let mut peer = peer_arc_mut.lock().unwrap();
-                        peer.listener_connection_ack(peer_arc_mut.clone(), socket);
+                        peer.listener_connection_ack(peer_arc_mut.clone(), mpsc_tx);
                     }
 
                     *peer_opt = Some(peer_arc_mut.clone());
@@ -157,6 +158,9 @@ pub fn listen(shoal: ShoalReadArc, listener: TcpListener) -> impl Future<Item = 
     listener
         .incoming()
         .for_each(move |socket| {
+            let (rx, tx) = socket.split();
+            let mpsc_tx = write_to_mpsc(tx);
+
             let local_pid = shoal.lock().local_pid;
 
             let shoal = shoal.clone();
@@ -165,9 +169,12 @@ pub fn listen(shoal: ShoalReadArc, listener: TcpListener) -> impl Future<Item = 
 
             let peer_opt = Arc::new(Mutex::new(None));
 
-            let send_future = send_packet(socket.try_clone()?, Proto::Connect(local_pid))
-                .and_then(move |framed_sock| {
-                    let manager = framed_sock
+            let send_future = send_packet(mpsc_tx, Proto::Connect(local_pid))
+                .map_err(|_| ())
+                .and_then(|_| {
+                    let framed_sock = FramedRead::new(rx, ProtoCodec::new(None));
+
+                    framed_sock
                         .map_err(Error::from)
                         .for_each(move |pkt| {
                             for_each_packet_connecting(
@@ -175,7 +182,7 @@ pub fn listen(shoal: ShoalReadArc, listener: TcpListener) -> impl Future<Item = 
                                 peer_opt.clone(),
                                 peer_addr,
                                 // TODO: unwrap?
-                                socket.try_clone().unwrap(),
+                                mpsc_tx,
                                 pkt,
                             )
                         })
@@ -183,13 +190,8 @@ pub fn listen(shoal: ShoalReadArc, listener: TcpListener) -> impl Future<Item = 
                             // TODO: println anyway ?
                             Error::ConnectionCancelled | Error::ConnectionEnded => (),
                             _ => eprintln!("Listener : error when receiving a packet : {:?}.", err),
-                        });
-
-                    tokio::spawn(manager);
-
-                    Ok(())
-                })
-                .map_err(|_| ());
+                        })
+                });
 
             tokio::spawn(send_future);
 

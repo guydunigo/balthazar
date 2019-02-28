@@ -3,6 +3,7 @@
 #[macro_use]
 extern crate serde_derive;
 extern crate bytes;
+extern crate futures;
 extern crate rand;
 extern crate ron;
 extern crate serde;
@@ -64,6 +65,12 @@ impl From<ser::Error> for Error {
 impl From<de::Error> for Error {
     fn from(err: de::Error) -> Error {
         Error::DeError(err)
+    }
+}
+
+impl From<()> for Error {
+    fn from(_: ()) -> Error {
+        Error::UnknownError
     }
 }
 

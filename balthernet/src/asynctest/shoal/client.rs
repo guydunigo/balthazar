@@ -19,8 +19,7 @@ const CONNECTION_INTERVAL: u64 = 10;
 fn to_connecting(peer: &mut Peer, mpsc_tx: mpsc::Sender<Proto>) {
     let local_vote = peer.client_to_connecting();
 
-    let send_future = mpsc_tx.send(Proto::Vote(local_vote));
-    tokio::spawn(send_future);
+    send_packet_and_spawn(mpsc_tx, Proto::Vote(local_vote));
 }
 
 fn for_each_packet_connecting(
@@ -126,8 +125,7 @@ fn for_each_packet_connecting(
                             if peer.client_connecting {
                                 // eprintln!("Client : {} : Peer inconsistency or double connection tasks : `peer.state` is already `Connecting(vote)`, cancelling connection...", peer_addr);
 
-                                let send_future = mpsc_tx.send(Proto::ConnectCancel);
-                                tokio::spawn(send_future);
+                                send_packet_and_spawn(mpsc_tx, Proto::ConnectCancel);
 
                                 return Err(Error::ConnectionCancelled);
                             } else if peer.listener_connecting {

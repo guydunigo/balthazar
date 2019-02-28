@@ -8,7 +8,7 @@ use tokio::prelude::*;
 use tokio::timer::Interval;
 
 use std::collections::HashMap;
-use std::net::{Shutdown, SocketAddr};
+use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -27,19 +27,19 @@ pub type MpscSenderMessage = mpsc::Sender<(PeerId, Message)>;
 
 /// Interval between ping packets in seconds
 const PING_INTERVAL: u64 = 3;
+/// Size of the queue for sending messages
+const MPSC_TX_SIZE: usize = 9;
 
 fn vote() -> ConnVote {
     // TODO: local node id ?
     random()
 }
 
-pub fn send_packet<W: AsyncWrite>(
-    socket: W,
+pub fn send_packet(
+    mpsc_tx: mpsc::Sender<Proto>,
     pkt: Proto,
-) -> impl Future<Item = FramedWrite<W, ProtoCodec>, Error = Error> {
-    let framed_sock = FramedWrite::new(socket, ProtoCodec::new(None));
-
-    framed_sock.send(pkt.clone()).map_err(move |err| {
+) -> impl Future<Item = mpsc::Sender<Proto>, Error = Error> {
+    mpsc_tx.send(pkt).map_err(move |err| {
         if let Proto::Ping = pkt {
         } else {
             eprintln!("Error when sending packet `{}` : `{:?}`.", pkt, err);
@@ -48,21 +48,15 @@ pub fn send_packet<W: AsyncWrite>(
     })
 }
 
-pub fn send_packet_and_spawn<W: AsyncWrite>(socket: W, pkt: Proto) {
-    let future = send_packet(socket, pkt).map(|_| ()).map_err(|_| ());
+pub fn send_packet_and_spawn(mpsc_tx: mpsc::Sender<Proto>, pkt: Proto) {
+    let future = send_packet(mpsc_tx, pkt).map(|_| ()).map_err(|_| ());
     tokio::spawn(future);
 }
 
-pub fn cancel_connection<W: AsyncWrite>(socket: W) {
-    let future = send_packet(socket, Proto::ConnectCancel)
+pub fn cancel_connection(mpsc_tx: mpsc::Sender<Proto>) {
+    let future = mpsc_tx
+        .send(Proto::ConnectCancel)
         .map_err(Error::from)
-        .and_then(|framed_sock| {
-            framed_sock
-                .get_ref()
-                .shutdown(Shutdown::Both)
-                .map_err(Error::from)
-        })
-        .map(|_| ())
         .map_err(|_err| {
             /*
             eprintln!(
@@ -70,7 +64,8 @@ pub fn cancel_connection<W: AsyncWrite>(socket: W) {
                 err
             )
             */
-        });
+        })
+        .and_then(|_| mpsc_tx.close().map_err(|_| ()).map(|_| ()));
 
     tokio::spawn(future);
 }
@@ -263,15 +258,13 @@ impl Peer {
     pub fn client_connection_cancel(&mut self, mpsc_tx: mpsc::Sender<Proto>) {
         self.client_connection_cancelled();
 
-        let send_future = mpsc_tx.send(Proto::ConnectCancel);
-        tokio::spawn(send_future);
+        send_packet_and_spawn(mpsc_tx, Proto::ConnectCancel);
     }
 
     pub fn listener_connection_cancel(&mut self, mpsc_tx: mpsc::Sender<Proto>) {
         self.listener_connecting = false;
 
-        let send_future = mpsc_tx.send(Proto::ConnectCancel);
-        tokio::spawn(send_future);
+        send_packet_and_spawn(mpsc_tx, Proto::ConnectCancel);
 
         if !self.client_connecting && self.is_connecting() {
             self.state = PeerState::NotConnected;
@@ -313,7 +306,7 @@ impl Peer {
     ) -> Box<Future<Item = (), Error = Error> + Send> {
         if let PeerState::Connected(mpsc_tx) = &self.state {
             // TODO: unwrap?
-            Box::new(mpsc_tx.send(pkt))
+            Box::new(send_packet(mpsc_tx.clone(), pkt).map(|_| ()))
         // TODO: delete this branch:
         } else if let Proto::Ping = pkt {
             // Don't register Pings...
@@ -335,7 +328,7 @@ impl Peer {
                         .ready_rx
                         .clone()
                         .map_err(|err| Error::OneShotError(err))
-                        .and_then(|mpsc_tx| mpsc_tx.send(pkt))
+                        .and_then(|mpsc_tx| send_packet(*mpsc_tx, pkt))
                         .map(|_| ())
                         .map_err(move |err| {
                             // TODO: Resend the packet ? Don't panic ?
@@ -444,21 +437,16 @@ fn for_each_packet(shoal: ShoalReadArc, peer: &mut Peer, pkt: Proto) -> Result<(
     let shoal = shoal.lock();
     match pkt {
         Proto::Ping => {
-            let socket = {
-                let socket = if let PeerState::Connected(socket) = &peer.state {
-                    // TODO: unwrap?
-                    socket.try_clone().unwrap()
-                } else {
-                    eprintln!("Manager : {} : Inconsistent Peer object : a packet was received, but `peer.state` is not `Connected(socket)`.", peer.addr);
-                    return Err(Error::PeerNotInConnectedState(
-                        "Inconsistent Peer object : a packet was received.".to_string(),
-                    ));
-                };
-
-                socket
+            let mpsc_tx = if let PeerState::Connected(mpsc_tx) = &peer.state {
+                mpsc_tx
+            } else {
+                eprintln!("Manager : {} : Inconsistent Peer object : a packet was received, but `peer.state` is not `Connected(socket)`.", peer.addr);
+                return Err(Error::PeerNotInConnectedState(
+                    "Inconsistent Peer object : a packet was received.".to_string(),
+                ));
             };
 
-            send_packet_and_spawn(socket, Proto::Pong);
+            send_packet_and_spawn(mpsc_tx.clone(), Proto::Pong);
         }
         Proto::Pong => {
             peer.pong();
@@ -521,11 +509,12 @@ fn for_each_packet(shoal: ShoalReadArc, peer: &mut Peer, pkt: Proto) -> Result<(
     Ok(())
 }
 
-pub fn write_to_mpsc<W: AsyncWrite>(tx: W) -> mpsc::Sender<Proto> {
-    let (mpsc_tx, mpsc_rx) = mpsc::channel();
+// TODO: don't shadow error
+// TODO: 'static :/
+pub fn write_to_mpsc<W: AsyncWrite + Send + 'static>(tx: W) -> mpsc::Sender<Proto> {
+    let (mpsc_tx, mpsc_rx) = mpsc::channel(MPSC_TX_SIZE);
 
     let framed_sock = FramedWrite::new(tx, ProtoCodec::new(None));
-    // TODO: don't shadow error
     let framed_future = framed_sock.send_all(mpsc_rx).map(|_| ()).map_err(|_| ());
     tokio::spawn(framed_future);
 
