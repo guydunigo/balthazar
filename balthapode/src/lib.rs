@@ -19,6 +19,8 @@ use std::fs::File;
 use std::io;
 use std::process::exit;
 use std::sync::{Arc, Mutex};
+use std::thread::sleep;
+use std::time::Duration;
 
 use job::task::arguments::Arguments;
 use job::task::{LoneTask, Task, TaskId};
@@ -113,6 +115,8 @@ pub fn fill(
                     .and_then(move |_| send_args(shoal, peer_pid, job_id, args_enumerated)),
             )
         } else {
+            // TODO: not clean... find a better way to ensure the messages are gone
+            sleep(Duration::from_secs(5));
             exit(0);
         }
     }
