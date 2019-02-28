@@ -1,9 +1,7 @@
 use futures::future::Shared;
 use futures::sync::{mpsc, oneshot};
 use rand::random;
-use tokio::codec::{FramedRead, FramedWrite};
-use tokio::io::ReadHalf;
-use tokio::net::TcpStream;
+use tokio::codec::FramedWrite;
 use tokio::prelude::*;
 use tokio::timer::Interval;
 
@@ -223,13 +221,22 @@ impl Peer {
             }
         };
         sender
-            .send(mpsc_tx)
+            .send(mpsc_tx.clone())
             .expect("Peer : Couldn't send readiness to peer oneshot.");
 
         println!("Manager : {} : Connected to : `{}`", self.pid, self.addr);
 
-        unimplemented!();
-        // TODO: self.manage(peer, socket_rx);
+        send_packet_and_spawn(mpsc_tx, Proto::ConnectAck);
+
+        {
+            // ping
+            let ping_future = Interval::new_interval(Duration::from_secs(PING_INTERVAL))
+                .map_err(Error::from)
+                .and_then(move |_| ping_peer(peer.clone()))
+                .for_each(|_| Ok(()))
+                .map_err(|_| ());
+            tokio::spawn(ping_future);
+        }
 
         Ok(())
     }
@@ -354,50 +361,23 @@ impl Peer {
         tokio::spawn(future);
     }
 
-    /// **Important** : peer must be a reference to self.
-    /// // TODO: ensure that ?
-    // TODO: manage should be called from the client or listener loop
-    // instead of creating another one
-    pub fn manage(&mut self, peer: PeerArcMut, socket_rx: ReadHalf<TcpStream>) {
-        if let PeerState::Connected(mpsc_tx) = self.state.clone() {
-            let framed_sock = FramedRead::new(socket_rx, ProtoCodec::new(Some(self.pid())));
-            let peer_pid = self.pid();
-            let peer_clone = peer.clone();
-            let shoal = self.shoal.clone();
-
-            send_packet_and_spawn(mpsc_tx, Proto::ConnectAck);
-
-            {
-                // ping
-                let ping_future = Interval::new_interval(Duration::from_secs(PING_INTERVAL))
-                    .map_err(Error::from)
-                    .and_then(move |_| ping_peer(peer_clone.clone()))
-                    .for_each(|_| Ok(()))
-                    .map_err(|_| ());
-                tokio::spawn(ping_future);
-            }
-
-            let manage_future = framed_sock
-                .map_err(Error::from)
-                .for_each(move |pkt| {
-                    for_each_packet(shoal.upgrade(), &mut *peer.lock().unwrap(), pkt)
-                })
-                .map_err(move |err| match err {
-                    // TODO: println anyway ?
-                    Error::ConnectionCancelled | Error::ConnectionEnded => (),
-                    Error::PeerNotInConnectedState(_) => (),
-                    _ => eprintln!(
-                        "Manager : {} : error when receiving a packet : {:?}.",
-                        peer_pid, err
-                    ),
-                });
-
-            tokio::spawn(manage_future);
-        }
-    }
-
     pub fn handle_pkt(&mut self, pkt: Proto) -> Result<(), Error> {
-        for_each_packet(self.shoal.upgrade(), self, pkt)
+        let res = handle_pkt(self.shoal.upgrade(), self, pkt);
+
+        match res {
+            // TODO: println anyway ?
+            Err(Error::ConnectionCancelled) | Err(Error::ConnectionEnded) => res,
+            Err(Error::PeerNotInConnectedState(_)) => res,
+            Err(err) => {
+                eprintln!(
+                    "Manager : {} : error when receiving a packet : {:?}.",
+                    self.pid(),
+                    err
+                );
+                Err(Error::ConnectionCancelled)
+            }
+            Ok(_) => res,
+        }
     }
 }
 
@@ -434,7 +414,7 @@ fn ping_peer(peer: PeerArcMut) -> Box<Future<Item = (), Error = Error> + Send> {
     }
 }
 
-fn for_each_packet(shoal: ShoalReadArc, peer: &mut Peer, pkt: Proto) -> Result<(), Error> {
+fn handle_pkt(shoal: ShoalReadArc, peer: &mut Peer, pkt: Proto) -> Result<(), Error> {
     let shoal_clone = shoal.clone();
     let shoal = shoal.lock();
     match pkt {

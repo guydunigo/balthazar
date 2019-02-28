@@ -4,6 +4,7 @@ use tokio::net::TcpListener;
 use tokio::prelude::*;
 
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use super::*;
@@ -175,17 +176,38 @@ pub fn listen(shoal: ShoalReadArc, listener: TcpListener) -> impl Future<Item = 
                 .and_then(move |_| {
                     let framed_sock = FramedRead::new(rx, ProtoCodec::new(None));
 
+                    let connecting = AtomicBool::new(true);
+
                     framed_sock
                         .map_err(Error::from)
                         .for_each(move |pkt| {
-                            for_each_packet_connecting(
-                                shoal.clone(),
-                                peer_opt.clone(),
-                                peer_addr,
-                                // TODO: unwrap?
-                                mpsc_tx.clone(),
-                                pkt,
-                            )
+                            // TODO: there might still be inconstistencies if two messages are
+                            // received at same time, use mutex ?
+                            if connecting.load(Ordering::Acquire) {
+                                let res = for_each_packet_connecting(
+                                    shoal.clone(),
+                                    peer_opt.clone(),
+                                    peer_addr,
+                                    mpsc_tx.clone(),
+                                    pkt,
+                                );
+
+                                if let Err(Error::ConnectionEnded) = res {
+                                    connecting.store(false, Ordering::AcqRel);
+                                    Ok(())
+                                } else {
+                                    res
+                                }
+                            } else {
+                                let peer_opt = peer_opt.lock().unwrap();
+                                if let Some(ref peer) = *peer_opt {
+                                    let mut peer_locked = peer.lock().unwrap();
+
+                                    peer_locked.handle_pkt(pkt)
+                                } else {
+                                    panic!("Can't be 'connected' and peer_opt=None !");
+                                }
+                            }
                         })
                         .map_err(move |err| match err {
                             // TODO: println anyway ?
