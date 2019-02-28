@@ -70,7 +70,6 @@ fn for_each_packet_connecting(
                     peer_addr
                 );
 
-                // TODO: keep the same receiving frame and just transfer some channel or so...
                 peer_locked
                     .handle_pkt(pkt)
                     .expect(&format!("Client : {} : Error forwarding pkt...", peer_addr)[..]);
@@ -176,18 +175,39 @@ fn connect_to_peer(
                 .send(Proto::Connect(local_pid))
                 .map_err(Error::from)
                 .and_then(move |_| {
+                    let connecting_arcmut = Arc::new(Mutex::new(true));
                     let framed_sock = FramedRead::new(rx, ProtoCodec::new(None));
 
                     framed_sock
                         .map_err(Error::from)
                         .for_each(move |pkt| {
-                            for_each_packet_connecting(
-                                shoal.clone(),
-                                peer_opt.clone(),
-                                peer_addr,
-                                mpsc_tx.clone(),
-                                pkt,
-                            )
+                            let mut connecting = connecting_arcmut.lock().unwrap();
+
+                            if *connecting {
+                                let res = for_each_packet_connecting(
+                                    shoal.clone(),
+                                    peer_opt.clone(),
+                                    peer_addr,
+                                    mpsc_tx.clone(),
+                                    pkt,
+                                );
+
+                                if let Err(Error::ConnectionEnded) = res {
+                                    *connecting = false;
+                                    Ok(())
+                                } else {
+                                    res
+                                }
+                            } else {
+                                let peer_opt = peer_opt.lock().unwrap();
+                                if let Some(ref peer) = *peer_opt {
+                                    let mut peer_locked = peer.lock().unwrap();
+
+                                    peer_locked.handle_pkt(pkt)
+                                } else {
+                                    panic!("Can't be 'connected' and peer_opt=None !");
+                                }
+                            }
                         })
                         .map_err(move |err| {
                             match err {

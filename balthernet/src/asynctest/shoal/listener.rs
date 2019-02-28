@@ -4,7 +4,6 @@ use tokio::net::TcpListener;
 use tokio::prelude::*;
 
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use super::*;
@@ -74,7 +73,6 @@ fn for_each_packet_connecting(
             PeerState::Connected(_) => {
                 println!("Listener : `peer.state` is `Connected`, stopping connection loop.");
 
-                // TODO: keep the same receiving frame and just transfer some channel or so...
                 peer_locked
                     .handle_pkt(pkt)
                     .expect(&format!("Client : {} : Error forwarding pkt...", peer_addr)[..]);
@@ -174,16 +172,15 @@ pub fn listen(shoal: ShoalReadArc, listener: TcpListener) -> impl Future<Item = 
             let send_future = send_packet(mpsc_tx.clone(), Proto::Connect(local_pid))
                 .map_err(|_| ())
                 .and_then(move |_| {
+                    let connecting_arcmut = Arc::new(Mutex::new(true));
                     let framed_sock = FramedRead::new(rx, ProtoCodec::new(None));
-
-                    let connecting = AtomicBool::new(true);
 
                     framed_sock
                         .map_err(Error::from)
                         .for_each(move |pkt| {
-                            // TODO: there might still be inconstistencies if two messages are
-                            // received at same time, use mutex ?
-                            if connecting.load(Ordering::Acquire) {
+                            let mut connecting = connecting_arcmut.lock().unwrap();
+
+                            if *connecting {
                                 let res = for_each_packet_connecting(
                                     shoal.clone(),
                                     peer_opt.clone(),
@@ -193,7 +190,7 @@ pub fn listen(shoal: ShoalReadArc, listener: TcpListener) -> impl Future<Item = 
                                 );
 
                                 if let Err(Error::ConnectionEnded) = res {
-                                    connecting.store(false, Ordering::AcqRel);
+                                    *connecting = false;
                                     Ok(())
                                 } else {
                                     res
