@@ -92,7 +92,8 @@ impl Encoder for ProtoCodec {
         }
 
         let buf_len = buf.len();
-        buf.reserve(len - buf_len + 4);
+        // TODO: Error if `(len + 4) - buf_len < 0` ?
+        buf.reserve((len + 4) - buf_len);
         buf.put_u32_le(len as u32);
         buf.put_slice(pkt_str.as_bytes());
 
