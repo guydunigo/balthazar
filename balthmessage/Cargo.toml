@@ -1,6 +1,6 @@
 [package]
 name = "balthmessage"
-version = "0.2.4"
+version = "0.2.5"
 authors = ["GONI Guillaume <gdn3@live.fr>"]
 
 [dependencies]

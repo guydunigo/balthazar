@@ -91,9 +91,7 @@ impl Encoder for ProtoCodec {
             return Err(Error::PacketTooBig(len));
         }
 
-        let buf_len = buf.len();
-        // TODO: Error if `(len + 4) - buf_len < 0` ?
-        buf.reserve((len + 4) - buf_len);
+        buf.reserve(len + 4);
         buf.put_u32_le(len as u32);
         buf.put_slice(pkt_str.as_bytes());
 
