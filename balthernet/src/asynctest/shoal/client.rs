@@ -172,6 +172,7 @@ fn connect_to_peer(
             println!("Client : {} : starting connection...", peer_addr);
 
             mpsc_tx
+                .clone()
                 .send(Proto::Connect(local_pid))
                 .map_err(Error::from)
                 .and_then(move |_| {
@@ -184,7 +185,7 @@ fn connect_to_peer(
                                 shoal.clone(),
                                 peer_opt.clone(),
                                 peer_addr,
-                                mpsc_tx,
+                                mpsc_tx.clone(),
                                 pkt,
                             )
                         })

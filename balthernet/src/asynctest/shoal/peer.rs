@@ -39,7 +39,7 @@ pub fn send_packet(
     mpsc_tx: mpsc::Sender<Proto>,
     pkt: Proto,
 ) -> impl Future<Item = mpsc::Sender<Proto>, Error = Error> {
-    mpsc_tx.send(pkt).map_err(move |err| {
+    mpsc_tx.send(pkt.clone()).map_err(move |err| {
         if let Proto::Ping = pkt {
         } else {
             eprintln!("Error when sending packet `{}` : `{:?}`.", pkt, err);
@@ -54,6 +54,8 @@ pub fn send_packet_and_spawn(mpsc_tx: mpsc::Sender<Proto>, pkt: Proto) {
 }
 
 pub fn cancel_connection(mpsc_tx: mpsc::Sender<Proto>) {
+    let mut mpsc_tx_clone = mpsc_tx.clone();
+
     let future = mpsc_tx
         .send(Proto::ConnectCancel)
         .map_err(Error::from)
@@ -65,7 +67,7 @@ pub fn cancel_connection(mpsc_tx: mpsc::Sender<Proto>) {
             )
             */
         })
-        .and_then(|_| mpsc_tx.close().map_err(|_| ()).map(|_| ()));
+        .and_then(move |_| mpsc_tx_clone.close().map_err(|_| ()).map(|_| ()));
 
     tokio::spawn(future);
 }
@@ -207,7 +209,7 @@ impl Peer {
         // TODO: other checks ?
         self.listener_connecting = false;
         self.client_connecting = false;
-        self.state = PeerState::Connected(mpsc_tx);
+        self.state = PeerState::Connected(mpsc_tx.clone());
 
         let ready_tx_sent = self.ready_tx.take();
 
@@ -328,7 +330,7 @@ impl Peer {
                         .ready_rx
                         .clone()
                         .map_err(|err| Error::OneShotError(err))
-                        .and_then(|mpsc_tx| send_packet(*mpsc_tx, pkt))
+                        .and_then(|mpsc_tx| send_packet((*mpsc_tx).clone(), pkt))
                         .map(|_| ())
                         .map_err(move |err| {
                             // TODO: Resend the packet ? Don't panic ?
@@ -363,7 +365,7 @@ impl Peer {
             let peer_clone = peer.clone();
             let shoal = self.shoal.clone();
 
-            mpsc_tx.send(Proto::ConnectAck);
+            send_packet_and_spawn(mpsc_tx, Proto::ConnectAck);
 
             {
                 // ping

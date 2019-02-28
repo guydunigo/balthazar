@@ -158,20 +158,21 @@ pub fn listen(shoal: ShoalReadArc, listener: TcpListener) -> impl Future<Item = 
     listener
         .incoming()
         .for_each(move |socket| {
+            let peer_addr = socket.peer_addr()?;
+
             let (rx, tx) = socket.split();
             let mpsc_tx = write_to_mpsc(tx);
 
             let local_pid = shoal.lock().local_pid;
 
             let shoal = shoal.clone();
-            let peer_addr = socket.peer_addr()?;
             println!("Listener : Asked for connection : `{}`", peer_addr);
 
             let peer_opt = Arc::new(Mutex::new(None));
 
-            let send_future = send_packet(mpsc_tx, Proto::Connect(local_pid))
+            let send_future = send_packet(mpsc_tx.clone(), Proto::Connect(local_pid))
                 .map_err(|_| ())
-                .and_then(|_| {
+                .and_then(move |_| {
                     let framed_sock = FramedRead::new(rx, ProtoCodec::new(None));
 
                     framed_sock
@@ -182,7 +183,7 @@ pub fn listen(shoal: ShoalReadArc, listener: TcpListener) -> impl Future<Item = 
                                 peer_opt.clone(),
                                 peer_addr,
                                 // TODO: unwrap?
-                                mpsc_tx,
+                                mpsc_tx.clone(),
                                 pkt,
                             )
                         })

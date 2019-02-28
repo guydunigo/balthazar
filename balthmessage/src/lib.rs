@@ -3,7 +3,6 @@
 #[macro_use]
 extern crate serde_derive;
 extern crate bytes;
-extern crate futures;
 extern crate rand;
 extern crate ron;
 extern crate serde;
@@ -48,6 +47,7 @@ pub enum Error {
     CouldNotGetSize,
     PacketTooBig(usize),
     JobTooBig(usize),
+    UnknownError,
 }
 
 impl From<io::Error> for Error {

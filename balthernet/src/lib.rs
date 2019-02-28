@@ -9,10 +9,13 @@ extern crate secp256k1;
 extern crate balthmessage as message;
 
 use futures::future::SharedError;
+use futures::sync::mpsc;
 
 use std::fmt::Display;
 use std::io;
 use std::net::{AddrParseError, SocketAddr, ToSocketAddrs};
+
+use message::Proto;
 
 pub mod asynctest;
 pub mod listener;
@@ -42,6 +45,7 @@ pub enum Error {
     PeerNotFound(PeerId),
     ShoalMpscError,
     OneShotError(SharedError<futures::Canceled>),
+    SendMpscError(mpsc::SendError<Proto>),
 }
 
 impl From<message::Error> for Error {
@@ -71,6 +75,12 @@ impl From<AddrParseError> for Error {
 impl From<tokio::timer::Error> for Error {
     fn from(err: tokio::timer::Error) -> Error {
         Error::TokioTimerError(err)
+    }
+}
+
+impl From<mpsc::SendError<Proto>> for Error {
+    fn from(err: mpsc::SendError<Proto>) -> Error {
+        Error::SendMpscError(err)
     }
 }
 
