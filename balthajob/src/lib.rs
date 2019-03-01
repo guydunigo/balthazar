@@ -16,7 +16,7 @@ pub use self::hash256::Hash256;
 use self::task::arguments::Arguments;
 use self::task::{TaskArcMut, TaskId};
 
-// TODO: hash(pid + bytecode) or tuple(pid, hash(bytecode)) ?
+// TODO: hash(bytecode) or hash(pid + bytecode) or tuple(pid, hash(bytecode)) ?
 pub type JobId = Hash256;
 pub type JobArcMut = Arc<Mutex<Job>>;
 pub type JobsMap = HashMap<JobId, JobArcMut>;
@@ -26,7 +26,6 @@ pub type JobsMapArcMut = Arc<Mutex<JobsMap>>;
 
 // TODO: don't duplicate PeerId...
 pub type PeerId = u32;
-const PID_LEN: usize = 4;
 
 pub enum Error {
     NoFreeTaskId,
@@ -35,10 +34,13 @@ pub enum Error {
 // TODO: possibility to automatically assign result/merge tasks when tasks are duplicated ?
 //      - ~~This implies a flag to set this to off~~ NEW IDEA: the user adds mute args to change the hash of the task
 // TODO: Same comment for jobs (share or not share same code + all anyone to add tasks ?)
+/// A job represent the program's bytecode and its attached Tasks.
+/// When it doesn't contain any Tasks, no computation will be performed.
+/// TODO: describe the format of the bytecode
 #[derive(Debug, Clone)]
 pub struct Job {
+// TODO: Store id or just calculate it ?
     pub id: JobId,
-    pub sender_pid: PeerId,
     pub bytecode: Vec<u8>,
     // TODO: beware of overriding, ...
     pub tasks: HashMap<TaskId, TaskArcMut>,
@@ -46,11 +48,11 @@ pub struct Job {
 
 impl Job {
     // TODO: Take as well a hash given by the sender to compare ?
-    pub fn new(sender_pid: PeerId, bytecode: Vec<u8>) -> Job {
-        let id = calculate_job_id(sender_pid, &bytecode[..]);
+    //          Or this is done via the p2p protocole ?
+    pub fn new(bytecode: Vec<u8>) -> Job {
+        let id = calculate_job_id(&bytecode[..]);
         Job {
             id,
-            sender_pid,
             bytecode,
             tasks: HashMap::new(),
         }
@@ -115,19 +117,8 @@ pub fn get_available_task(jobs: &JobsMap) -> Option<(JobArcMut, TaskArcMut)> {
         .next()
 }
 
-// TODO: so if a sender sends two different jobs with the same bytecode, they will be stored in the same place.
-//      - Is this a good thing ? (pros: no duplicate bytecode -> size + net and parse times)
-//      - The job sender would have to track which task ids and results are for each job : easy, just write it in the arguments...
-//      - OR : sender sends a uid with the job...
-// TODO: other way to get the job_id : signature sent by sender?
-fn calculate_job_id(sender_pid: PeerId, bytecode: &[u8]) -> JobId {
-    let pid_bytes = sender_pid.to_le_bytes();
-    let mut vec = Vec::with_capacity(bytecode.len() + PID_LEN);
-
-    vec.extend_from_slice(&pid_bytes);
-    vec.extend_from_slice(&bytecode);
-
-    Hash256::hash(&vec[..])
+fn calculate_job_id(bytecode: &[u8]) -> JobId {
+    Hash256::hash(&bytecode[..])
 }
 
 #[cfg(test)]
