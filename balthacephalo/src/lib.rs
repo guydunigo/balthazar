@@ -85,7 +85,6 @@ pub fn for_each_message(
                             .map_err(move |err| {
                                 eprintln!("Cephalo : {} : Error when sending task, setting it as available : `{:?}`.", peer_pid, err);
                                 task.lock().unwrap().set_available(peer_pid);
-                                ()
                             })
                             .map(|_| ());
                         tokio::spawn(future);

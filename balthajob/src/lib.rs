@@ -16,7 +16,7 @@ pub use self::hash256::Hash256;
 use self::task::arguments::Arguments;
 use self::task::{TaskArcMut, TaskId};
 
-// TODO: hash(pid + bytecode) or tuple(pid, bytecode) ?
+// TODO: hash(pid + bytecode) or tuple(pid, hash(bytecode)) ?
 pub type JobId = Hash256;
 pub type JobArcMut = Arc<Mutex<Job>>;
 pub type JobsMap = HashMap<JobId, JobArcMut>;
@@ -32,8 +32,9 @@ pub enum Error {
     NoFreeTaskId,
 }
 
-// TODO: possibility to automatically assign result when tasks are duplicated ?
-//      - This implies a flag to set this to off
+// TODO: possibility to automatically assign result/merge tasks when tasks are duplicated ?
+//      - ~~This implies a flag to set this to off~~ NEW IDEA: the user adds mute args to change the hash of the task
+// TODO: Same comment for jobs (share or not share same code + all anyone to add tasks ?)
 #[derive(Debug, Clone)]
 pub struct Job {
     pub id: JobId,
@@ -49,7 +50,7 @@ impl Job {
         let id = calculate_job_id(sender_pid, &bytecode[..]);
         Job {
             id,
-            sender_pid: sender_pid,
+            sender_pid,
             bytecode,
             tasks: HashMap::new(),
         }

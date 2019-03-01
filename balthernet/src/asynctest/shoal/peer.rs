@@ -100,6 +100,12 @@ impl PingStatus {
     }
 }
 
+impl Default for PingStatus {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum PeerState {
     NotConnected,
@@ -336,7 +342,7 @@ impl Peer {
                     let future = self
                         .ready_rx
                         .clone()
-                        .map_err(|err| Error::OneShotError(err))
+                        .map_err(Error::OneShotError)
                         .and_then(|mpsc_tx| send_packet((*mpsc_tx).clone(), pkt))
                         .map(|_| ())
                         .map_err(move |err| {

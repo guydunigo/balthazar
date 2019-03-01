@@ -116,7 +116,7 @@ pub fn start_orchestrator(
         Instant::now() + Duration::from_secs(5),
         Duration::from_secs(IDLE_CHECK_INTERVAL),
     )
-    .map_err(|err| net::Error::TokioTimerError(err))
+    .map_err(net::Error::TokioTimerError)
     .for_each(move |_| {
         let shoal = shoal_clone.clone();
         let jobs = jobs_clone.clone();
@@ -230,7 +230,7 @@ pub fn orchestrate(
         .send((from_pid, Message::ReturnValue(job_id, task_id, res)))
         .and_then(move |sender| sender.send((from_pid, Message::Idle(1))))
         .map(|_| ())
-        .map_err(|err| Error::ToShoalMpscError(err));
+        .map_err(Error::ToShoalMpscError);
 
     // println!("Time 5 : {:?}", Instant::now());
     Box::new(send_future)

@@ -39,8 +39,7 @@ impl Config {
         let res = Config {
             pid: config_parsed.pid,
             command: config_parsed.command,
-            addr: parse_socket_addr(config_parsed.addr)
-                .map_err(|err| Error::LocalAddressParsingError(err))?,
+            addr: parse_socket_addr(config_parsed.addr).map_err(Error::LocalAddressParsingError)?,
             peers: config_parsed
                 .peers
                 .iter()

@@ -38,7 +38,7 @@ impl Decoder for ProtoCodec {
         };
 
         if buf.len() < pkt_size + PACKET_SIZE_SIZE {
-            return Ok(None);
+            Ok(None)
         } else {
             buf.split_to(PACKET_SIZE_SIZE);
             let pkt = buf.split_to(pkt_size);

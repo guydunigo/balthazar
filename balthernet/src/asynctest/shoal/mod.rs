@@ -162,7 +162,7 @@ impl Shoal {
     ) -> Box<Future<Item = (), Error = Error> + Send> {
         let peer_opt = {
             let peers = self.peers.lock().unwrap();
-            peers.get(&peer_pid).map(|peer| peer.clone())
+            peers.get(&peer_pid).cloned()
         };
 
         match peer_opt {
@@ -198,13 +198,11 @@ impl Shoal {
                         };
 
                         let local_pid = self.local_pid();
-                        let future = ready_rx.map_err(|err| Error::OneShotError(err)).and_then(
-                            move |peer| {
-                                peer.lock()
-                                    .unwrap()
-                                    .send_action(Proto::Direct(M::new(local_pid, msg)), nc_action)
-                            },
-                        );
+                        let future = ready_rx.map_err(Error::OneShotError).and_then(move |peer| {
+                            peer.lock()
+                                .unwrap()
+                                .send_action(Proto::Direct(M::new(local_pid, msg)), nc_action)
+                        });
 
                         Box::new(future)
                     }
@@ -263,7 +261,7 @@ impl Shoal {
         let peers = self.peers.lock().unwrap();
 
         if to == self.local_pid() {
-            if route_list.len() == 0 {
+            if route_list.is_empty() {
                 eprintln!(
                 "The route list is empty, which can mean : 1. The Shoal is trying to send the message to itself or 2. a `ForwardTo` with no sender has been sent."
             );

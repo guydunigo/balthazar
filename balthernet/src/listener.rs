@@ -52,7 +52,7 @@ pub fn listen<A: ToSocketAddrs + Display>(
             let stream = stream?;
             Ok(tx.send(stream)?)
         })
-        .skip_while(|result| result.is_ok())
+        .skip_while(std::result::Result::is_ok)
         .next()
         .unwrap()?;
     //.for_each(|res| eprintln!("{:?}", res));

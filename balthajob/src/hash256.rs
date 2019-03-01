@@ -31,9 +31,7 @@ impl From<&[u8]> for Hash256 {
             panic!("Bad parameter to create Hash256 : source is not 32 bytes long.");
         } else {
             let mut inner = [0; 32];
-            for i in 0..32 {
-                inner[i] = src[i];
-            }
+            inner[..32].clone_from_slice(&src[..32]);
             Hash256(inner)
         }
     }
