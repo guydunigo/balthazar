@@ -71,6 +71,7 @@ impl From<de::Error> for Error {
 
 // ------------------------------------------------------------------
 
+// TODO: redefine the whole method, it IS ugly
 pub fn fill(
     runtime: &mut Runtime,
     shoal: ShoalReadArc,
@@ -85,7 +86,7 @@ pub fn fill(
         code
     };
 
-    let mut args_list: Vec<Arguments> = {
+    let args_list: Vec<Arguments> = {
         let mut f = File::open("args_list.ron").unwrap();
         let mut args_list_txt: Vec<u8> = Vec::new();
         f.read_to_end(&mut args_list_txt).unwrap();
@@ -93,26 +94,26 @@ pub fn fill(
         // Deserialize args_list
         de::from_bytes(&args_list_txt[..]).unwrap()
     };
-    let args_enumerated: Vec<(usize, Arguments)> = args_list.drain(..).enumerate().collect();
 
     // TODO: just put them all in a list and wait for all at once ?
     fn send_args(
         shoal: ShoalReadArc,
         peer_pid: PeerId,
         job_id: JobId,
-        mut args_enumerated: Vec<(usize, Arguments)>,
+        mut args_list: Vec<Arguments>,
     ) -> Box<Future<Item = (), Error = net::Error> + Send> {
-        if let Some((task_id, args)) = args_enumerated.pop() {
+        if let Some(args) = args_list.pop() {
             let shoal_clone = shoal.clone();
             let shoal_lock = shoal_clone.lock();
+            let task = Task::new(args);
             Box::new(
                 shoal_lock
                     .send_to_future_action(
                         peer_pid,
-                        Message::Task(job_id, task_id, args),
+                        Message::Task(job_id, task.id, task.args),
                         NCA::Delay,
                     )
-                    .and_then(move |_| send_args(shoal, peer_pid, job_id, args_enumerated)),
+                    .and_then(move |_| send_args(shoal, peer_pid, job_id, args_list)),
             )
         } else {
             // TODO: not clean... find a better way to ensure the messages are gone
@@ -121,19 +122,15 @@ pub fn fill(
         }
     }
 
-    let job = Job::new(shoal.lock().local_pid(), code);
+    let job = Job::new(code);
     let job_id = job.id;
     let shoal_clone = shoal.clone();
 
     let future = shoal
         .lock()
-        .send_to_future_action(
-            MANAGER_ID,
-            Message::Job(shoal.lock().local_pid(), job_id, job.bytecode),
-            NCA::Delay,
-        )
+        .send_to_future_action(MANAGER_ID, Message::Job(job_id, job.bytecode), NCA::Delay)
         .and_then(move |_| {
-            send_args(shoal_clone, MANAGER_ID, job_id, args_enumerated).map_err(net::Error::from)
+            send_args(shoal_clone, MANAGER_ID, job_id, args_list).map_err(net::Error::from)
         })
         .map(|_| ())
         .map_err(|_| ());
@@ -157,16 +154,18 @@ pub fn swim(runtime: &mut Runtime, shoal: ShoalReadArc, shoal_rx: MpscReceiverMe
     let shoal_rx_future = shoal_rx
         .map_err(|_| net::Error::ShoalMpscError)
         .for_each(move |(peer_pid, msg)| match msg {
-            Message::Job(peer_id, job_id, bytecode) => {
-                let new_lone_tasks = register_job(
-                    peer_id,
+            Message::Job(job_id, bytecode) => {
+                let new_lone_tasks_option = register_job(
+                    peer_pid,
                     jobs.clone(),
                     &mut lone_tasks,
                     tx.lock().unwrap().clone(),
                     job_id,
                     bytecode,
                 );
-                lone_tasks = new_lone_tasks;
+                if let Some(new_lone_tasks) = new_lone_tasks_option {
+                    lone_tasks = new_lone_tasks;
+                }
 
                 Ok(())
             }
@@ -196,6 +195,7 @@ pub fn swim(runtime: &mut Runtime, shoal: ShoalReadArc, shoal_rx: MpscReceiverMe
     runtime.spawn(shoal_rx_future);
 }
 
+// TODO: redefine the whole method, it seems ugly
 fn register_job(
     peer_pid: PeerId,
     jobs: JobsMapArcMut,
@@ -203,7 +203,16 @@ fn register_job(
     tx: Sender<(PeerId, JobId, TaskId)>,
     job_id: JobId,
     bytecode: Vec<u8>,
-) -> Vec<LoneTask> {
+) -> Option<Vec<LoneTask>> {
+    let mut job = Job::new(bytecode);
+    // TODO: better handling
+    if job.id != job_id {
+        panic!(
+            "Mismatched job ids job_id({}) != job.id({}).",
+            job_id, job.id
+        );
+    }
+
     let mut new_lone_tasks = Vec::with_capacity(lone_tasks.len());
 
     // TODO: multiple jobs having same id ?
@@ -215,9 +224,8 @@ fn register_job(
         .map(|(_, job)| job.clone())
     {
         // TODO: Useful ?
-        Some(job) => job.lock().unwrap().set_bytecode(bytecode),
+        Some(_) => None,
         None => {
-            let mut job = Job::new(peer_pid, bytecode);
             let mut tasks_to_send = Vec::new();
 
             for t in lone_tasks.drain(..) {
@@ -240,13 +248,13 @@ fn register_job(
                             eprintln!("Pode : Could not send task to executor : `{:?}`.", err);
                         }),
                 );
-            })
+            });
+            Some(new_lone_tasks)
         }
     }
-
-    new_lone_tasks
 }
 
+// TODO: redefine the whole method, it seems ugly
 fn register_task(
     shoal: ShoalReadArc,
     from_pid: PeerId,
@@ -258,11 +266,20 @@ fn register_task(
     task_id: TaskId,
     args: Arguments,
 ) -> Result<(), net::Error> {
+    let task = Task::new(args);
+    // TODO: better handling
+    if task.id != task_id {
+        panic!(
+            "Mismatched task ids task_id({}) != task.id({}).",
+            task_id, task.id
+        );
+    }
+
     let jobs_locked = jobs.lock().unwrap();
 
     match jobs_locked.iter().find(|(id, _)| **id == job_id) {
         Some((job_id, job)) => {
-            job.lock().unwrap().add_new_task_with_id(task_id, args);
+            job.lock().unwrap().add_task(task);
 
             tokio::spawn(
                 tx.send((from_pid, *job_id, task_id))
@@ -273,7 +290,6 @@ fn register_task(
             );
         }
         None => {
-            let task = Task::new(task_id, args);
             lone_tasks.push(LoneTask { job_id, task });
             shoal.lock().broadcast_msg(Message::RequestJob(job_id));
         }

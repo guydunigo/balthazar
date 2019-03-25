@@ -20,11 +20,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
 name = "balthacephalo"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
- "balthajob 0.2.0",
+ "balthajob 0.2.1",
  "balthernet 0.4.0",
- "balthmessage 0.2.5",
+ "balthmessage 0.3.0",
  "tokio 0.1.15 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
@@ -37,7 +37,7 @@ dependencies = [
 
 [[package]]
 name = "balthajob"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "parity-wasm 0.37.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "ron 0.4.2 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -51,8 +51,8 @@ dependencies = [
 name = "balthalib"
 version = "0.1.0"
 dependencies = [
- "balthacephalo 0.1.0",
- "balthapode 0.1.0",
+ "balthacephalo 0.2.0",
+ "balthapode 0.2.0",
  "balthernet 0.4.0",
  "ron 0.4.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde 1.0.88 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -62,11 +62,11 @@ dependencies = [
 
 [[package]]
 name = "balthapode"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
- "balthajob 0.2.0",
+ "balthajob 0.2.1",
  "balthernet 0.4.0",
- "balthmessage 0.2.5",
+ "balthmessage 0.3.0",
  "futures 0.1.25 (registry+https://github.com/rust-lang/crates.io-index)",
  "parity-wasm 0.37.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "tokio 0.1.15 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -77,7 +77,7 @@ dependencies = [
 name = "balthernet"
 version = "0.4.0"
 dependencies = [
- "balthmessage 0.2.5",
+ "balthmessage 0.3.0",
  "bytes 0.4.11 (registry+https://github.com/rust-lang/crates.io-index)",
  "futures 0.1.25 (registry+https://github.com/rust-lang/crates.io-index)",
  "libsecp256k1 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -89,9 +89,9 @@ dependencies = [
 
 [[package]]
 name = "balthmessage"
-version = "0.2.5"
+version = "0.3.0"
 dependencies = [
- "balthajob 0.2.0",
+ "balthajob 0.2.1",
  "bytes 0.4.11 (registry+https://github.com/rust-lang/crates.io-index)",
  "rand 0.6.5 (registry+https://github.com/rust-lang/crates.io-index)",
  "ron 0.4.2 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -104,7 +104,7 @@ dependencies = [
 name = "balthnative"
 version = "0.1.0"
 dependencies = [
- "balthajob 0.2.0",
+ "balthajob 0.2.1",
  "ron 0.4.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde 1.0.88 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde_derive 1.0.88 (registry+https://github.com/rust-lang/crates.io-index)",
