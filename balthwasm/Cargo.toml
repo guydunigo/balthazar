@@ -9,6 +9,6 @@ crate-type = ["cdylib"]
 
 [dependencies]
 sha3 = "0.8.1"
-serde_derive = "1.0.88"
-serde = "1.0.88"
-ron = "0.4.1"
+serde_derive = "1.0.89"
+serde = "1.0.89"
+ron = "0.4.2"

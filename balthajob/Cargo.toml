@@ -5,9 +5,9 @@ authors = ["GONI Guillaume <gdn3@live.fr>"]
 edition = "2018"
 
 [dependencies]
-serde_derive = "1.0.88"
-serde = "1.0.88"
+serde_derive = "1.0.89"
+serde = "1.0.89"
 parity-wasm = "0.37.0"
-wasmi = "0.4.3"
+wasmi = "0.4.4"
 sha3 = "0.8.1"
 ron = "0.4.2"

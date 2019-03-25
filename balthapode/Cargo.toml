@@ -4,10 +4,10 @@ version = "0.2.0"
 authors = ["GONI Guillaume <gdn3@live.fr>"]
 
 [dependencies]
-tokio = "0.1.15"
+tokio = "0.1.18"
 futures = "0.1.25"
 parity-wasm = "0.37.0"
-wasmi = "0.4.3"
+wasmi = "0.4.4"
 
 balthajob = { path = "../balthajob" }
 balthmessage = { path = "../balthmessage" }
