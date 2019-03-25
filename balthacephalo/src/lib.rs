@@ -14,6 +14,7 @@ use std::sync::{Arc, Mutex};
 
 use job::Job;
 use job::JobsMapArcMut;
+use job::task::Task;
 use message::Message;
 use net::asynctest::shoal::{MpscReceiverMessage, PeerId, ShoalReadArc};
 
@@ -103,7 +104,7 @@ pub fn for_each_message(
                 Some(job) => {
                     // TODO: Don't like cloning probably big array...
                     let job = job.lock().unwrap();
-                    Message::Job(job.sender_pid, job_id, job.bytecode.clone())
+                    Message::Job(job_id, job.bytecode.clone())
                 }
                 None => Message::UnknownJobId(job_id),
             };
@@ -111,10 +112,15 @@ pub fn for_each_message(
             shoal.lock().send_to(peer_pid, msg);
         }
         // TODO: check conflicts ?
-        Message::Job(sender_pid, _job_id, job) => {
+        Message::Job(job_id, job) => {
             // TODO: check job_id, send confirmation/error message ?
             let mut jobs = jobs_rc.lock().unwrap();
-            let job = Job::new(sender_pid, job);
+            let job = Job::new(job);
+
+            // TODO: better handling
+            if job.id != job_id {
+                panic!("Mismatched job ids job_id({}) != job.id({}).", job_id, job.id);
+            }
 
             jobs.insert(job.id, Arc::new(Mutex::new(job)));
         }
@@ -133,7 +139,14 @@ pub fn for_each_message(
                 }
             };
 
-            job.lock().unwrap().add_new_task_with_id(task_id, args);
+            let task = Task::new(args);
+
+            // TODO: better handling
+            if task.id != task_id {
+                panic!("Mismatched task ids task_id({}) != task.id({}).", task_id, task.id);
+            }
+
+            job.lock().unwrap().add_task(task);
         }
         Message::ReturnValue(job_id, task_id, value) => {
             // TODO: check job, task ids and sender ?

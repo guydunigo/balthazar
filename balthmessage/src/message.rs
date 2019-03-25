@@ -8,7 +8,7 @@ pub enum Message {
     RequestJob(JobId),
     UnknownJobId(JobId),
     UnknownTaskId(JobId, TaskId),
-    Job(PeerId, JobId, Vec<u8>), // TODO: more a signature than JobId
+    Job(JobId, Vec<u8>), // TODO: more a signature than JobId
     JobRegisteredAt(JobId),
     Task(JobId, TaskId, Arguments),
     // TODO: or tasks?
@@ -22,8 +22,8 @@ impl fmt::Display for Message {
         use Message::*;
 
         match self {
-            Job(pid, jid, bytecode) => {
-                write!(f, "Job #{} from `{}` of {} bytes", jid, pid, bytecode.len())
+            Job(jid, bytecode) => {
+                write!(f, "Job #{} of {} bytes", jid, bytecode.len())
             }
             Task(jid, tid, _) => write!(f, "Task #{} for Job #{}", tid, jid),
             ReturnValue(jid, tid, _) => write!(f, "Result for Task #{} for Job #{}", tid, jid),
