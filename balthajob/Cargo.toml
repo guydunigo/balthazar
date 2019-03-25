@@ -1,6 +1,6 @@
 [package]
 name = "balthajob"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["GONI Guillaume <gdn3@live.fr>"]
 edition = "2018"
 
@@ -10,3 +10,4 @@ serde = "1.0.88"
 parity-wasm = "0.37.0"
 wasmi = "0.4.3"
 sha3 = "0.8.1"
+ron = "0.4.2"

@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 
 pub use self::hash256::Hash256;
 use self::task::arguments::Arguments;
-use self::task::{TaskArcMut, TaskId};
+use self::task::{Task, TaskArcMut, TaskId};
 
 // TODO: hash(bytecode) or hash(pid + bytecode) or tuple(pid, hash(bytecode)) ?
 pub type JobId = Hash256;
@@ -39,7 +39,7 @@ pub enum Error {
 /// TODO: describe the format of the bytecode
 #[derive(Debug, Clone)]
 pub struct Job {
-// TODO: Store id or just calculate it ?
+    // TODO: Store id or just calculate it ?
     pub id: JobId,
     pub bytecode: Vec<u8>,
     // TODO: beware of overriding, ...
@@ -59,29 +59,20 @@ impl Job {
     }
 
     // TODO: check if id already exists : deal with collision
-    pub fn add_task(&mut self, task: task::Task) {
+    // TODO: Public ?
+    pub fn add_task(&mut self, task: Task) {
+        if self.tasks.contains_key(&task.id) {
+            // TODO: better handling
+            panic!("Importing key when it already exists");
+        }
         self.tasks.insert(task.id, Arc::new(Mutex::new(task)));
     }
 
-    pub fn add_new_task_with_id(&mut self, task_id: TaskId, args: Arguments) {
-        let task = task::Task::new(task_id, args);
+    pub fn add_new_task(&mut self, args: Arguments) -> TaskId {
+        let task = Task::new(args);
+        let task_id = task.id;
         self.add_task(task);
-    }
-
-    fn get_free_task_id(&self) -> Result<TaskId, Error> {
-        for i in 0..TaskId::max_value() {
-            if self.tasks.get(&i).is_none() {
-                return Ok(i);
-            }
-        }
-
-        Err(Error::NoFreeTaskId)
-    }
-
-    pub fn add_new_task(&mut self, args: Arguments) -> Result<TaskId, Error> {
-        let task_id = self.get_free_task_id()?;
-        self.add_new_task_with_id(task_id, args);
-        Ok(task_id)
+        task_id
     }
 
     // TODO: what happens between the mutex unlock and the new lock ? return MutexGuard ?
