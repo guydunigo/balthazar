@@ -86,10 +86,6 @@ impl Job {
             None => None,
         }
     }
-
-    pub fn set_bytecode(&mut self, bytecode: Vec<u8>) {
-        self.bytecode = bytecode;
-    }
 }
 
 // TODO: what happens between the mutex unlock and the new lock ? return MutexGuard ?
