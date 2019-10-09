@@ -18,7 +18,7 @@ impl fmt::Display for Hash256 {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "0x")?;
         for b in self.0.iter() {
-            write!(f, "{:2x}", b)?;
+            write!(f, "{:02x}", b)?;
         }
 
         Ok(())
