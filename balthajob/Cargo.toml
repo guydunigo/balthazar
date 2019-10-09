@@ -1,13 +1,13 @@
 [package]
 name = "balthajob"
-version = "0.2.1"
+version = "0.2.3"
 authors = ["GONI Guillaume <gdn3@live.fr>"]
 edition = "2018"
 
 [dependencies]
-serde_derive = "1.0.89"
-serde = "1.0.89"
+serde_derive = "1.0.101"
+serde = "1.0.101"
 parity-wasm = "0.37.0"
-wasmi = "0.4.4"
-sha3 = "0.8.1"
-ron = "0.4.2"
+wasmi = "0.5.1"
+sha3 = "0.8.2"
+ron = "0.5.1"

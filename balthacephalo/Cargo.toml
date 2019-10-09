@@ -1,10 +1,10 @@
 [package]
 name = "balthacephalo"
-version = "0.2.0"
+version = "0.2.1"
 authors = ["GONI Guillaume <gdn3@live.fr>"]
 
 [dependencies]
-tokio = "0.1.18"
+tokio = "0.1.22"
 
 balthmessage = { path = "../balthmessage" }
 balthajob = { path = "../balthajob" }

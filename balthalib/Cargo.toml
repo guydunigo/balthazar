@@ -1,13 +1,13 @@
 [package]
 name = "balthalib"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["GONI Guillaume <gdn3@live.fr>"]
 
 [dependencies]
-tokio = "0.1.18"
-serde_derive = "1.0.89"
-serde = "1.0.89"
-ron = "0.4.2"
+tokio = "0.1.22"
+serde_derive = "1.0.101"
+serde = "1.0.101"
+ron = "0.5.1"
 
 balthacephalo = { path = "../balthacephalo" }
 balthapode = { path = "../balthapode" }
