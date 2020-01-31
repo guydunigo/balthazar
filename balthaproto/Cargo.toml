@@ -1,5 +1,5 @@
 [package]
-name = "balthacli"
+name = "balthaproto"
 version = "0.0.0"
 authors = ["GONI Guillaume <gdn3@live.fr>"]
 edition = "2018"

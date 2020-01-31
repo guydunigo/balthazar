@@ -1,16 +1,9 @@
 [package]
 name = "balthernet"
-version = "0.4.1"
+version = "0.1.0"
 authors = ["GONI Guillaume <gdn3@live.fr>"]
 edition = "2018"
 
-[dependencies]
-serde = "1.0.101"
-ron = "0.5.1"
-tokio = "0.1.22"
-futures = "0.1.29"
-bytes = "0.4.12"
-rand= "0.7.2"
-libsecp256k1= "0.3.1"
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-balthmessage = { path = "../balthmessage" }
+[dependencies]

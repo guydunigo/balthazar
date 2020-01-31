@@ -1,6 +1,0 @@
-(
-    pid: 9000,
-    addr: "localhost:9000",
-    command: Cephalo,
-    peers: [],
-)

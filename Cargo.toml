@@ -1,18 +1,14 @@
 [workspace]
-# name = "balthamar"
-# version = "0.1.0"
-# authors = ["GONI Guillaume <gdn3@live.fr>"]
+name = "balthazar"
+version = "0.0.0"
+authors = ["GONI Guillaume <gdn3@live.fr>"]
 
 members = [
     "balthacli",
     "balthalib",
-    "balthacephalo",
-    "balthapode",
-    "balthmessage",
-    "balthwasm",
-    "balthajob",
-    "balthnative",
     "balthernet",
+    "balthastore",
+    "balthaproto",
 ]
 
 default-members = ["balthacli"]

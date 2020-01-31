@@ -1,8 +1,0 @@
-(
-    pid: 9001,
-    addr: "localhost:9001",
-    command: NetTest,
-    peers: [
-        "localhost:9000",
-    ],
-)

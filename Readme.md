@@ -1,35 +1,21 @@
-# Balthazar
+> This project is being realized in the context of my master thesis in the
+> **Technische Hochschule Ulm** (Deutschland), based on an idea I had a few years back.
 
-## Balthacephalo
+# Balthazar: A peer-to-peer world computer.
 
-## Balthapode
+## Balthacli
 
-## Balthmessage
+The command-line tool to run the node and interact with the network.
 
-## ...
+## Balthalib
 
-## TODO
+Contains and regroups all the base elements to use the network.
 
-- Check evolution of wasmi : [wasmi on github](https://github.com/paritytech/wasmi)
+## Balthastore
 
-## Message forwarding solutions :
+This part manages the different storages used by the system.
+For now, only **IPFS** will be implemented but others might come in the future.
 
-- ~~Send a request to find peer and directly create a connection to it~~
-    - What if it can't be connected to (proxy, nat, ...) ?
-    - How do I know it doesn't exist ?
-- ~~Send a request to know if peer is somewhere on the network~~
-    - It can disconnect before the message is actually sent
-    - How do I know it doesn't exist ?
-- Send the message in a special Forward msg to every other peers :
-    - If the receiving peer is the target, send Ack or send the answer directly ?
-    - If the receiving peer knows the target, it sends forwards directly the message to it.
-        - Send `Found` back
-    - If not, forwards to every other peer (not sender) :
-        - Wait for all answers : If one `Found` : return `Found`, else return `NotFound`
+## Balthaproto
 
-- Keep track of the path by sending along a growing list
-    - Same for broadcast
-
-0 - 1
-  \ | 
-    2 - 3
+The different protocols used specifically for this system for inter-node communications.
