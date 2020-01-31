@@ -1,3 +1,9 @@
+> **Note:** This branch is dedicated to previous version of Balthazar I developped on my own.
+> It's very dirty and was done without any proper research on peer-to-peer networks or anything.
+> Just a little hobby project to see what I could achieve based on an idea I had.
+>
+> The project has been restarted from scratch for my master thesis and is available on the master branch at: <https://github.com/guydunigo/balthazar>.
+
 # Balthazar
 
 ## Balthacephalo
