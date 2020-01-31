@@ -13,7 +13,7 @@ use std::{error::Error, fmt, io};
 
 use super::{FileAddr, Storage};
 
-/// Wrapper arround [`ipfs_api::response::Error`] to implement trait [`std::error:Error`].
+/// Wrapper arround [`ipfs_api::response::Error`] to implement trait [`std::error::Error`].
 #[derive(Debug)]
 pub struct IpfsApiResponseError {
     inner: response::Error,
