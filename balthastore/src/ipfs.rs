@@ -1,10 +1,9 @@
 extern crate http;
 extern crate ipfs_api;
+extern crate tokio;
 
 use bytes::Bytes;
-use futures::{
-    future::BoxFuture, io::AsyncRead, stream::BoxStream, FutureExt, StreamExt, TryStreamExt,
-};
+use futures::{future::BoxFuture, stream::BoxStream, FutureExt, StreamExt, TryStreamExt};
 use http::uri::InvalidUri;
 use ipfs_api::response;
 use ipfs_api::IpfsClient;
@@ -46,8 +45,13 @@ impl IpfsStorage {
         })
     }
 
-    /// Return the inner [`IpfsClient`] if a direct access is needed.
-    pub fn into_inner(&self) -> &IpfsClient {
+    /// Get back the inner [`IpfsClient`] if a direct access is needed.
+    pub fn into_inner(self) -> IpfsClient {
+        self.ipfs_client
+    }
+
+    /// Returns the inner [`IpfsClient`] if a direct access is needed.
+    pub fn inner(&self) -> &IpfsClient {
         &self.ipfs_client
     }
 }
@@ -55,15 +59,15 @@ impl IpfsStorage {
 impl Storage for IpfsStorage {
     type Error = IpfsApiResponseError;
 
-    fn store_stream<T: 'static + io::Read + AsyncRead + Send + Sync>(
+    fn store_stream<T: 'static + io::Read + Send + Sync>(
         &self,
         data_stream: T,
-    ) -> BoxFuture<Result<FileAddr, Self::Error>> {
+    ) -> BoxFuture<Result<FileAddr, IpfsApiResponseError>> {
+        let new_client = self.inner().clone();
         async move {
-            let res = self.ipfs_client.add(data_stream).await;
-            println!("Stored on IPFS : {:?}", res);
+            let res = new_client.add(data_stream).await;
             match res {
-                Ok(res) => Ok(res.name),
+                Ok(res) => Ok(format!("/ipfs/{}", res.name)),
                 Err(error) => Err(error.into()),
             }
         }
@@ -71,14 +75,59 @@ impl Storage for IpfsStorage {
     }
 
     fn get_stream(&self, addr: &FileAddr) -> BoxStream<Result<Bytes, Self::Error>> {
-        self.ipfs_client.get(addr).map_err(|e| e.into()).boxed()
+        self.ipfs_client.cat(addr).map_err(|e| e.into()).boxed()
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use std::fs;
+    use tokio::runtime::Runtime;
+
+    const TEST_DIR: &str = "./tests";
+    const TEST_FILE: &str = "/ipfs/QmbFqDhxQGHz3upYJVKfyJrnyvPceBWPrrTd11cd1wvFGZ";
+
+    fn get_test_file_name() -> String {
+        format!("{}{}", TEST_DIR, TEST_FILE)
+    }
+
     #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
+    fn it_stores_a_correct_file_stream() {
+        let storage = IpfsStorage::default();
+        let file = fs::File::open(get_test_file_name()).unwrap();
+
+        let res = Runtime::new()
+            .unwrap()
+            .block_on(storage.store_stream(file))
+            .unwrap();
+
+        assert_eq!(TEST_FILE, res);
+    }
+
+    #[test]
+    fn it_stores_a_correct_file() {
+        let storage = IpfsStorage::default();
+        let content = fs::read(get_test_file_name()).unwrap();
+
+        let file_name = Runtime::new()
+            .unwrap()
+            .block_on(storage.store(&content[..]))
+            .unwrap();
+
+        assert_eq!(TEST_FILE, file_name);
+    }
+
+    #[test]
+    fn it_reads_a_correct_file() {
+        let storage = IpfsStorage::default();
+        let content = fs::read(get_test_file_name()).unwrap();
+
+        let data = Runtime::new()
+            .unwrap()
+            .block_on(storage.get(&TEST_FILE.to_string()))
+            .unwrap();
+
+        assert_eq!(content, data);
     }
 }

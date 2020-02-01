@@ -67,6 +67,7 @@ dependencies = [
  "http",
  "ipfs-api",
  "multiaddr",
+ "tokio",
 ]
 
 [[package]]
