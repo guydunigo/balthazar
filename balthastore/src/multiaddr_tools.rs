@@ -1,8 +1,10 @@
 use multiaddr::{AddrComponent, Multiaddr};
 use std::{error::Error, fmt};
 
-/// Try to convert a multiaddress into a usual [`String`].
-/// The multiaddress must correpsond to an usual *internet* address.
+/// Tries to convert a multiaddress into a usual [`String`].
+/// The multiaddress must correpsond to an *usual internet address*.
+///
+/// > **Warning:** This doesn't try do be extensive with all possible representations and protocols.
 ///
 /// As first protocol parts (**address**) are supported:
 /// - `/ip4/`

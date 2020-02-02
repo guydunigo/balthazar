@@ -13,3 +13,4 @@ http = "0.2.0"
 bytes = "0.5.4"
 tokio = { version = "0.2.11", features = ["fs"] }
 multiaddr = "0.3.1"
+either = "1.5.3"

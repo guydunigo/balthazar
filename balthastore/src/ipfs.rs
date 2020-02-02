@@ -1,8 +1,10 @@
+extern crate either;
 extern crate http;
 extern crate ipfs_api;
 extern crate tokio;
 
 use bytes::Bytes;
+use either::Either;
 use futures::{future::BoxFuture, stream::BoxStream, FutureExt, StreamExt, TryStreamExt};
 use http::uri::InvalidUri;
 use ipfs_api::response;
@@ -10,7 +12,9 @@ use ipfs_api::IpfsClient;
 use multiaddr::Multiaddr;
 use std::{error::Error, fmt, io};
 
-use super::{FileAddr, Storage};
+use super::{
+    try_internet_multiaddr_to_usual_format, FileAddr, MultiaddrToStringConversionError, Storage,
+};
 
 /// Wrapper arround [`ipfs_api::response::Error`] to implement trait [`std::error::Error`].
 #[derive(Debug)]
@@ -40,9 +44,14 @@ pub struct IpfsStorage {
 
 impl IpfsStorage {
     /// Creates a new client connecting to the listening multiaddr.
-    pub fn new(listen_addr: Multiaddr) -> Result<Self, InvalidUri> {
+    pub fn new(
+        listen_addr: Multiaddr,
+    ) -> Result<Self, Either<InvalidUri, MultiaddrToStringConversionError>> {
+        let usual_addr =
+            try_internet_multiaddr_to_usual_format(&listen_addr).map_err(|e| Either::Right(e))?;
+        let http_addr = format!("http://{}", usual_addr);
         Ok(IpfsStorage {
-            ipfs_client: IpfsClient::new_from_uri(&listen_addr.to_string()[..])?,
+            ipfs_client: IpfsClient::new_from_uri(&http_addr[..]).map_err(|e| Either::Left(e))?,
         })
     }
 
@@ -82,12 +91,12 @@ impl Storage for IpfsStorage {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::tests::TEST_DIR;
+    use super::*;
     use std::fs;
     use tokio::runtime::Runtime;
 
-    const TEST_FILE: &str = "/ipfs/QmbFqDhxQGHz3upYJVKfyJrnyvPceBWPrrTd11cd1wvFGZ";
+    const TEST_FILE: &str = "/ipfs/QmPZ9gcCEpqKTo6aq61g2nXGUhM4iCL3ewB6LDXZCtioEB";
 
     fn get_test_file_name() -> String {
         format!("{}{}", TEST_DIR, TEST_FILE)
@@ -95,14 +104,12 @@ mod tests {
 
     #[test]
     fn it_connects_to_given_address() {
-        /*
-        let storage = IpfsStorage::new("/ip6/::1/tcp/5001".parse().unwrap()).unwrap();
+        let storage = IpfsStorage::new("/dns4/ipfs.io".parse().unwrap()).unwrap();
 
         Runtime::new()
             .unwrap()
             .block_on(storage.get(&TEST_FILE.to_string()))
             .unwrap();
-        */
     }
 
     #[test]

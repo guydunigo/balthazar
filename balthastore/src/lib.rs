@@ -1,6 +1,6 @@
 //! # Balthastore
 //!
-//! This crate contains different utilities to use different storage technologies 
+//! This crate contains different utilities to use different storage technologies
 //! interchangeably and transparently.
 extern crate bytes;
 extern crate futures;
@@ -13,7 +13,9 @@ use std::{error::Error, io};
 pub mod ipfs;
 mod multiaddr_tools;
 
-pub use multiaddr_tools::try_internet_multiaddr_to_usual_format;
+pub use multiaddr_tools::{
+    try_internet_multiaddr_to_usual_format, MultiaddrToStringConversionError,
+};
 
 //TODO: Multiaddr?
 pub type FileAddr = String;
