@@ -1,7 +1,11 @@
-//! # Balthastore
-//!
 //! This crate contains different utilities to use different storage technologies
 //! interchangeably and transparently.
+//!
+//! See for instance the [`Storage`] trait used to create a uniform way to manipulate
+//! different storage mechanisms.
+//!
+//! As of now, only a storage for [Ipfs](https://ipfs.io) is implemented through
+//! [`ipfs::IpfsStorage`].
 extern crate bytes;
 extern crate futures;
 extern crate multiaddr;
