@@ -9,7 +9,7 @@ edition = "2018"
 [dependencies]
 ipfs-api = "0.6.0-rc"
 futures = "0.3.1"
-multiaddr = "0.3.1"
 http = "0.2.0"
 bytes = "0.5.4"
 tokio = { version = "0.2.11", features = ["fs"] }
+multiaddr = "0.3.1"

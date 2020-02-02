@@ -34,6 +34,7 @@ impl From<response::Error> for IpfsApiResponseError {
 /// port on `localhost:5001`.
 #[derive(Clone, Default)]
 pub struct IpfsStorage {
+    // TODO: For performance reasons, recreate the client each time ?
     ipfs_client: IpfsClient,
 }
 
@@ -82,14 +83,26 @@ impl Storage for IpfsStorage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::tests::TEST_DIR;
     use std::fs;
     use tokio::runtime::Runtime;
 
-    const TEST_DIR: &str = "./tests";
     const TEST_FILE: &str = "/ipfs/QmbFqDhxQGHz3upYJVKfyJrnyvPceBWPrrTd11cd1wvFGZ";
 
     fn get_test_file_name() -> String {
         format!("{}{}", TEST_DIR, TEST_FILE)
+    }
+
+    #[test]
+    fn it_connects_to_given_address() {
+        /*
+        let storage = IpfsStorage::new("/ip6/::1/tcp/5001".parse().unwrap()).unwrap();
+
+        Runtime::new()
+            .unwrap()
+            .block_on(storage.get(&TEST_FILE.to_string()))
+            .unwrap();
+        */
     }
 
     #[test]

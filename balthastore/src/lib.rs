@@ -1,3 +1,7 @@
+//! # Balthastore
+//!
+//! This crate contains different utilities to use different storage technologies 
+//! interchangeably and transparently.
 extern crate bytes;
 extern crate futures;
 extern crate multiaddr;
@@ -7,8 +11,11 @@ use futures::{future::BoxFuture, stream::BoxStream, FutureExt, StreamExt};
 use std::{error::Error, io};
 
 pub mod ipfs;
+mod multiaddr_tools;
 
-//TODO: Multiaddr
+pub use multiaddr_tools::try_internet_multiaddr_to_usual_format;
+
+//TODO: Multiaddr?
 pub type FileAddr = String;
 
 /// This trait defines a generic interface for storage mechanisms so they can be used interchangeably.
@@ -53,8 +60,7 @@ pub trait Storage: Sync {
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
-    }
+    /// Only for testing the different storage:
+    /// Place here the files you want to try to store or compare.
+    pub const TEST_DIR: &str = "./test_files";
 }
