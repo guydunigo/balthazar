@@ -7,13 +7,13 @@ use bytes::Bytes;
 use either::Either;
 use futures::{future::BoxFuture, stream::BoxStream, FutureExt, StreamExt, TryStreamExt};
 use http::uri::InvalidUri;
-use ipfs_api::response;
-use ipfs_api::IpfsClient;
+use ipfs_api::{response, IpfsClient};
 use multiaddr::Multiaddr;
-use std::{error::Error, fmt, io};
+use std::{error::Error, fmt};
 
 use super::{
-    try_internet_multiaddr_to_usual_format, FileAddr, MultiaddrToStringConversionError, Storage,
+    try_internet_multiaddr_to_usual_format, FileAddr, GenericReader,
+    MultiaddrToStringConversionError, Storage,
 };
 
 /// Wrapper arround [`ipfs_api::response::Error`] to implement trait [`std::error::Error`].
@@ -67,25 +67,32 @@ impl IpfsStorage {
 }
 
 impl Storage for IpfsStorage {
-    type Error = IpfsApiResponseError;
-
-    fn store_stream<T: 'static + io::Read + Send + Sync>(
+    fn store_stream(
         &self,
-        data_stream: T,
-    ) -> BoxFuture<Result<FileAddr, IpfsApiResponseError>> {
+        data_stream: GenericReader,
+    ) -> BoxFuture<Result<FileAddr, Box<dyn Error>>> {
         let new_client = self.inner().clone();
         async move {
             let res = new_client.add(data_stream).await;
             match res {
                 Ok(res) => Ok(format!("/ipfs/{}", res.name)),
-                Err(error) => Err(error.into()),
+                Err(error) => {
+                    let error: Box<dyn Error> = Box::new(IpfsApiResponseError::from(error));
+                    Err(error)
+                }
             }
         }
         .boxed()
     }
 
-    fn get_stream(&self, addr: &FileAddr) -> BoxStream<Result<Bytes, Self::Error>> {
-        self.ipfs_client.cat(addr).map_err(|e| e.into()).boxed()
+    fn get_stream(&self, addr: &FileAddr) -> BoxStream<Result<Bytes, Box<dyn Error>>> {
+        self.ipfs_client
+            .cat(addr)
+            .map_err(|e| {
+                let error: Box<dyn Error> = Box::new(IpfsApiResponseError::from(e));
+                error
+            })
+            .boxed()
     }
 }
 
@@ -119,7 +126,7 @@ mod tests {
 
         let res = Runtime::new()
             .unwrap()
-            .block_on(storage.store_stream(file))
+            .block_on(storage.store_stream(GenericReader::new(file)))
             .unwrap();
 
         assert_eq!(TEST_FILE, res);
