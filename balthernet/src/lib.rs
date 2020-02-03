@@ -1,3 +1,5 @@
+extern crate libp2p;
+
 #[cfg(test)]
 mod tests {
     #[test]
