@@ -1,3 +1,4 @@
+//! Provides [`StoragesWrapper`] to use different [`Storage`] at once in a transparently.
 // TODO: Instructions to add new Storage
 
 use super::{ipfs, FileAddr, GenericReader, MultiaddrToStringConversionError, Storage};
@@ -27,7 +28,6 @@ impl Default for StorageType {
 /// underlying [`ipfs::IpfsStorage`].
 ///
 /// [`StoragesWrapper`] has a **default** storage defined and [`Storage::store`] calls will use it and [`Storage::get`] calls that couldn't be automatically linked to another [`Storage`] are sent to it as well.
-/// TODO
 #[derive(Clone, Default)]
 pub struct StoragesWrapper {
     default_storage_type: StorageType,
@@ -45,7 +45,8 @@ impl StoragesWrapper {
         self.default_storage_type
     }
 
-    /// Returns the [`Storage`] corresponding to the [`Self::default_storage_type`] answer.
+    /// Returns the [`Storage`] corresponding to the
+    /// [`default_storage_type`](`StoragesWrapper::default_storage_type`) answer.
     pub fn default_storage(&self) -> &dyn Storage {
         self.storage_type_to_storage(self.default_storage_type())
     }
@@ -66,11 +67,11 @@ impl StoragesWrapper {
         Ok(())
     }
 
-    /// Tries to determine the best storage to use to obtain [`addr`].
+    /// Tries to determine the best storage to use to obtain `addr`.
     ///
     /// It uses these rules:
-    /// - if [`addr`] is in the format `/ipfs/[MULTIHASH]`: StorageType::Ipfs
-    /// - otherwise: [`Self::default_storage_type`]
+    /// - if `addr` is in the format `/ipfs/[MULTIHASH]`: StorageType::Ipfs
+    /// - otherwise: [`default_storage_type`](`StoragesWrapper::default_storage_type`)
     ///
     /// ## For example:
     /// ```rust
@@ -94,7 +95,7 @@ impl StoragesWrapper {
         }
     }
 
-    /// Returns the [`Storage`] corresponding to the [`Self::get_storage_type_based_on_address`] answer.
+    /// Returns the [`Storage`] corresponding to the [`get_storage_type_based_on_address`](`StoragesWrapper::get_storage_type_based_on_address`) answer.
     pub fn get_storage_based_on_address(&self, addr: &FileAddr) -> &dyn Storage {
         let storage_type = self.get_storage_type_based_on_address(addr);
         self.storage_type_to_storage(storage_type)
@@ -102,7 +103,7 @@ impl StoragesWrapper {
 }
 
 impl Storage for StoragesWrapper {
-    /// Stores the data into the [`Self::default_storage_type`].
+    /// Stores the data into the [`default_storage_type`](`StoragesWrapper::default_storage_type`).
     fn store_stream(
         &self,
         data_stream: GenericReader,
@@ -110,8 +111,8 @@ impl Storage for StoragesWrapper {
         self.default_storage().store_stream(data_stream)
     }
 
-    /// Tries to determine automatically the best [`Storage`] to retrieve data at [`addr`]
-    /// using [`Self::get_storage_type_based_on_address`].
+    /// Tries to determine automatically the best [`Storage`] to retrieve data at `addr`
+    /// using [`get_storage_type_based_on_address`](`StoragesWrapper::get_storage_type_based_on_address`).
     fn get_stream(&self, addr: &FileAddr) -> BoxStream<Result<Bytes, Box<dyn Error>>> {
         self.get_storage_based_on_address(addr).get_stream(addr)
     }

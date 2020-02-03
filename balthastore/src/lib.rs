@@ -1,8 +1,14 @@
 //! This crate contains different utilities to use different storage technologies
 //! interchangeably and transparently.
 //!
+//!
 //! See for instance the [`Storage`] trait used to create a uniform way to manipulate
 //! different storage mechanisms.
+//!
+//!
+//! This crate provides a wrapper structure to use the different Storages in a transparent way, see
+//! [`wrapper::StoragesWrapper`].
+//!
 //!
 //! As of now, only a storage for [Ipfs](https://ipfs.io) is implemented through
 //! [`ipfs::IpfsStorage`].

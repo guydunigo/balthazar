@@ -1,3 +1,4 @@
+//! Provides [`IpfsStorage`] to use the [InterPlanetary File-System (IPFS)](https://ipfs.io)
 extern crate either;
 extern crate http;
 extern crate ipfs_api;
@@ -33,7 +34,8 @@ impl From<response::Error> for IpfsApiResponseError {
     }
 }
 
-/// Ipfs storage for use by the nodes.
+/// Storage to use the [InterPlanetary File-System (IPFS)](https://ipfs.io)
+///
 /// Creating it through the [`Default::default`] trait connects to the default Ipfs
 /// port on `localhost:5001`.
 #[derive(Clone, Default)]
