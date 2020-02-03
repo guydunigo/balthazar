@@ -8,3 +8,6 @@ edition = "2018"
 
 [dependencies]
 libp2p = "0.15.0"
+balthaproto = { path = "../balthaproto" }
+balthalib = { path = "../balthalib" }
+futures = "0.3.1"
