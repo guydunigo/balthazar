@@ -16,7 +16,7 @@ use std::{error::Error, io};
 
 pub mod ipfs;
 mod multiaddr_tools;
-// pub mod wrapper;
+pub mod wrapper;
 
 pub use multiaddr_tools::{
     try_internet_multiaddr_to_usual_format, MultiaddrToStringConversionError,
