@@ -7,9 +7,8 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-libp2p = "0.15.0"
 balthaproto = { path = "../balthaproto" }
 balthamisc = { path = "../balthamisc" }
+libp2p = "0.15.0"
 futures = "0.3.1"
-# TODO: restrict features to bare essentials.
-# tokio = { version = "0.2.11", features = ["full"] }
+void = "1.0.2"
