@@ -268,11 +268,12 @@ where
 
 // ---------------------------------------------------------------
 
-// TODO: reference to the NetworkBehaviour
-/// Events coming from the NetworkBehaviour into the [`Balthandler`] to be sent to the peer for instance.
+/// Events coming from the [`BalthBehaviour`](`super::BalthBehaviour`) into the [`Balthandler`]
+/// to be sent to the peer for instance.
 ///
 /// For each event for message added, add either of these fields to identify different events:
-/// - `user_data`: for requests coming from us (i.e. through the NetworkBehaviour),
+/// - `user_data`: for requests coming from us (i.e. through the
+/// [`BalthBehaviour`](`super::BalthBehaviour`)),
 /// - `request_id`: for answers at peer's requests coming.
 #[derive(Debug)]
 pub enum BalthandlerEventIn<TUserData> {
@@ -292,13 +293,12 @@ pub enum BalthandlerEventIn<TUserData> {
     },
 }
 
-// TODO: reference to the NetworkBehaviour
 /// Events coming out of [`Balthandler`]. It can be forwarding a message coming
-/// from a peer to the NetworkBehaviour for example.
+/// from a peer to the [`BalthBehaviour`](`super::BalthBehaviour`) for example.
 ///
 /// For each event for message added, add either of these fields to identify different events:
 /// - `user_data`: for answers to our requests from the peer,
-/// - `request_id`: for requests coming from the peer (i.e. through the NetworkBehaviour).
+/// - `request_id`: for requests coming from the peer (i.e. through the [`BalthBehaviour`](`super::BalthBehaviour`)).
 #[derive(Debug)]
 pub enum BalthandlerEventOut<TUserData> {
     NodeTypeAnswer {
