@@ -21,6 +21,9 @@ impl<M, E, T: Sink<M, Error = E> + Stream<Item = Result<M, E>>> SinkStream<M, E>
 pub type ProtoBufProtocolSink<M> = Box<dyn SinkStream<M, io::Error> + Send + Unpin>;
 
 /// Codec used by the [`ProtoBufProtocol`].
+///
+/// To be noted that the [`ProtoBufCodec`] doesn't seem to work as it doesn't know the size to receive...
+/// **Use [`ProtoBufLengthCodec`] instead**,
 type Codec<M> = ProtoBufLengthCodec<M>;
 
 /// Generic protocol used with protobuf messages.

@@ -5,6 +5,10 @@ use prost::Message;
 use std::io;
 
 /// Generic codec for **protobuf** messages.
+///
+/// To be noted that it doesn't seem to work by itself since doesn't know
+/// the size of the message to receive and don't know when to stop during the reception.
+/// It is then maybe preferable to use [`ProtoBufLengthCodec`] instead.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ProtoBufCodec<M> {
     _marker: std::marker::PhantomData<M>,
