@@ -14,8 +14,7 @@ use libp2p::{
 use super::balthazar::{BalthBehaviour, BalthBehaviourEvent, BalthBehaviourKindOfEvent};
 use misc::NodeType;
 
-/// [`BalthBehavioursWrapper`] to use several
-/// [`NetworkBehaviour`](`libp2p::swarm::NetworkBehaviour`) at the same time.
+/// Use several [`NetworkBehaviour`](`libp2p::swarm::NetworkBehaviour`) at the same time.
 #[derive(NetworkBehaviour)]
 pub struct BalthBehavioursWrapper<TSubstream> {
     balthbehaviour: BalthBehaviour<TSubstream>,

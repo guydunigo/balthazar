@@ -2,10 +2,11 @@
 //!
 //! This module is greatly inspired from [`libp2p::kad::Kademlia`].
 //!
-//! If there are new kind of events that can be received, add them to
-//! [`BalthBehaviourKindOfEvent`].
+//! ## Procedure when adding events or new kinds of messages
 //!
-//! Have a look at the [`handler`] module discription to make the necessary updates.
+//! If there are new kinds of events that can be received, add them to [`BalthBehaviourKindOfEvent`].
+//!
+//! Have a look at the [`handler`] module description to make the necessary updates.
 //!
 //! When extending [`BalthBehaviourKindOfEvent`] or [`handler::BalthandlerEventOut`], update the `poll` method
 //! from [`BalthBehaviour`].
@@ -63,7 +64,7 @@ impl<T> GenericEvent<T> {
     */
 }
 
-/// Event injected into [`Balthbehaviour`] from either [`Balthandler`] and from outside (other
+/// Event injected into [`BalthBehaviour`] from either [`Balthandler`] and from outside (other
 /// [`NetworkBehaviour`]s, etc.
 #[derive(Debug)]
 pub enum BalthBehaviourKindOfEvent<TUserData> {

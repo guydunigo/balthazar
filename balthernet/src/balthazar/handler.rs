@@ -2,6 +2,8 @@
 //!
 //! This module is greatly inspired from [`libp2p::kad::handler::KademliaHandler`].
 //!
+//! ## Procedure when adding events or new kinds of messages
+//!
 //! To handle new messages:
 //! 1. add new events in [`BalthandlerEventIn`] and [`BalthandlerEventOut`],
 //! 2. for each new [`BalthandlerEventIn`], extend the `inject_event` function,
