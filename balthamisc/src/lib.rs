@@ -1,5 +1,7 @@
-extern crate balthastore as store;
-extern crate balthernet as net;
+extern crate balthaproto as proto;
+
+mod node_type;
+pub use node_type::NodeType;
 
 #[cfg(test)]
 mod tests {

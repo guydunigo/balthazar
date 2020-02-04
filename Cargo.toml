@@ -9,6 +9,7 @@ members = [
     "balthernet",
     "balthastore",
     "balthaproto",
+    "balthamisc",
 ]
 
 default-members = ["balthacli"]

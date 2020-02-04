@@ -6,10 +6,11 @@
 ## Balthacli
 
 The command-line tool to run the node and interact with the network.
+It serves as an interface to **Balthalib** for the command-line and contains only code for this purpose.
 
 ## Balthalib
 
-Contains and regroups all the base elements to use the network.
+Contains and regroups all the base elements to use the network found in the libraries given here underneath.
 
 ## Balthastore
 
@@ -19,3 +20,7 @@ For now, only **IPFS** will be implemented but others might come in the future.
 ## Balthaproto
 
 The different protocols used specifically for this system for inter-node communications.
+
+## Balthamisc
+
+Contains different miscelaneous types and functions used by other libraries.

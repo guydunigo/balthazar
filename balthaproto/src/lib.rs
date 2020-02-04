@@ -1,4 +1,5 @@
-//! This crate contains networking protocols to be used by the **balthernet**.
+//! This crate contains the base networking protocols to be used by **balthernet**
+//! as well as basic structures and functions to handle them.
 extern crate bytes;
 extern crate futures;
 extern crate futures_codec;

@@ -1,3 +1,5 @@
+extern crate balthalib;
+
 #[cfg(test)]
 mod tests {
     #[test]

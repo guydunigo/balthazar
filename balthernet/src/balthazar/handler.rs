@@ -1,4 +1,8 @@
 //!  This module is greatly inspired from [`libp2p::kad::handler::KademliaHandler`].
+//!
+//!  It provides [`Balthandler`], a [`ProtocolsHandler`] for use in [`libp2p`].
+//!
+//!  TODO: add procedure for new messages.
 use futures::{
     io::{AsyncRead, AsyncWrite},
     sink::Sink,
@@ -19,17 +23,20 @@ use std::{
     time::{Duration, Instant},
 };
 
-use lib::NodeType;
+use misc::NodeType;
 use proto::{
     protobuf::{ProtoBufProtocol, ProtoBufProtocolSink},
     worker,
 };
 
-const DEFAULT_KEEP_ALIVE_DURATION_SECS: u64 = 10;
+/// Default time to keep alive time to determine how long should the connection be
+/// kept with the peer.
+pub const DEFAULT_KEEP_ALIVE_DURATION_SECS: u64 = 10;
 
-/// Events coming from the behaviour to be sent to peer for instance.
+// TODO: reference to the NetworkBehaviour
+/// Events coming from the NetworkBehaviour into the [`Balthandler`] to be sent to the peer for instance.
 #[derive(Debug)]
-pub enum MyHandlerEventIn<TUserData> {
+pub enum BalthandlerEventIn<TUserData> {
     ManagerRequest {
         user_data: TUserData,
     },
@@ -44,12 +51,13 @@ pub enum MyHandlerEventIn<TUserData> {
         node_type: NodeType<()>,
         request_id: MyRequestId,
     },
-    Dummy, // TODO: remove
 }
 
-/// Events coming out of handler. It can be a message coming from peer for example.
+// TODO: reference to the NetworkBehaviour
+/// Events coming out of [`Balthandler`]. It can be forwarding a message coming
+/// from a peer to the NetworkBehaviour for example.
 #[derive(Debug)] // todo: copy?
-pub enum MyHandlerEventOut<TUserData> {
+pub enum BalthandlerEventOut<TUserData> {
     NodeTypeAnswer {
         node_type: NodeType<()>,
         user_data: TUserData,
@@ -65,10 +73,9 @@ pub enum MyHandlerEventOut<TUserData> {
         user_data: TUserData,
     },
     QueryError {
-        error: MyHandlerQueryErr,
+        error: BalthandlerQueryErr,
         user_data: TUserData,
     },
-    Null, // TODO: remove
 }
 
 /// Unique identifier for a request. Must be passed back in order to answer a request from
@@ -84,7 +91,7 @@ pub struct MyRequestId {
 
 /// Error that can happen when handling a query.
 #[derive(Debug)]
-pub enum MyHandlerQueryErr {
+pub enum BalthandlerQueryErr {
     /// Error while trying to perform the query.
     Upgrade(ProtocolsHandlerUpgrErr<io::Error>),
     /// Received an answer that doesn't correspond to the request.
@@ -93,39 +100,39 @@ pub enum MyHandlerQueryErr {
     Io(io::Error),
 }
 
-impl error::Error for MyHandlerQueryErr {
+impl error::Error for BalthandlerQueryErr {
     fn source(&self) -> Option<&(dyn error::Error + 'static)> {
         match self {
-            MyHandlerQueryErr::Upgrade(err) => Some(err),
-            MyHandlerQueryErr::UnexpectedMessage => None,
-            MyHandlerQueryErr::Io(err) => Some(err),
+            BalthandlerQueryErr::Upgrade(err) => Some(err),
+            BalthandlerQueryErr::UnexpectedMessage => None,
+            BalthandlerQueryErr::Io(err) => Some(err),
         }
     }
 }
 
-impl fmt::Display for MyHandlerQueryErr {
+impl fmt::Display for BalthandlerQueryErr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            MyHandlerQueryErr::Upgrade(err) => write!(f, "Error while performing query: {}", err),
-            MyHandlerQueryErr::UnexpectedMessage => {
+            BalthandlerQueryErr::Upgrade(err) => write!(f, "Error while performing query: {}", err),
+            BalthandlerQueryErr::UnexpectedMessage => {
                 write!(f, "Remote answered our query with the wrong message type")
             }
-            MyHandlerQueryErr::Io(err) => write!(f, "I/O error during a query: {}", err),
+            BalthandlerQueryErr::Io(err) => write!(f, "I/O error during a query: {}", err),
         }
     }
 }
 
-impl From<ProtocolsHandlerUpgrErr<io::Error>> for MyHandlerQueryErr {
+impl From<ProtocolsHandlerUpgrErr<io::Error>> for BalthandlerQueryErr {
     #[inline]
     fn from(err: ProtocolsHandlerUpgrErr<io::Error>) -> Self {
-        MyHandlerQueryErr::Upgrade(err)
+        BalthandlerQueryErr::Upgrade(err)
     }
 }
 
-impl From<io::Error> for MyHandlerQueryErr {
+impl From<io::Error> for BalthandlerQueryErr {
     #[inline]
     fn from(err: io::Error) -> Self {
-        MyHandlerQueryErr::Io(err)
+        BalthandlerQueryErr::Io(err)
     }
 }
 
@@ -146,7 +153,7 @@ enum SubstreamState<TMessage, TUserData> {
     // TODO: add timeout
     OutWaitingAnswer(ProtoBufProtocolSink<TMessage>, TUserData),
     /// An error happened on the substream and we should report the error to the user.
-    OutReportError(MyHandlerQueryErr, TUserData),
+    OutReportError(BalthandlerQueryErr, TUserData),
     /// The substream is being closed.
     OutClosing(ProtoBufProtocolSink<TMessage>),
     /// Waiting for a request from the remote.
@@ -193,11 +200,12 @@ impl<TMessage, TUserData> SubstreamState<TMessage, TUserData> {
     }
 }
 
-pub struct MyPHandler<TSubstream, TUserData>
+/// This structure implements the [`ProtocolsHandler`] trait to handle a connection with
+/// another peer.
+pub struct Balthandler<TSubstream, TUserData>
 where
     TSubstream: AsyncRead + AsyncWrite + Unpin,
 {
-    node_type: NodeType<()>,
     substreams: Vec<SubstreamState<WorkerMsgWrapper, TUserData>>,
     proto: ProtoBufProtocol<WorkerMsgWrapper>,
     keep_alive: KeepAlive,
@@ -205,23 +213,20 @@ where
     _marker: std::marker::PhantomData<TSubstream>,
 }
 
-impl<TSubstream, TUserData> MyPHandler<TSubstream, TUserData>
+impl<TSubstream, TUserData> Balthandler<TSubstream, TUserData>
 where
     TSubstream: AsyncRead + AsyncWrite + Unpin,
 {
-    fn default_keep_alive() -> KeepAlive {
-        KeepAlive::Until(Instant::now() + Duration::from_secs(DEFAULT_KEEP_ALIVE_DURATION_SECS))
+    pub fn new() -> Self {
+        Self::default()
     }
 
-    pub fn new(node_type: NodeType<()>) -> Self {
-        MyPHandler {
-            node_type,
-            substreams: Vec::new(),
-            proto: Default::default(),
-            keep_alive: Self::default_keep_alive(),
-            next_connec_unique_id: UniqueConnecId(0),
-            _marker: Default::default(),
-        }
+    /// Returns a [`KeepAlive`] object with a default time to keep alive time to determine
+    /// how long should the connection be kept with the peer.
+    ///
+    /// See [`DEFAULT_KEEP_ALIVE_DURATION_SECS`].
+    fn default_keep_alive() -> KeepAlive {
+        KeepAlive::Until(Instant::now() + Duration::from_secs(DEFAULT_KEEP_ALIVE_DURATION_SECS))
     }
 
     fn next_connec_unique_id(&mut self) -> UniqueConnecId {
@@ -231,13 +236,28 @@ where
     }
 }
 
-impl<TSubstream, TUserData> ProtocolsHandler for MyPHandler<TSubstream, TUserData>
+impl<TSubstream, TUserData> Default for Balthandler<TSubstream, TUserData>
+where
+    TSubstream: AsyncRead + AsyncWrite + Unpin,
+{
+    fn default() -> Self {
+        Balthandler {
+            substreams: Vec::new(),
+            proto: worker::new_worker_protocol(),
+            keep_alive: Self::default_keep_alive(),
+            next_connec_unique_id: UniqueConnecId(0),
+            _marker: Default::default(),
+        }
+    }
+}
+
+impl<TSubstream, TUserData> ProtocolsHandler for Balthandler<TSubstream, TUserData>
 where
     TSubstream: AsyncRead + AsyncWrite + Send + Unpin + 'static,
     TUserData: fmt::Debug, // + Clone,
 {
-    type InEvent = MyHandlerEventIn<TUserData>;
-    type OutEvent = MyHandlerEventOut<TUserData>;
+    type InEvent = BalthandlerEventIn<TUserData>;
+    type OutEvent = BalthandlerEventOut<TUserData>;
     type Error = io::Error;
     type Substream = TSubstream;
     type InboundProtocol = ProtoBufProtocol<WorkerMsgWrapper>;
@@ -246,7 +266,7 @@ where
 
     fn listen_protocol(&self) -> SubstreamProtocol<Self::InboundProtocol> {
         // eprintln!("New listen protocol");
-        SubstreamProtocol::new(Self::InboundProtocol::default())
+        SubstreamProtocol::new(worker::new_worker_protocol())
     }
 
     fn inject_fully_negotiated_inbound(
@@ -274,7 +294,7 @@ where
     fn inject_event(&mut self, event: Self::InEvent) {
         eprintln!("Event injected in Handler from Behaviour: {:?}", event);
         match event {
-            MyHandlerEventIn::ManagerAnswer {
+            BalthandlerEventIn::ManagerAnswer {
                 accepted,
                 request_id,
             } => {
@@ -296,17 +316,17 @@ where
                     self.substreams.push(evt);
                 }
             }
-            MyHandlerEventIn::ManagerRequest { user_data } => {
+            BalthandlerEventIn::ManagerRequest { user_data } => {
                 let msg = worker::ManagerRequest {}.into();
                 let evt = SubstreamState::OutPendingOpen(msg, Some(user_data));
                 self.substreams.push(evt);
             }
-            MyHandlerEventIn::NodeTypeRequest { user_data } => {
+            BalthandlerEventIn::NodeTypeRequest { user_data } => {
                 let msg = worker::NodeTypeRequest {}.into();
                 let evt = SubstreamState::OutPendingOpen(msg, Some(user_data));
                 self.substreams.push(evt);
             }
-            MyHandlerEventIn::NodeTypeAnswer {
+            BalthandlerEventIn::NodeTypeAnswer {
                 node_type,
                 request_id,
             } => {
@@ -330,7 +350,7 @@ where
                     self.substreams.push(evt);
                 }
             }
-            MyHandlerEventIn::Dummy => (),
+            BalthandlerEventIn::Dummy => (),
         }
     }
 
@@ -420,7 +440,7 @@ fn advance_substream<TSubstream, TUserData>(
         ProtocolsHandlerEvent<
             ProtoBufProtocol<WorkerMsgWrapper>,
             (WorkerMsgWrapper, Option<TUserData>),
-            MyHandlerEventOut<TUserData>,
+            BalthandlerEventOut<TUserData>,
             io::Error,
         >,
     >,
@@ -447,8 +467,8 @@ where
                     Err(error) => {
                         let event = if let Some(user_data) = user_data {
                             Some(ProtocolsHandlerEvent::Custom(
-                                MyHandlerEventOut::QueryError {
-                                    error: MyHandlerQueryErr::Io(error),
+                                BalthandlerEventOut::QueryError {
+                                    error: BalthandlerQueryErr::Io(error),
                                     user_data,
                                 },
                             ))
@@ -462,8 +482,8 @@ where
                 Poll::Ready(Err(error)) => {
                     let event = if let Some(user_data) = user_data {
                         Some(ProtocolsHandlerEvent::Custom(
-                            MyHandlerEventOut::QueryError {
-                                error: MyHandlerQueryErr::Io(error),
+                            BalthandlerEventOut::QueryError {
+                                error: BalthandlerQueryErr::Io(error),
                                 user_data,
                             },
                         ))
@@ -488,8 +508,8 @@ where
                 Poll::Ready(Err(error)) => {
                     let event = if let Some(user_data) = user_data {
                         Some(ProtocolsHandlerEvent::Custom(
-                            MyHandlerEventOut::QueryError {
-                                error: MyHandlerQueryErr::Io(error),
+                            BalthandlerEventOut::QueryError {
+                                error: BalthandlerQueryErr::Io(error),
                                 user_data,
                             },
                         ))
@@ -518,15 +538,15 @@ where
                 }
                 Poll::Pending => (Some(OutWaitingAnswer(substream, user_data)), None, false),
                 Poll::Ready(Some(Err(error))) => {
-                    let event = MyHandlerEventOut::QueryError {
+                    let event = BalthandlerEventOut::QueryError {
                         error: error.into(),
                         user_data,
                     };
                     (None, Some(ProtocolsHandlerEvent::Custom(event)), false)
                 }
                 Poll::Ready(None) => {
-                    let event = MyHandlerEventOut::QueryError {
-                        error: MyHandlerQueryErr::Io(io::ErrorKind::UnexpectedEof.into()),
+                    let event = BalthandlerEventOut::QueryError {
+                        error: BalthandlerQueryErr::Io(io::ErrorKind::UnexpectedEof.into()),
                         user_data,
                     };
                     (None, Some(ProtocolsHandlerEvent::Custom(event)), false)
@@ -535,7 +555,7 @@ where
         }
         OutReportError(error, user_data) => {
             // println!("OutReportError");
-            let event = MyHandlerEventOut::QueryError { error, user_data };
+            let event = BalthandlerEventOut::QueryError { error, user_data };
             (None, Some(ProtocolsHandlerEvent::Custom(event)), false)
         }
         OutClosing(mut stream) => {
@@ -609,12 +629,12 @@ where
 fn process_request<TUserData>(
     event: WorkerMsgWrapper,
     connec_unique_id: UniqueConnecId,
-) -> Option<Result<MyHandlerEventOut<TUserData>, io::Error>> {
+) -> Option<Result<BalthandlerEventOut<TUserData>, io::Error>> {
     eprintln!("process_request {:?}", event);
     if let Some(msg) = event.msg {
         match msg /*event.msg.expect("empty protobuf oneof")*/ {
         WorkerMsg::NodeTypeRequest(worker::NodeTypeRequest {}) => {
-            Some(Ok(MyHandlerEventOut::NodeTypeRequest {
+            Some(Ok(BalthandlerEventOut::NodeTypeRequest {
                 request_id: MyRequestId { connec_unique_id },
             }))
         }
@@ -629,7 +649,7 @@ fn process_request<TUserData>(
 fn process_answer<TUserData>(
     event: WorkerMsgWrapper,
     user_data: TUserData,
-) -> Option<MyHandlerEventOut<TUserData>> {
+) -> Option<BalthandlerEventOut<TUserData>> {
     eprintln!("process_answer {:?}", event);
     if let Some(msg) = event.msg {
         match msg /*event.msg.expect("empty protobuf oneof")*/ {
@@ -640,7 +660,7 @@ fn process_answer<TUserData>(
                     node_type
                 ))
                 .into();
-            Some(MyHandlerEventOut::NodeTypeAnswer {
+            Some(BalthandlerEventOut::NodeTypeAnswer {
                 node_type,
                 user_data,
             })

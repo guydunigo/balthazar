@@ -170,14 +170,36 @@ dependencies = [
 [[package]]
 name = "balthacli"
 version = "0.0.0"
+dependencies = [
+ "balthalib",
+]
 
 [[package]]
 name = "balthalib"
 version = "0.0.0"
+dependencies = [
+ "balthastore",
+ "balthernet",
+]
+
+[[package]]
+name = "balthamisc"
+version = "0.1.0"
+dependencies = [
+ "balthaproto",
+]
 
 [[package]]
 name = "balthaproto"
-version = "0.0.0"
+version = "0.1.0"
+dependencies = [
+ "bytes 0.5.4",
+ "futures 0.3.1",
+ "futures_codec 0.4.0",
+ "libp2p",
+ "prost",
+ "prost-build",
+]
 
 [[package]]
 name = "balthastore"
@@ -196,6 +218,9 @@ dependencies = [
 name = "balthernet"
 version = "0.1.0"
 dependencies = [
+ "balthamisc",
+ "balthaproto",
+ "futures 0.3.1",
  "libp2p",
 ]
 
@@ -856,6 +881,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "futures_codec"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fe8859feb7140742ed1a2a85a07941100ad2b5f98a421b353931d718a34144d1"
+dependencies = [
+ "bytes 0.5.4",
+ "futures 0.3.1",
+ "memchr",
+ "pin-project",
+]
+
+[[package]]
 name = "gcc"
 version = "0.3.55"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1315,7 +1352,7 @@ dependencies = [
  "bytes 0.5.4",
  "fnv",
  "futures 0.3.1",
- "futures_codec",
+ "futures_codec 0.3.4",
  "libp2p-core",
  "libp2p-swarm",
  "log",
@@ -1356,7 +1393,7 @@ dependencies = [
  "either",
  "fnv",
  "futures 0.3.1",
- "futures_codec",
+ "futures_codec 0.3.4",
  "libp2p-core",
  "libp2p-swarm",
  "log",
@@ -1403,7 +1440,7 @@ dependencies = [
  "bytes 0.5.4",
  "fnv",
  "futures 0.3.1",
- "futures_codec",
+ "futures_codec 0.3.4",
  "libp2p-core",
  "log",
  "parking_lot 0.10.0",
@@ -1453,7 +1490,7 @@ checksum = "195fda6b6a948a242fd30570e0e3418ae8e0a20055ea75d45458e1079a8efb05"
 dependencies = [
  "bytes 0.5.4",
  "futures 0.3.1",
- "futures_codec",
+ "futures_codec 0.3.4",
  "libp2p-core",
  "log",
  "prost",
@@ -2810,7 +2847,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c689459fbaeb50e56c6749275f084decfd02194ac5852e6617d95d0d3cf02eaf"
 dependencies = [
  "bytes 0.5.4",
- "futures_codec",
+ "futures_codec 0.3.4",
 ]
 
 [[package]]
