@@ -17,8 +17,8 @@ use futures::Stream;
 use libp2p::build_development_transport;
 // use libp2p::build_tcp_ws_secio_mplex_yamux;
 /// To avoid importing the whole libp2p crate in another one...
-pub use libp2p::identity;
-use libp2p::{identity::Keypair, swarm::Swarm, Multiaddr};
+pub use libp2p::{identity, Multiaddr};
+use libp2p::{identity::Keypair, swarm::Swarm};
 use misc::NodeType;
 
 pub mod balthazar;
