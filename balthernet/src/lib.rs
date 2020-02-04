@@ -28,8 +28,8 @@ pub use wrapper::BalthBehavioursWrapper;
 
 // TODO: better control over Swarm object and solve return type hell: use of channel ?
 // TODO: NodeType containing manager to try ?
-/// Creates a new swarm based on [`BalthBehaviour`] and a default transport and returns
-/// a stream of event coming out of [`BalthBehaviour`].
+/// Creates a new swarm based on [`BalthBehaviour`](`balthazar::BalthBehaviour`) and a default transport and returns
+/// a stream of event coming out of [`BalthBehaviour`](`balthazar::BalthBehaviour`).
 pub fn get_swarm(
     node_type: NodeType<()>,
     keypair: Keypair,
@@ -38,6 +38,7 @@ pub fn get_swarm(
 ) -> impl Stream<Item = balthazar::BalthBehaviourEvent> {
     let keypair_public = keypair.public();
     let peer_id = keypair_public.clone().into_peer_id();
+    // TODO: retry that
     // let net_behaviour = BalthBehavioursWrapper::new(node_type, keypair.public());
     let net_behaviour = balthazar::BalthBehaviour::new(node_type);
 

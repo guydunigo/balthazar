@@ -10,5 +10,5 @@ edition = "2018"
 balthaproto = { path = "../balthaproto" }
 balthamisc = { path = "../balthamisc" }
 libp2p = "0.15.0"
-futures = "0.3.1"
+futures = "0.3.2"
 void = "1.0.2"

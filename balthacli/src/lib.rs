@@ -12,6 +12,8 @@ pub fn run() {
         _ => NodeType::Worker(()),
     };
 
+    println!("Starting as {:?}...", node_type);
+
     let listen_addr: Multiaddr = if let NodeType::Manager = node_type {
         "/ip4/0.0.0.0/tcp/3333"
     } else {
