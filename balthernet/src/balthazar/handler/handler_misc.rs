@@ -1,9 +1,22 @@
-//! This module is greatly inspired from [`libp2p::kad::handler::KademliaHandler`].
+//! Different classes/functions used by the [`Balthandler`](`super::Balthandler`).
 //!
-//! Different classes used by the [`Balthandler`](`super::Balthandler`).
-use libp2p::swarm::ProtocolsHandlerUpgrErr;
+//! This module is greatly inspired from [`libp2p::kad::handler::KademliaHandler`].
+use futures::{
+    io::{AsyncRead, AsyncWrite},
+    sink::Sink,
+    Stream,
+};
+use libp2p::swarm::{ProtocolsHandlerEvent, ProtocolsHandlerUpgrErr, SubstreamProtocol};
+use proto::protobuf::ProtoBufProtocol;
 use proto::protobuf::ProtoBufProtocolSink;
-use std::{error, fmt, io};
+use proto::worker::WorkerMsgWrapper;
+use std::{
+    error, fmt, io,
+    pin::Pin,
+    task::{Context, Poll},
+};
+
+use super::{process_answer, process_request, BalthandlerEventOut};
 
 /// Unique identifier for a connection.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
@@ -147,3 +160,206 @@ impl<TMessage, TUserData> SubstreamState<TMessage, TUserData> {
     }
 }
 */
+
+/// Advances one substream.
+///
+/// Returns the new state for that substream, an event to generate, and whether the substream
+/// should be polled again.
+pub fn advance_substream<TSubstream, TUserData>(
+    state: SubstreamState<WorkerMsgWrapper, TUserData>,
+    upgrade: ProtoBufProtocol<WorkerMsgWrapper>,
+    cx: &mut Context,
+) -> (
+    // New substream if it needs to be used again:
+    Option<SubstreamState<WorkerMsgWrapper, TUserData>>,
+    // Answer event with the action to do (send ask for new substream, error, send event to
+    // behaviour, ...):
+    Option<
+        ProtocolsHandlerEvent<
+            ProtoBufProtocol<WorkerMsgWrapper>,
+            (WorkerMsgWrapper, Option<TUserData>),
+            BalthandlerEventOut<TUserData>,
+            io::Error,
+        >,
+    >,
+    // Should the substream be polled again:
+    bool,
+)
+where
+    TSubstream: AsyncRead + AsyncWrite + Unpin,
+{
+    use SubstreamState::*;
+    match state {
+        OutPendingOpen(msg, user_data) => {
+            let evt = ProtocolsHandlerEvent::OutboundSubstreamRequest {
+                protocol: SubstreamProtocol::new(upgrade),
+                info: (msg, user_data),
+            };
+            // println!("OutPendingOpen");
+            (None, Some(evt), false)
+        }
+        OutPendingSend(mut substream, msg, user_data) => {
+            // println!("OutPendingSend");
+            match Sink::poll_ready(Pin::new(&mut substream), cx) {
+                Poll::Ready(Ok(_)) => match Sink::start_send(Pin::new(&mut substream), msg) {
+                    Ok(_) => (Some(OutPendingFlush(substream, user_data)), None, true),
+                    Err(error) => {
+                        let event = if let Some(user_data) = user_data {
+                            Some(ProtocolsHandlerEvent::Custom(
+                                BalthandlerEventOut::QueryError {
+                                    error: BalthandlerQueryErr::Io(error),
+                                    user_data,
+                                },
+                            ))
+                        } else {
+                            None
+                        };
+                        (None, event, false)
+                    }
+                },
+                Poll::Pending => (Some(OutPendingSend(substream, msg, user_data)), None, false),
+                Poll::Ready(Err(error)) => {
+                    let event = if let Some(user_data) = user_data {
+                        Some(ProtocolsHandlerEvent::Custom(
+                            BalthandlerEventOut::QueryError {
+                                error: BalthandlerQueryErr::Io(error),
+                                user_data,
+                            },
+                        ))
+                    } else {
+                        None
+                    };
+                    (None, event, false)
+                }
+            }
+        }
+        OutPendingFlush(mut substream, user_data) => {
+            // println!("OutPendingFlush");
+            match Sink::poll_flush(Pin::new(&mut substream), cx) {
+                Poll::Ready(Ok(())) => {
+                    if let Some(user_data) = user_data {
+                        (Some(OutWaitingAnswer(substream, user_data)), None, true)
+                    } else {
+                        (Some(OutClosing(substream)), None, true)
+                    }
+                }
+                Poll::Pending => (Some(OutPendingFlush(substream, user_data)), None, false),
+                Poll::Ready(Err(error)) => {
+                    let event = if let Some(user_data) = user_data {
+                        Some(ProtocolsHandlerEvent::Custom(
+                            BalthandlerEventOut::QueryError {
+                                error: BalthandlerQueryErr::Io(error),
+                                user_data,
+                            },
+                        ))
+                    } else {
+                        None
+                    };
+
+                    (None, event, false)
+                }
+            }
+        }
+        OutWaitingAnswer(mut substream, user_data) => {
+            // println!("OutWaitingAnswer");
+            match Stream::poll_next(Pin::new(&mut substream), cx) {
+                Poll::Ready(Some(Ok(msg))) => {
+                    let new_state = OutClosing(substream);
+                    if let Some(event) = process_answer(msg, user_data) {
+                        (
+                            Some(new_state),
+                            Some(ProtocolsHandlerEvent::Custom(event)),
+                            true,
+                        )
+                    } else {
+                        (Some(new_state), None, true)
+                    }
+                }
+                Poll::Pending => (Some(OutWaitingAnswer(substream, user_data)), None, false),
+                Poll::Ready(Some(Err(error))) => {
+                    let event = BalthandlerEventOut::QueryError {
+                        error: error.into(),
+                        user_data,
+                    };
+                    (None, Some(ProtocolsHandlerEvent::Custom(event)), false)
+                }
+                Poll::Ready(None) => {
+                    let event = BalthandlerEventOut::QueryError {
+                        error: BalthandlerQueryErr::Io(io::ErrorKind::UnexpectedEof.into()),
+                        user_data,
+                    };
+                    (None, Some(ProtocolsHandlerEvent::Custom(event)), false)
+                }
+            }
+        }
+        OutReportError(error, user_data) => {
+            // println!("OutReportError");
+            let event = BalthandlerEventOut::QueryError { error, user_data };
+            (None, Some(ProtocolsHandlerEvent::Custom(event)), false)
+        }
+        OutClosing(mut stream) => {
+            // println!("OutClosing");
+            match Sink::poll_close(Pin::new(&mut stream), cx) {
+                Poll::Ready(Ok(())) => (None, None, false),
+                Poll::Pending => (Some(OutClosing(stream)), None, false),
+                Poll::Ready(Err(_)) => (None, None, false),
+            }
+        }
+        InWaitingMessage(id, mut substream) => {
+            // println!("InWaitingMessage");
+            match Stream::poll_next(Pin::new(&mut substream), cx) {
+                Poll::Ready(Some(Ok(msg))) => {
+                    if let Some(Ok(ev)) = process_request(msg, id) {
+                        (
+                            Some(InWaitingUser(id, substream)),
+                            Some(ProtocolsHandlerEvent::Custom(ev)),
+                            false,
+                        )
+                    } else {
+                        (Some(InClosing(substream)), None, true)
+                    }
+                }
+                Poll::Pending => (Some(InWaitingMessage(id, substream)), None, false),
+                Poll::Ready(None) => {
+                    eprintln!("Inbound substream: EOF");
+                    (None, None, false)
+                }
+                Poll::Ready(Some(Err(e))) => {
+                    eprintln!("Inbound substream error: {:?}", e);
+                    (None, None, false)
+                }
+            }
+        }
+        InWaitingUser(id, substream) => {
+            // println!("InWaitingUser");
+            (Some(InWaitingUser(id, substream)), None, false)
+        }
+        InPendingSend(id, mut substream, msg) => {
+            // println!("InPendingSend");
+            match Sink::poll_ready(Pin::new(&mut substream), cx) {
+                Poll::Ready(Ok(())) => match Sink::start_send(Pin::new(&mut substream), msg) {
+                    Ok(()) => (Some(InPendingFlush(id, substream)), None, true),
+                    Err(_) => (None, None, false),
+                },
+                Poll::Pending => (Some(InPendingSend(id, substream, msg)), None, false),
+                Poll::Ready(Err(_)) => (None, None, false),
+            }
+        }
+        InPendingFlush(id, mut substream) => {
+            // println!("InPendingFlush");
+            match Sink::poll_flush(Pin::new(&mut substream), cx) {
+                Poll::Ready(Ok(())) => (Some(InWaitingMessage(id, substream)), None, true),
+                Poll::Pending => (Some(InPendingFlush(id, substream)), None, false),
+                Poll::Ready(Err(_)) => (None, None, false),
+            }
+        }
+        InClosing(mut stream) => {
+            // println!("InClosing");
+            match Sink::poll_close(Pin::new(&mut stream), cx) {
+                Poll::Ready(Ok(())) => (None, None, false),
+                Poll::Pending => (Some(InClosing(stream)), None, false),
+                Poll::Ready(Err(_)) => (None, None, false),
+            }
+        }
+    }
+}
