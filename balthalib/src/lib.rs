@@ -34,14 +34,8 @@ pub async fn get_keypair(keyfile_path: &Path) -> Result<Keypair, BalthazarError>
     Keypair::rsa_from_pkcs8(&mut bytes).map_err(|e| BalthazarError::KeyDecodingError(e))
 }
 
-pub fn run(
-    node_type: NodeType<()>,
-    // keyfile_path: &Path,
-    listen_addr: Multiaddr,
-    addresses_to_dial: &[Multiaddr],
-) {
+pub fn run(node_type: NodeType<()>, listen_addr: Multiaddr, addresses_to_dial: &[Multiaddr]) {
     let fut = async move {
-        // let keypair = get_keypair(keyfile_path).await.unwrap();
         let keypair = balthernet::identity::Keypair::generate_secp256k1();
         let swarm = net::get_swarm(node_type, keypair, listen_addr, addresses_to_dial);
 

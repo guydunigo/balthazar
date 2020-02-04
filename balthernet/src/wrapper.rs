@@ -7,40 +7,57 @@ use libp2p::{
     kad::{record::store::MemoryStore, Kademlia, KademliaEvent, PutRecordOk, Record},
     mdns::{Mdns, MdnsEvent},
     ping::{Ping, PingEvent},
-    swarm::NetworkBehaviourEventProcess,
+    swarm::{
+        protocols_handler::{IntoProtocolsHandler, ProtocolsHandler},
+        NetworkBehaviour, NetworkBehaviourAction, NetworkBehaviourEventProcess,
+    },
     NetworkBehaviour,
 };
+use std::task::{Context, Poll};
 
 use super::balthazar::{BalthBehaviour, BalthBehaviourEvent, BalthBehaviourKindOfEvent};
 use misc::NodeType;
 
 /// Use several [`NetworkBehaviour`](`libp2p::swarm::NetworkBehaviour`) at the same time.
 #[derive(NetworkBehaviour)]
-pub struct BalthBehavioursWrapper<TSubstream> {
+#[behaviour(poll_method = "poll")]
+#[behaviour(out_event = "BalthBehaviourEvent")]
+pub struct BalthBehavioursWrapper<TSubstream>
+where
+    TSubstream: 'static + Send + Sync + Unpin + AsyncRead + AsyncWrite,
+{
     balthbehaviour: BalthBehaviour<TSubstream>,
-    ping: Ping<TSubstream>,
     mdns: Mdns<TSubstream>,
+    ping: Ping<TSubstream>,
     kademlia: Kademlia<TSubstream, MemoryStore>,
     identify: Identify<TSubstream>,
 }
 
-impl<T> BalthBehavioursWrapper<T> {
+impl<T> BalthBehavioursWrapper<T>
+where
+    T: 'static + Send + Sync + Unpin + AsyncRead + AsyncWrite,
+{
     pub fn new(node_type: NodeType<()>, pub_key: PublicKey) -> Self {
         let local_peer_id = pub_key.clone().into_peer_id();
         let store = MemoryStore::new(local_peer_id.clone());
         BalthBehavioursWrapper {
             balthbehaviour: BalthBehaviour::new(node_type),
-            ping: Ping::default(),
             mdns: Mdns::new().expect("Couldn't create a Mdns NetworkBehaviour"),
+            ping: Ping::default(),
             kademlia: Kademlia::new(local_peer_id, store),
             identify: Identify::new("1.0".to_string(), "3.0".to_string(), pub_key),
         }
+    }
+
+fn poll(&mut self, _cx: &mut Context) -> Poll<NetworkBehaviourAction<<<<Self as NetworkBehaviour>::ProtocolsHandler as IntoProtocolsHandler>::Handler as ProtocolsHandler>::InEvent, <Self as NetworkBehaviour>::OutEvent>>{
+        // TODO: forward different events
+        Poll::Pending
     }
 }
 
 impl<T> NetworkBehaviourEventProcess<BalthBehaviourEvent> for BalthBehavioursWrapper<T>
 where
-    T: AsyncRead + AsyncWrite,
+    T: 'static + Send + Sync + Unpin + AsyncRead + AsyncWrite,
 {
     fn inject_event(&mut self, event: BalthBehaviourEvent) {
         eprintln!("Event from BalthBehaviourEvent for {:?}", event.peer_id());
@@ -49,7 +66,7 @@ where
 
 impl<T> NetworkBehaviourEventProcess<MdnsEvent> for BalthBehavioursWrapper<T>
 where
-    T: AsyncRead + AsyncWrite,
+    T: 'static + Send + Sync + Unpin + AsyncRead + AsyncWrite,
 {
     // Called when `mdns` produces an event.
     fn inject_event(&mut self, event: MdnsEvent) {
@@ -70,7 +87,7 @@ where
 
 impl<T> NetworkBehaviourEventProcess<KademliaEvent> for BalthBehavioursWrapper<T>
 where
-    T: AsyncRead + AsyncWrite,
+    T: 'static + Send + Sync + Unpin + AsyncRead + AsyncWrite,
 {
     // Called when `kademlia` produces an event.
     fn inject_event(&mut self, message: KademliaEvent) {
@@ -103,7 +120,7 @@ where
 
 impl<T> NetworkBehaviourEventProcess<IdentifyEvent> for BalthBehavioursWrapper<T>
 where
-    T: AsyncRead + AsyncWrite,
+    T: 'static + Send + Sync + Unpin + AsyncRead + AsyncWrite,
 {
     // Called when `mdns` produces an event.
     fn inject_event(&mut self, event: IdentifyEvent) {
@@ -122,7 +139,7 @@ where
 
 impl<T> NetworkBehaviourEventProcess<PingEvent> for BalthBehavioursWrapper<T>
 where
-    T: AsyncRead + AsyncWrite,
+    T: 'static + Send + Sync + Unpin + AsyncRead + AsyncWrite,
 {
     fn inject_event(&mut self, event: PingEvent) {
         match event.result {

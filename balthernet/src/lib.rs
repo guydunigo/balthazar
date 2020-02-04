@@ -39,8 +39,8 @@ pub fn get_swarm(
     let keypair_public = keypair.public();
     let peer_id = keypair_public.clone().into_peer_id();
     // TODO: retry that
-    // let net_behaviour = BalthBehavioursWrapper::new(node_type, keypair.public());
-    let net_behaviour = balthazar::BalthBehaviour::new(node_type);
+    let net_behaviour = BalthBehavioursWrapper::new(node_type, keypair.public());
+    // let net_behaviour = balthazar::BalthBehaviour::new(node_type);
 
     // TODO: inspect the two build things and errors
     // let transport = tcp_transport::get_tcp_transport(keypair);
