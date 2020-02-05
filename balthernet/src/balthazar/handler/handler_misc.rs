@@ -16,7 +16,7 @@ use std::{
     task::{Context, Poll},
 };
 
-use super::{process_answer, process_request, BalthandlerEventOut};
+use super::{process_answer, process_request, EventOut};
 
 /// Unique identifier for a connection.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
@@ -178,7 +178,7 @@ pub fn advance_substream<TSubstream, TUserData>(
         ProtocolsHandlerEvent<
             ProtoBufProtocol<WorkerMsgWrapper>,
             (WorkerMsgWrapper, Option<TUserData>),
-            BalthandlerEventOut<TUserData>,
+            EventOut<TUserData>,
             io::Error,
         >,
     >,
@@ -205,12 +205,10 @@ where
                     Ok(_) => (Some(OutPendingFlush(substream, user_data)), None, true),
                     Err(error) => {
                         let event = if let Some(user_data) = user_data {
-                            Some(ProtocolsHandlerEvent::Custom(
-                                BalthandlerEventOut::QueryError {
-                                    error: BalthandlerQueryErr::Io(error),
-                                    user_data,
-                                },
-                            ))
+                            Some(ProtocolsHandlerEvent::Custom(EventOut::QueryError {
+                                error: BalthandlerQueryErr::Io(error),
+                                user_data,
+                            }))
                         } else {
                             None
                         };
@@ -220,12 +218,10 @@ where
                 Poll::Pending => (Some(OutPendingSend(substream, msg, user_data)), None, false),
                 Poll::Ready(Err(error)) => {
                     let event = if let Some(user_data) = user_data {
-                        Some(ProtocolsHandlerEvent::Custom(
-                            BalthandlerEventOut::QueryError {
-                                error: BalthandlerQueryErr::Io(error),
-                                user_data,
-                            },
-                        ))
+                        Some(ProtocolsHandlerEvent::Custom(EventOut::QueryError {
+                            error: BalthandlerQueryErr::Io(error),
+                            user_data,
+                        }))
                     } else {
                         None
                     };
@@ -246,12 +242,10 @@ where
                 Poll::Pending => (Some(OutPendingFlush(substream, user_data)), None, false),
                 Poll::Ready(Err(error)) => {
                     let event = if let Some(user_data) = user_data {
-                        Some(ProtocolsHandlerEvent::Custom(
-                            BalthandlerEventOut::QueryError {
-                                error: BalthandlerQueryErr::Io(error),
-                                user_data,
-                            },
-                        ))
+                        Some(ProtocolsHandlerEvent::Custom(EventOut::QueryError {
+                            error: BalthandlerQueryErr::Io(error),
+                            user_data,
+                        }))
                     } else {
                         None
                     };
@@ -277,14 +271,14 @@ where
                 }
                 Poll::Pending => (Some(OutWaitingAnswer(substream, user_data)), None, false),
                 Poll::Ready(Some(Err(error))) => {
-                    let event = BalthandlerEventOut::QueryError {
+                    let event = EventOut::QueryError {
                         error: error.into(),
                         user_data,
                     };
                     (None, Some(ProtocolsHandlerEvent::Custom(event)), false)
                 }
                 Poll::Ready(None) => {
-                    let event = BalthandlerEventOut::QueryError {
+                    let event = EventOut::QueryError {
                         error: BalthandlerQueryErr::Io(io::ErrorKind::UnexpectedEof.into()),
                         user_data,
                     };
@@ -294,7 +288,7 @@ where
         }
         OutReportError(error, user_data) => {
             // println!("OutReportError");
-            let event = BalthandlerEventOut::QueryError { error, user_data };
+            let event = EventOut::QueryError { error, user_data };
             (None, Some(ProtocolsHandlerEvent::Custom(event)), false)
         }
         OutClosing(mut stream) => {

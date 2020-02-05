@@ -231,6 +231,7 @@ dependencies = [
  "balthaproto",
  "futures 0.3.2",
  "libp2p",
+ "tokio",
  "void",
 ]
 

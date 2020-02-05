@@ -37,11 +37,14 @@ pub async fn get_keypair(keyfile_path: &Path) -> Result<Keypair, BalthazarError>
 pub fn run(node_type: NodeType<()>, listen_addr: Multiaddr, addresses_to_dial: &[Multiaddr]) {
     let fut = async move {
         let keypair = balthernet::identity::Keypair::generate_secp256k1();
-        let swarm = net::get_swarm(node_type, keypair, listen_addr, addresses_to_dial);
+        let (swarm, mut inbound_tx) =
+            net::get_swarm(node_type, keypair, listen_addr, addresses_to_dial);
+
+        inbound_tx.send(net::EventIn::Ping).await.unwrap();
 
         swarm
             .for_each(|e| {
-                eprintln!("S  --- event: {:?}", e);
+                eprintln!("S --- event: {:?}", e);
                 future::ready(())
             })
             .await;

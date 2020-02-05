@@ -5,12 +5,12 @@
 //! ## Procedure when adding events or new kinds of messages
 //!
 //! To handle new messages:
-//! 1. add new events in [`BalthandlerEventIn`] and [`BalthandlerEventOut`],
-//! 2. for each new [`BalthandlerEventIn`], extend the `inject_event` function,
+//! 1. add new events in [`EventIn`] and [`EventOut`],
+//! 2. for each new [`EventIn`], extend the `inject_event` function,
 //! 3. for each new request message which should be forwarded to the behviour, extend
-//!    the `process_request` function to create the corresponding [`BalthandlerEventOut`],
+//!    the `process_request` function to create the corresponding [`EventOut`],
 //! 4. for each new answer message which should be forwarded to the behviour, extend
-//!    the `process_answer` function to create the corresponding [`BalthandlerEventOut`].
+//!    the `process_answer` function to create the corresponding [`EventOut`].
 use futures::io::{AsyncRead, AsyncWrite};
 use libp2p::{
     core::{InboundUpgrade, OutboundUpgrade},
@@ -93,8 +93,8 @@ where
     TSubstream: AsyncRead + AsyncWrite + Send + Unpin + 'static,
     TUserData: fmt::Debug,
 {
-    type InEvent = BalthandlerEventIn<TUserData>;
-    type OutEvent = BalthandlerEventOut<TUserData>;
+    type InEvent = EventIn<TUserData>;
+    type OutEvent = EventOut<TUserData>;
     type Error = io::Error;
     type Substream = TSubstream;
     type InboundProtocol = ProtoBufProtocol<WorkerMsgWrapper>;
@@ -164,22 +164,22 @@ where
 
         // eprintln!("Event injected in Handler from Behaviour: {:?}", event);
         match event {
-            BalthandlerEventIn::ManagerAnswer {
+            EventIn::ManagerAnswer {
                 accepted,
                 request_id,
             } => {
                 let msg = worker::ManagerAnswer { accepted }.into();
                 inject_answer_event_to_peer_request(&mut self.substreams, request_id, msg)
             }
-            BalthandlerEventIn::ManagerRequest { user_data } => {
+            EventIn::ManagerRequest { user_data } => {
                 let msg = worker::ManagerRequest {}.into();
                 inject_new_request_event(&mut self.substreams, user_data, msg)
             }
-            BalthandlerEventIn::NodeTypeRequest { user_data } => {
+            EventIn::NodeTypeRequest { user_data } => {
                 let msg = worker::NodeTypeRequest {}.into();
                 inject_new_request_event(&mut self.substreams, user_data, msg)
             }
-            BalthandlerEventIn::NodeTypeAnswer {
+            EventIn::NodeTypeAnswer {
                 node_type,
                 request_id,
             } => {
@@ -278,7 +278,7 @@ where
 /// [`BalthBehaviour`](`super::BalthBehaviour`)),
 /// - `request_id`: for answers at peer's requests coming.
 #[derive(Debug)]
-pub enum BalthandlerEventIn<TUserData> {
+pub enum EventIn<TUserData> {
     ManagerRequest {
         user_data: TUserData,
     },
@@ -302,7 +302,7 @@ pub enum BalthandlerEventIn<TUserData> {
 /// - `user_data`: for answers to our requests from the peer,
 /// - `request_id`: for requests coming from the peer (i.e. through the [`BalthBehaviour`](`super::BalthBehaviour`)).
 #[derive(Debug)]
-pub enum BalthandlerEventOut<TUserData> {
+pub enum EventOut<TUserData> {
     NodeTypeAnswer {
         node_type: NodeType<()>,
         user_data: TUserData,
@@ -327,12 +327,12 @@ pub enum BalthandlerEventOut<TUserData> {
 fn process_request<TUserData>(
     event: WorkerMsgWrapper,
     connec_unique_id: UniqueConnecId,
-) -> Option<Result<BalthandlerEventOut<TUserData>, io::Error>> {
+) -> Option<Result<EventOut<TUserData>, io::Error>> {
     // eprintln!("process_request {:?}", event);
     if let Some(msg) = event.msg {
         match msg {
             WorkerMsg::NodeTypeRequest(worker::NodeTypeRequest {}) => {
-                Some(Ok(BalthandlerEventOut::NodeTypeRequest {
+                Some(Ok(EventOut::NodeTypeRequest {
                     request_id: RequestId::new(connec_unique_id),
                 }))
             }
@@ -347,7 +347,7 @@ fn process_request<TUserData>(
 fn process_answer<TUserData>(
     event: WorkerMsgWrapper,
     user_data: TUserData,
-) -> Option<BalthandlerEventOut<TUserData>> {
+) -> Option<EventOut<TUserData>> {
     // eprintln!("process_answer {:?}", event);
     if let Some(msg) = event.msg {
         match msg /*event.msg.expect("empty protobuf oneof")*/ {
@@ -358,7 +358,7 @@ fn process_answer<TUserData>(
                     node_type
                 ))
                 .into();
-            Some(BalthandlerEventOut::NodeTypeAnswer {
+            Some(EventOut::NodeTypeAnswer {
                 node_type,
                 user_data,
             })

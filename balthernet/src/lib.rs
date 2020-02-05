@@ -13,6 +13,7 @@ extern crate balthamisc as misc;
 extern crate balthaproto as proto;
 extern crate futures;
 extern crate libp2p;
+extern crate tokio;
 extern crate void;
 
 use futures::Stream;
@@ -22,12 +23,15 @@ use libp2p::build_development_transport;
 pub use libp2p::{identity, Multiaddr};
 use libp2p::{identity::Keypair, swarm::Swarm};
 use misc::NodeType;
+use tokio::sync::mpsc::Sender;
 
 pub mod balthazar;
 pub mod tcp_transport;
 mod wrapper;
+pub use balthazar::{EventIn, EventOut};
 pub use wrapper::BalthBehavioursWrapper;
 
+// TODO: Better interface with wrapper object
 // TODO: better control over Swarm object and solve return type hell: use of channel ?
 // TODO: NodeType containing manager to try ?
 /// Creates a new swarm based on [`BalthBehaviour`](`balthazar::BalthBehaviour`) and a default transport and returns
@@ -37,10 +41,13 @@ pub fn get_swarm(
     keypair: Keypair,
     listen_addr: Multiaddr,
     addresses_to_dial: &[Multiaddr],
-) -> impl Stream<Item = balthazar::BalthBehaviourEventOut> {
+) -> (
+    impl Stream<Item = balthazar::EventOut>,
+    Sender<balthazar::EventIn>,
+) {
     let keypair_public = keypair.public();
     let peer_id = keypair_public.into_peer_id();
-    let net_behaviour = BalthBehavioursWrapper::new(node_type, keypair.public());
+    let (net_behaviour, tx) = BalthBehavioursWrapper::new(node_type, keypair.public());
 
     // TODO: inspect the two build things and errors
     // let transport = tcp_transport::get_tcp_transport(keypair);
@@ -60,7 +67,7 @@ pub fn get_swarm(
         println!("Listening on {}", addr);
     }
 
-    swarm
+    (swarm, tx)
 }
 
 #[cfg(test)]

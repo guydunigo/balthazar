@@ -17,14 +17,15 @@ use std::{
     collections::VecDeque,
     task::{Context, Poll},
 };
+use tokio::sync::mpsc::Sender;
 
-use super::balthazar::{BalthBehaviour, BalthBehaviourEventOut};
+use super::balthazar::{self, BalthBehaviour};
 use misc::NodeType;
 
 /// Use several [`NetworkBehaviour`](`libp2p::swarm::NetworkBehaviour`) at the same time.
 #[derive(NetworkBehaviour)]
 #[behaviour(poll_method = "poll")]
-#[behaviour(out_event = "BalthBehaviourEventOut")]
+#[behaviour(out_event = "balthazar::EventOut")]
 pub struct BalthBehavioursWrapper<TSubstream>
 where
     TSubstream: 'static + Send + Sync + Unpin + AsyncRead + AsyncWrite,
@@ -35,24 +36,31 @@ where
     kademlia: Kademlia<TSubstream, MemoryStore>,
     // identify: Identify<TSubstream>,
     #[behaviour(ignore)]
-    events: VecDeque<BalthBehaviourEventOut>,
+    events: VecDeque<balthazar::EventOut>,
 }
 
 impl<T> BalthBehavioursWrapper<T>
 where
     T: 'static + Send + Sync + Unpin + AsyncRead + AsyncWrite,
 {
-    pub fn new(node_type: NodeType<()>, pub_key: PublicKey) -> Self {
+    /// Creates a new [`BalthBehavioursWrapper`] and returns a [`Sender`] channel
+    /// to communicate with it from the exterior of the Swarm.
+    pub fn new(node_type: NodeType<()>, pub_key: PublicKey) -> (Self, Sender<balthazar::EventIn>) {
         let local_peer_id = pub_key.into_peer_id();
         let store = MemoryStore::new(local_peer_id.clone());
-        BalthBehavioursWrapper {
-            balthbehaviour: BalthBehaviour::new(node_type),
-            mdns: Mdns::new().expect("Couldn't create a Mdns NetworkBehaviour"),
-            ping: Ping::default(),
-            kademlia: Kademlia::new(local_peer_id, store),
-            // identify: Identify::new("1.0".to_string(), "3.0".to_string(), pub_key),
-            events: Default::default(),
-        }
+        let (balthbehaviour, tx) = BalthBehaviour::new(node_type);
+
+        (
+            BalthBehavioursWrapper {
+                balthbehaviour,
+                mdns: Mdns::new().expect("Couldn't create a Mdns NetworkBehaviour"),
+                ping: Ping::default(),
+                kademlia: Kademlia::new(local_peer_id, store),
+                // identify: Identify::new("1.0".to_string(), "3.0".to_string(), pub_key),
+                events: Default::default(),
+            },
+            tx,
+        )
     }
 
 fn poll(&mut self, _cx: &mut Context) -> Poll<NetworkBehaviourAction<<<<Self as NetworkBehaviour>::ProtocolsHandler as IntoProtocolsHandler>::Handler as ProtocolsHandler>::InEvent, <Self as NetworkBehaviour>::OutEvent>>{
@@ -64,11 +72,11 @@ fn poll(&mut self, _cx: &mut Context) -> Poll<NetworkBehaviourAction<<<<Self as 
     }
 }
 
-impl<T> NetworkBehaviourEventProcess<BalthBehaviourEventOut> for BalthBehavioursWrapper<T>
+impl<T> NetworkBehaviourEventProcess<balthazar::EventOut> for BalthBehavioursWrapper<T>
 where
     T: 'static + Send + Sync + Unpin + AsyncRead + AsyncWrite,
 {
-    fn inject_event(&mut self, event: BalthBehaviourEventOut) {
+    fn inject_event(&mut self, event: balthazar::EventOut) {
         self.events.push_front(event);
     }
 }
