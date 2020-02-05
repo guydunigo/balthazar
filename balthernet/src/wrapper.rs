@@ -13,7 +13,10 @@ use libp2p::{
     },
     NetworkBehaviour,
 };
-use std::task::{Context, Poll};
+use std::{
+    collections::VecDeque,
+    task::{Context, Poll},
+};
 
 use super::balthazar::{BalthBehaviour, BalthBehaviourEvent, BalthBehaviourKindOfEvent};
 use misc::NodeType;
@@ -31,6 +34,8 @@ where
     ping: Ping<TSubstream>,
     kademlia: Kademlia<TSubstream, MemoryStore>,
     // identify: Identify<TSubstream>,
+    #[behaviour(ignore)]
+    events: VecDeque<BalthBehaviourEvent>,
 }
 
 impl<T> BalthBehavioursWrapper<T>
@@ -46,6 +51,7 @@ where
             ping: Ping::default(),
             kademlia: Kademlia::new(local_peer_id, store),
             // identify: Identify::new("1.0".to_string(), "3.0".to_string(), pub_key),
+            events: Default::default(),
         }
     }
 
@@ -61,6 +67,7 @@ where
 {
     fn inject_event(&mut self, event: BalthBehaviourEvent) {
         eprintln!("Event from BalthBehaviourEvent for {:?}", event.peer_id());
+        self.events.push_front(event);
     }
 }
 

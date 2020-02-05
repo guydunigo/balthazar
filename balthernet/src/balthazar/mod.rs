@@ -303,12 +303,12 @@ where
         _cx: &mut Context,
         _params: &mut impl PollParameters
 ) -> Poll<NetworkBehaviourAction<<<Self::ProtocolsHandler as IntoProtocolsHandler>::Handler as ProtocolsHandler>::InEvent, Self::OutEvent>>{
-        if let Some(e) = self.events.pop_back() {
+        while let Some(e) = self.events.pop_back() {
             let mut peer = self
                 .peers
                 .entry(e.peer_id.clone())
                 .or_insert_with(|| Peer::new(e.peer_id.clone()));
-            match e.event {
+            let answer = match e.event {
                 BalthBehaviourKindOfEvent::Mdns(_) if !peer.dialed => {
                     peer.dialed = true;
                     Poll::Ready(NetworkBehaviourAction::DialPeer { peer_id: e.peer_id })
@@ -366,31 +366,34 @@ where
                     // println!("Forwarding event {:?}", e);
                     Poll::Ready(NetworkBehaviourAction::GenerateEvent(e))
                 }
+            };
+
+            if let Poll::Ready(_) = answer {
+                return answer;
+            }
+        }
+        /*
+        if let NodeType::Worker(Some(ref manager_id)) = self.node_type {
+            match self.dummy_rx.poll_recv(cx) {
+                Poll::Ready(Some(BalthandlerEventIn::Dummy)) => {
+                    Poll::Ready(NetworkBehaviourAction::SendEvent {
+                        peer_id: manager_id.clone(),
+                        event: BalthandlerEventIn::ManagerRequest {
+                            user_data: self.next_query_unique_id(),
+                        },
+                    })
+                }
+                Poll::Ready(Some(event)) => Poll::Ready(NetworkBehaviourAction::SendEvent {
+                    peer_id: manager_id.clone(),
+                    event,
+                }),
+                Poll::Ready(None) => panic!("Dummy has died"),
+                Poll::Pending => Poll::Pending,
             }
         } else {
-            /*
-            if let NodeType::Worker(Some(ref manager_id)) = self.node_type {
-                match self.dummy_rx.poll_recv(cx) {
-                    Poll::Ready(Some(BalthandlerEventIn::Dummy)) => {
-                        Poll::Ready(NetworkBehaviourAction::SendEvent {
-                            peer_id: manager_id.clone(),
-                            event: BalthandlerEventIn::ManagerRequest {
-                                user_data: self.next_query_unique_id(),
-                            },
-                        })
-                    }
-                    Poll::Ready(Some(event)) => Poll::Ready(NetworkBehaviourAction::SendEvent {
-                        peer_id: manager_id.clone(),
-                        event,
-                    }),
-                    Poll::Ready(None) => panic!("Dummy has died"),
-                    Poll::Pending => Poll::Pending,
-                }
-            } else {
-                Poll::Pending
-            }
-            */
             Poll::Pending
         }
+        */
+        Poll::Pending
     }
 }
