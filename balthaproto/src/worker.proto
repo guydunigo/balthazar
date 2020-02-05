@@ -7,10 +7,6 @@ message Task {
  string args = 2;
 }
 
-message ManagerRequest {}
-message ManagerAnswer {
- bool accepted = 1;
-}
 message NodeTypeRequest {}
 message NodeTypeAnswer {
  NodeType node_type = 1;
@@ -23,10 +19,7 @@ enum NodeType {
 
 message WorkerMsgWrapper {
  oneof msg {
-   Task task = 1;
-   ManagerRequest manager_request = 2;
-   ManagerAnswer manager_answer = 3;
-   NodeTypeRequest node_type_request = 4;
-   NodeTypeAnswer node_type_answer = 5;
+   NodeTypeRequest node_type_request = 1;
+   NodeTypeAnswer node_type_answer = 2;
  }
 }

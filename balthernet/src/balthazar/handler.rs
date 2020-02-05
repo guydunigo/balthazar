@@ -164,17 +164,6 @@ where
 
         // eprintln!("Event injected in Handler from Behaviour: {:?}", event);
         match event {
-            EventIn::ManagerAnswer {
-                accepted,
-                request_id,
-            } => {
-                let msg = worker::ManagerAnswer { accepted }.into();
-                inject_answer_event_to_peer_request(&mut self.substreams, request_id, msg)
-            }
-            EventIn::ManagerRequest { user_data } => {
-                let msg = worker::ManagerRequest {}.into();
-                inject_new_request_event(&mut self.substreams, user_data, msg)
-            }
             EventIn::NodeTypeRequest { user_data } => {
                 let msg = worker::NodeTypeRequest {}.into();
                 inject_new_request_event(&mut self.substreams, user_data, msg)
@@ -279,13 +268,6 @@ where
 /// - `request_id`: for answers at peer's requests coming.
 #[derive(Debug)]
 pub enum EventIn<TUserData> {
-    ManagerRequest {
-        user_data: TUserData,
-    },
-    ManagerAnswer {
-        accepted: bool,
-        request_id: RequestId,
-    },
     NodeTypeRequest {
         user_data: TUserData,
     },
@@ -309,13 +291,6 @@ pub enum EventOut<TUserData> {
     },
     NodeTypeRequest {
         request_id: RequestId,
-    },
-    ManagerRequest {
-        request_id: RequestId,
-    },
-    ManagerAnswer {
-        answer: bool,
-        user_data: TUserData,
     },
     QueryError {
         error: BalthandlerQueryErr,

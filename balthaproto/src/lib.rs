@@ -31,24 +31,6 @@ pub mod worker {
         }
     }
 
-    impl From<Task> for WorkerMsgWrapper {
-        fn from(src: Task) -> Self {
-            WorkerMsg::Task(src).into()
-        }
-    }
-
-    impl From<ManagerRequest> for WorkerMsgWrapper {
-        fn from(src: ManagerRequest) -> Self {
-            WorkerMsg::ManagerRequest(src).into()
-        }
-    }
-
-    impl From<ManagerAnswer> for WorkerMsgWrapper {
-        fn from(src: ManagerAnswer) -> Self {
-            WorkerMsg::ManagerAnswer(src).into()
-        }
-    }
-
     impl From<NodeTypeRequest> for WorkerMsgWrapper {
         fn from(src: NodeTypeRequest) -> Self {
             WorkerMsg::NodeTypeRequest(src).into()
