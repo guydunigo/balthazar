@@ -353,7 +353,7 @@ fn process_answer<TUserData>(
         match msg /*event.msg.expect("empty protobuf oneof")*/ {
         WorkerMsg::NodeTypeAnswer(worker::NodeTypeAnswer { node_type }) => {
             let node_type = worker::NodeType::from_i32(node_type)
-                .expect(&format!(
+                .unwrap_or_else(|| panic!(
                     "Unexpected i32 value in protobuf enum NodeTypeAnswer::node_type: `{}`",
                     node_type
                 ))

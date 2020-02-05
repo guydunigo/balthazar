@@ -38,7 +38,7 @@ where
     T: 'static + Send + Sync + Unpin + AsyncRead + AsyncWrite,
 {
     pub fn new(node_type: NodeType<()>, pub_key: PublicKey) -> Self {
-        let local_peer_id = pub_key.clone().into_peer_id();
+        let local_peer_id = pub_key.into_peer_id();
         let store = MemoryStore::new(local_peer_id.clone());
         BalthBehavioursWrapper {
             balthbehaviour: BalthBehaviour::new(node_type),

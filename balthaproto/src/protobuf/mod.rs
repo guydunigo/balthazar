@@ -62,7 +62,7 @@ where
 
     fn upgrade_inbound(self, socket: TSocket, _: Self::Info) -> Self::Future {
         // eprintln!("Upgrade inbound");
-        let codec = Codec::new();
+        let codec = Codec::default();
         future::ok(Box::new(Framed::new(socket, codec)))
     }
 }
@@ -78,7 +78,7 @@ where
 
     fn upgrade_outbound(self, socket: TSocket, _: Self::Info) -> Self::Future {
         // eprintln!("Upgrade outbound");
-        let codec = Codec::new();
+        let codec = Codec::default();
         future::ok(Box::new(Framed::new(socket, codec)))
     }
 }

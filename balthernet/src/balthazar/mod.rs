@@ -223,7 +223,7 @@ where
         let mut peer = self
             .peers
             .entry(peer_id.clone())
-            .or_insert(Peer::new(peer_id.clone()));
+            .or_insert_with(|| Peer::new(peer_id.clone()));
         if let Some(ref endpoint) = peer.endpoint {
             panic!(
                 "Peer `{:?}` already has an endpoint `{:?}`.",
@@ -245,7 +245,7 @@ where
 
     fn inject_disconnected(&mut self, peer_id: &PeerId, endpoint: ConnectedPoint) {
         if let Some(peer) = self.peers.get_mut(peer_id) {
-            if let Some(_) = peer.endpoint.take() {
+            if peer.endpoint.take().is_some() {
                 eprintln!("Disconnected for {:?} : {:?}", peer_id, endpoint);
             } else {
                 panic!(
@@ -307,7 +307,7 @@ where
             let mut peer = self
                 .peers
                 .entry(e.peer_id.clone())
-                .or_insert(Peer::new(e.peer_id.clone()));
+                .or_insert_with(|| Peer::new(e.peer_id.clone()));
             match e.event {
                 BalthBehaviourKindOfEvent::Mdns(_) if !peer.dialed => {
                     peer.dialed = true;
@@ -325,7 +325,7 @@ where
                 }),
                 BalthBehaviourKindOfEvent::Handler(BalthandlerEventOut::NodeTypeAnswer {
                     node_type,
-                    user_data: _,
+                    ..
                 }) => {
                     if let Some(ref known_node_type) = peer.node_type {
                         if *known_node_type != node_type {

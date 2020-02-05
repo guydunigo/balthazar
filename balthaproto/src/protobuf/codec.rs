@@ -29,11 +29,10 @@ where
 
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
         // eprintln!("decode {:?} {}", src, src.len());
-        let item = Self::Item::decode(src)
-            .map(|m| Some(m))
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e));
+        Self::Item::decode(src)
+            .map(Some)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
         // eprintln!("decoded {:?}", item);
-        item
     }
 }
 
@@ -61,8 +60,8 @@ pub struct ProtoBufLengthCodec<M> {
     _marker: std::marker::PhantomData<M>,
 }
 
-impl<M: Default> ProtoBufLengthCodec<M> {
-    pub fn new() -> Self {
+impl<M: Default> Default for ProtoBufLengthCodec<M> {
+    fn default() -> Self {
         ProtoBufLengthCodec {
             length_codec: LengthCodec,
             protobuf_codec: ProtoBufCodec::default(),
@@ -138,7 +137,7 @@ mod tests {
     #[test]
     fn it_encodes_decodes_with_protobuf_length_codec() {
         let original_msg: worker::WorkerMsgWrapper = worker::NodeTypeRequest {}.into();
-        let mut codec = ProtoBufLengthCodec::new();
+        let mut codec = ProtoBufLengthCodec::default();
 
         let mut bytes = BytesMut::new();
 

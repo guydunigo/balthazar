@@ -30,8 +30,8 @@ impl fmt::Display for BalthazarError {
 pub async fn get_keypair(keyfile_path: &Path) -> Result<Keypair, BalthazarError> {
     let mut bytes = fs::read(keyfile_path)
         .await
-        .map_err(|e| BalthazarError::ReadKeyFileError(e))?;
-    Keypair::rsa_from_pkcs8(&mut bytes).map_err(|e| BalthazarError::KeyDecodingError(e))
+        .map_err(BalthazarError::ReadKeyFileError)?;
+    Keypair::rsa_from_pkcs8(&mut bytes).map_err(BalthazarError::KeyDecodingError)
 }
 
 pub fn run(node_type: NodeType<()>, listen_addr: Multiaddr, addresses_to_dial: &[Multiaddr]) {

@@ -7,6 +7,8 @@
 //! ## Set up instructions
 //!
 //! TODO: base instructions to set it up.
+#![allow(clippy::type_complexity)]
+
 extern crate balthamisc as misc;
 extern crate balthaproto as proto;
 extern crate futures;
@@ -37,7 +39,7 @@ pub fn get_swarm(
     addresses_to_dial: &[Multiaddr],
 ) -> impl Stream<Item = balthazar::BalthBehaviourEvent> {
     let keypair_public = keypair.public();
-    let peer_id = keypair_public.clone().into_peer_id();
+    let peer_id = keypair_public.into_peer_id();
     let net_behaviour = BalthBehavioursWrapper::new(node_type, keypair.public());
 
     // TODO: inspect the two build things and errors

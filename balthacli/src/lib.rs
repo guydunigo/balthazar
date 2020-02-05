@@ -4,7 +4,7 @@ use lib::{misc::NodeType, net::Multiaddr};
 use std::env;
 
 pub fn run() {
-    let elm_type = env::args().skip(1).next().unwrap_or("0".to_string());
+    let elm_type = env::args().nth(1).unwrap_or_else(|| "0".to_string());
     let dial_addrs = env::args().skip(2);
 
     let node_type = match &elm_type[..] {

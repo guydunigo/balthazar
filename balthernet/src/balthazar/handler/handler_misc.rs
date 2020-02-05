@@ -24,7 +24,7 @@ pub struct UniqueConnecId(u64);
 
 impl UniqueConnecId {
     /// Increments the contained Id.
-    pub fn inc(&self) -> UniqueConnecId {
+    pub fn inc(self) -> UniqueConnecId {
         UniqueConnecId(self.0 + 1)
     }
 }

@@ -50,10 +50,10 @@ impl IpfsStorage {
         listen_addr: Multiaddr,
     ) -> Result<Self, Either<InvalidUri, MultiaddrToStringConversionError>> {
         let usual_addr =
-            try_internet_multiaddr_to_usual_format(&listen_addr).map_err(|e| Either::Right(e))?;
+            try_internet_multiaddr_to_usual_format(&listen_addr).map_err(Either::Right)?;
         let http_addr = format!("http://{}", usual_addr);
         Ok(IpfsStorage {
-            ipfs_client: IpfsClient::new_from_uri(&http_addr[..]).map_err(|e| Either::Left(e))?,
+            ipfs_client: IpfsClient::new_from_uri(&http_addr[..]).map_err(Either::Left)?,
         })
     }
 
