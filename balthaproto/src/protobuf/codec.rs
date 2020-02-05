@@ -1,14 +1,12 @@
 //! Some generic codecs to use with **Protobuf** messages.
 use bytes::BytesMut;
-use futures_codec::{Decoder, Encoder, LengthCodec};
+use futures_codec::{Decoder, Encoder /*, LengthCodec*/};
 use prost::Message;
 use std::io;
 
+pub type ProtoBufLengthCodec<M> = ProtoBufCodec<M>;
+
 /// Generic codec for **protobuf** messages.
-///
-/// To be noted that it doesn't seem to work by itself since doesn't know
-/// the size of the message to receive and don't know when to stop during the reception.
-/// It is then maybe preferable to use [`ProtoBufLengthCodec`] instead.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ProtoBufCodec<M> {
     _marker: std::marker::PhantomData<M>,
@@ -27,12 +25,13 @@ where
     type Item = M;
     type Error = io::Error;
 
+    // TODO: reliable to shut up all errors ?
     fn decode(&mut self, src: &mut BytesMut) -> Result<Option<Self::Item>, Self::Error> {
-        // eprintln!("decode {:?} {}", src, src.len());
-        Self::Item::decode(src)
+        let answer = Self::Item::decode_length_delimited(src)
             .map(Some)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
-        // eprintln!("decoded {:?}", item);
+            .unwrap_or_else(|_| None);
+        Ok(answer)
+        // .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
     }
 }
 
@@ -44,14 +43,13 @@ where
     type Error = io::Error;
 
     fn encode(&mut self, item: Self::Item, dst: &mut BytesMut) -> Result<(), Self::Error> {
-        // eprintln!("encode {:?}", item);
-        item.encode(dst)
+        item.encode_length_delimited(dst)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-        // eprintln!("encoded {:?} {}", dst, dst.len());
         Ok(())
     }
 }
 
+/*
 /// Prefixes the [`ProtoBufCodec`] with a `u64` indicating the size of the message using
 /// [`LengthCodec`].
 pub struct ProtoBufLengthCodec<M> {
@@ -114,6 +112,7 @@ where
         Ok(())
     }
 }
+*/
 
 #[cfg(test)]
 mod tests {
