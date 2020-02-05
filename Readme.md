@@ -21,6 +21,10 @@ For now, only **IPFS** will be implemented but others might come in the future.
 
 The different protocols used specifically for this system for inter-node communications.
 
+## Balthurner
+
+The different elements correpsonding to the execution (**runner**) environment can be found it this crate.
+
 ## Balthamisc
 
 Contains different miscelaneous types and functions used by other libraries.

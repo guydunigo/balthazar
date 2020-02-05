@@ -187,6 +187,7 @@ dependencies = [
  "balthamisc",
  "balthastore",
  "balthernet",
+ "balthurner",
  "futures 0.3.2",
  "tokio",
 ]
@@ -234,6 +235,10 @@ dependencies = [
  "tokio",
  "void",
 ]
+
+[[package]]
+name = "balthurner"
+version = "0.1.0"
 
 [[package]]
 name = "base-x"
