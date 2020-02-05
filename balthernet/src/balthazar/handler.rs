@@ -328,7 +328,7 @@ fn process_request<TUserData>(
     event: WorkerMsgWrapper,
     connec_unique_id: UniqueConnecId,
 ) -> Option<Result<BalthandlerEventOut<TUserData>, io::Error>> {
-    eprintln!("process_request {:?}", event);
+    // eprintln!("process_request {:?}", event);
     if let Some(msg) = event.msg {
         match msg {
             WorkerMsg::NodeTypeRequest(worker::NodeTypeRequest {}) => {
@@ -348,7 +348,7 @@ fn process_answer<TUserData>(
     event: WorkerMsgWrapper,
     user_data: TUserData,
 ) -> Option<BalthandlerEventOut<TUserData>> {
-    eprintln!("process_answer {:?}", event);
+    // eprintln!("process_answer {:?}", event);
     if let Some(msg) = event.msg {
         match msg /*event.msg.expect("empty protobuf oneof")*/ {
         WorkerMsg::NodeTypeAnswer(worker::NodeTypeAnswer { node_type }) => {

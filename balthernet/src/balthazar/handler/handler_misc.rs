@@ -321,7 +321,7 @@ where
                 }
                 Poll::Pending => (Some(InWaitingMessage(id, substream)), None, false),
                 Poll::Ready(None) => {
-                    eprintln!("Inbound substream: EOF");
+                    // eprintln!("Inbound substream: EOF");
                     (None, None, false)
                 }
                 Poll::Ready(Some(Err(e))) => {

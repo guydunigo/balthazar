@@ -4,11 +4,11 @@
 //!
 //! ## Procedure when adding events or new kinds of messages
 //!
-//! If there are new kinds of events that can be received, add them to [`BalthBehaviourKindOfEvent`].
+//! If there are new kinds of events that can be received, add them to [`InternalEvent`].
 //!
 //! Have a look at the [`handler`] module description to make the necessary updates.
 //!
-//! When extending [`BalthBehaviourKindOfEvent`] or [`handler::BalthandlerEventOut`], update the `poll` method
+//! When extending [`InternalEvent`] or [`handler::BalthandlerEventOut`], update the `poll` method
 //! from [`BalthBehaviour`].
 use futures::io::{AsyncRead, AsyncWrite};
 use libp2p::{
@@ -31,62 +31,46 @@ pub mod handler;
 use handler::{Balthandler, BalthandlerEventIn, BalthandlerEventOut};
 use misc::NodeType;
 
-/// Wrapper event to add the [`PeerId`] of the peer linked to the event.
-#[derive(Debug)]
-pub struct GenericEvent<T> {
-    peer_id: PeerId,
-    event: T,
-}
-
-impl<T> GenericEvent<T> {
-    pub fn peer_id(&self) -> &PeerId {
-        &self.peer_id
-    }
-
-    pub fn event(&self) -> &T {
-        &self.event
-    }
-}
-
-impl<T> GenericEvent<T> {
-    pub fn new(peer_id: PeerId, event: T) -> Self {
-        GenericEvent { peer_id, event }
-    }
-
-    /*
-     * TODO: Keep ?
-    pub fn new_from_custom(peer_id: PeerId, event: TCustomEvent) -> Self {
-        GenericEvent {
-            peer_id,
-            event: BalthBehaviourKindOfEvent::Custom(event),
-        }
-    }
-    */
-}
-
 /// Event injected into [`BalthBehaviour`] from either [`Balthandler`] and from outside (other
 /// [`NetworkBehaviour`]s, etc.
 #[derive(Debug)]
-pub enum BalthBehaviourKindOfEvent<TUserData> {
+enum InternalEvent<TUserData> {
     /// Event created when the [`Mdns`](`libp2p::mdns::Mdns`) discovers a new peer at given multiaddress.
-    Mdns(Multiaddr),
+    Mdns(PeerId, Multiaddr),
     /// Event originating from [`Balthandler`].
-    Handler(BalthandlerEventOut<TUserData>),
-    /*
-     * TODO: useful ?
-    /// Other events from the another part of the node (i.e. usually from outside of the networking part of the system).
-    Custom(TCustomEvent),
-    */
-    /// Request a node type
+    Handler(PeerId, BalthandlerEventOut<TUserData>),
+    /// Request a node type.
     /// TODO: delete and delegate to outside, or default here?
-    AskNodeType,
+    AskNodeType(PeerId),
+    /// Generates an event towards the Swarm.
+    GenerateEvent(BalthBehaviourEventOut),
+}
+
+/*
+/// TODO: doc
+#[derive(Debug)]
+pub enum BalthBehaviourEventIn {
+    Ping,
+}
+*/
+
+/// TODO: doc
+#[derive(Debug)]
+pub enum BalthBehaviourEventOut {
+    /// Node type discovered for a peer.
+    PeerHasNewType(PeerId, NodeType<()>),
+    /// Peer has been connected to given endpoint.
+    PeerConnected(PeerId, ConnectedPoint),
+    /// Peer has been disconnected from given endpoint.
+    PeerDisconnected(PeerId, ConnectedPoint),
+    /// Answer to a [`BalthBehaviourEventIn::Ping`].
+    Pong,
+    /// Events created by [`Balthandler`] which are not handled directly in [`BalthBehaviour`]
+    Handler(PeerId, BalthandlerEventOut<QueryId>),
 }
 
 /// Type to identify our queries within [`Balthandler`] to link answers to queries.
 pub type QueryId = usize;
-
-/// Events used internally by [`BalthBehaviour`].
-pub type BalthBehaviourEvent = GenericEvent<BalthBehaviourKindOfEvent<QueryId>>;
 
 /*
 async fn dummy<T: Clone>(
@@ -156,7 +140,7 @@ pub struct BalthBehaviour<TSubstream> {
     // TODO: should the node_type be kept here, what happens if it changes elsewhere?
     node_type: BehaviourNodeType,
     peers: HashMap<PeerId, Peer>,
-    events: VecDeque<BalthBehaviourEvent>,
+    events: VecDeque<InternalEvent<QueryId>>,
     next_query_unique_id: QueryId,
     _marker: PhantomData<TSubstream>,
 }
@@ -189,13 +173,35 @@ impl<TSubstream> BalthBehaviour<TSubstream> {
         old
     }
 
-    pub fn events(&self) -> &VecDeque<BalthBehaviourEvent> {
+    pub fn inject_mdns_event(&mut self, peer_id: PeerId, multiaddr: Multiaddr) {
+        self.events
+            .push_front(InternalEvent::Mdns(peer_id, multiaddr));
+    }
+
+    fn inject_handler_event(&mut self, peer_id: PeerId, handler_evt: BalthandlerEventOut<QueryId>) {
+        self.events
+            .push_front(InternalEvent::Handler(peer_id, handler_evt));
+    }
+
+    fn inject_generate_event(&mut self, evt: BalthBehaviourEventOut) {
+        self.events.push_front(InternalEvent::GenerateEvent(evt));
+    }
+
+    fn get_peer_or_insert(&mut self, peer_id: &PeerId) -> &mut Peer {
+        self.peers
+            .entry(peer_id.clone())
+            .or_insert_with(|| Peer::new(peer_id.clone()))
+    }
+
+    /*
+    pub fn events(&self) -> &VecDeque<InternalEvent> {
         &self.events
     }
 
-    pub fn events_mut(&mut self) -> &mut VecDeque<BalthBehaviourEvent> {
+    pub fn events_mut(&mut self) -> &mut VecDeque<InternalEvent> {
         &mut self.events
     }
+    */
 }
 
 impl<TSubstream> NetworkBehaviour for BalthBehaviour<TSubstream>
@@ -203,7 +209,7 @@ where
     TSubstream: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
     type ProtocolsHandler = Balthandler<TSubstream, QueryId>;
-    type OutEvent = BalthBehaviourEvent;
+    type OutEvent = BalthBehaviourEventOut;
 
     fn new_handler(&mut self) -> Self::ProtocolsHandler {
         // println!("New handler");
@@ -230,23 +236,25 @@ where
                 peer_id, endpoint
             );
         } else {
-            eprintln!("Connected for {:?} : {:?}", peer_id, endpoint);
-            peer.endpoint = Some(endpoint);
-        }
+            // If the node_type is unknown, plans to send a request:
+            if peer.node_type.is_none() {
+                self.events
+                    .push_front(InternalEvent::AskNodeType(peer_id.clone()));
+            }
 
-        // If the node_type is unknown, plans to send a request:
-        if peer.node_type.is_none() {
-            self.events.push_front(BalthBehaviourEvent::new(
-                peer_id,
-                BalthBehaviourKindOfEvent::AskNodeType,
-            ));
+            peer.endpoint = Some(endpoint.clone());
+
+            self.inject_generate_event(BalthBehaviourEventOut::PeerConnected(peer_id, endpoint));
         }
     }
 
     fn inject_disconnected(&mut self, peer_id: &PeerId, endpoint: ConnectedPoint) {
         if let Some(peer) = self.peers.get_mut(peer_id) {
             if peer.endpoint.take().is_some() {
-                eprintln!("Disconnected for {:?} : {:?}", peer_id, endpoint);
+                self.inject_generate_event(BalthBehaviourEventOut::PeerDisconnected(
+                    peer_id.clone(),
+                    endpoint,
+                ));
             } else {
                 panic!(
                     "Peer `{:?}` already doesn't have any endpoint `{:?}`.",
@@ -286,14 +294,7 @@ where
         peer_id: PeerId,
         event: <<Self::ProtocolsHandler as IntoProtocolsHandler>::Handler as ProtocolsHandler>::OutEvent,
     ) {
-        eprintln!(
-            "Event injected in Behaviour from Handler {:?} : {:?}",
-            peer_id, event
-        );
-        self.events.push_front(BalthBehaviourEvent::new(
-            peer_id,
-            BalthBehaviourKindOfEvent::Handler(event),
-        ))
+        self.inject_handler_event(peer_id, event);
     }
 
     // TODO: break this function into one or several external functions for clearer parsing ?
@@ -303,68 +304,65 @@ where
         _cx: &mut Context,
         _params: &mut impl PollParameters
 ) -> Poll<NetworkBehaviourAction<<<Self::ProtocolsHandler as IntoProtocolsHandler>::Handler as ProtocolsHandler>::InEvent, Self::OutEvent>>{
-        while let Some(e) = self.events.pop_back() {
-            let mut peer = self
-                .peers
-                .entry(e.peer_id.clone())
-                .or_insert_with(|| Peer::new(e.peer_id.clone()));
-            let answer = match e.event {
-                BalthBehaviourKindOfEvent::Mdns(_) if !peer.dialed => {
-                    peer.dialed = true;
-                    Poll::Ready(NetworkBehaviourAction::DialPeer { peer_id: e.peer_id })
-                }
-                BalthBehaviourKindOfEvent::Mdns(_) => Poll::Pending,
-                BalthBehaviourKindOfEvent::Handler(BalthandlerEventOut::NodeTypeRequest {
-                    request_id,
-                }) => Poll::Ready(NetworkBehaviourAction::SendEvent {
-                    peer_id: peer.peer_id.clone(),
-                    event: BalthandlerEventIn::NodeTypeAnswer {
-                        node_type: self.node_type.clone().map(|_| ()),
-                        request_id,
-                    },
-                }),
-                BalthBehaviourKindOfEvent::Handler(BalthandlerEventOut::NodeTypeAnswer {
-                    node_type,
-                    ..
-                }) => {
-                    if let Some(ref known_node_type) = peer.node_type {
-                        if *known_node_type != node_type {
-                            eprintln!("Peer `{:?}` answered a different node_type `{:?}` than before `{:?}`", peer.peer_id, known_node_type, node_type);
-                        }
+        while let Some(internal_evt) = self.events.pop_back() {
+            let answer = match internal_evt {
+                InternalEvent::Mdns(peer_id, _) => {
+                    // TODO: use the multiaddr ?
+                    let mut peer = self.get_peer_or_insert(&peer_id);
+                    if !peer.dialed {
+                        peer.dialed = true;
+                        Poll::Ready(NetworkBehaviourAction::DialPeer { peer_id })
                     } else {
-                        eprintln!("Peer `{:?}` has a new type `{:?}`", peer.peer_id, node_type);
-                        peer.node_type = Some(node_type);
+                        Poll::Pending
                     }
-                    Poll::Pending
                 }
-                // Forward event to other parts of system.
-                /*
-                BalthBehaviourKindOfEvent::Handler(event) => {
-                    let mut tx = self.dummy_tx.clone();
-                    tokio::spawn(async move {
-                        tx.send(event).await.unwrap();
-                    });
-                    Poll::Pending
-                    /* Poll::Ready(NetworkBehaviourAction::SendEvent {
-                        peer_id: e.peer_id,
-                        event: BalthandlerEventIn::ManagerAnswer {
-                            accepted: true,
-                            request_id,
-                        },
-                    })*/
+                // TODO: separate function for handling Handlers events
+                InternalEvent::Handler(peer_id, event) => {
+                    let mut peer = self.get_peer_or_insert(&peer_id);
+                    match event {
+                        BalthandlerEventOut::NodeTypeRequest { request_id } => {
+                            Poll::Ready(NetworkBehaviourAction::SendEvent {
+                                peer_id: peer.peer_id.clone(),
+                                event: BalthandlerEventIn::NodeTypeAnswer {
+                                    node_type: self.node_type.clone().map(|_| ()),
+                                    request_id,
+                                },
+                            })
+                        }
+                        BalthandlerEventOut::NodeTypeAnswer { node_type, .. } => {
+                            if let Some(ref known_node_type) = peer.node_type {
+                                if *known_node_type != node_type {
+                                    eprintln!("EE --- Peer `{:?}` answered a different node_type `{:?}` than before `{:?}`", peer.peer_id, known_node_type, node_type);
+                                }
+                            } else {
+                                peer.node_type = Some(node_type.clone());
+                                self.inject_generate_event(BalthBehaviourEventOut::PeerHasNewType(
+                                    peer_id, node_type,
+                                ));
+                            }
+                            Poll::Pending
+                        }
+                        _ => {
+                            self.inject_generate_event(BalthBehaviourEventOut::Handler(
+                                peer_id, event,
+                            ));
+                            Poll::Pending
+                        }
+                    }
                 }
-                */
-                BalthBehaviourKindOfEvent::AskNodeType if peer.node_type.is_none() => {
+                InternalEvent::AskNodeType(peer_id)
+                    if self.get_peer_or_insert(&peer_id).node_type.is_none() =>
+                {
                     Poll::Ready(NetworkBehaviourAction::SendEvent {
-                        peer_id: e.peer_id,
+                        peer_id,
                         event: BalthandlerEventIn::NodeTypeRequest {
                             user_data: self.next_query_unique_id(),
                         },
                     })
                 }
-                _ => {
-                    // println!("Forwarding event {:?}", e);
-                    Poll::Ready(NetworkBehaviourAction::GenerateEvent(e))
+                InternalEvent::AskNodeType(_) => Poll::Pending,
+                InternalEvent::GenerateEvent(event) => {
+                    Poll::Ready(NetworkBehaviourAction::GenerateEvent(event))
                 }
             };
 

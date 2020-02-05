@@ -18,13 +18,13 @@ use std::{
     task::{Context, Poll},
 };
 
-use super::balthazar::{BalthBehaviour, BalthBehaviourEvent, BalthBehaviourKindOfEvent};
+use super::balthazar::{BalthBehaviour, BalthBehaviourEventOut};
 use misc::NodeType;
 
 /// Use several [`NetworkBehaviour`](`libp2p::swarm::NetworkBehaviour`) at the same time.
 #[derive(NetworkBehaviour)]
 #[behaviour(poll_method = "poll")]
-#[behaviour(out_event = "BalthBehaviourEvent")]
+#[behaviour(out_event = "BalthBehaviourEventOut")]
 pub struct BalthBehavioursWrapper<TSubstream>
 where
     TSubstream: 'static + Send + Sync + Unpin + AsyncRead + AsyncWrite,
@@ -35,7 +35,7 @@ where
     kademlia: Kademlia<TSubstream, MemoryStore>,
     // identify: Identify<TSubstream>,
     #[behaviour(ignore)]
-    events: VecDeque<BalthBehaviourEvent>,
+    events: VecDeque<BalthBehaviourEventOut>,
 }
 
 impl<T> BalthBehavioursWrapper<T>
@@ -56,17 +56,19 @@ where
     }
 
 fn poll(&mut self, _cx: &mut Context) -> Poll<NetworkBehaviourAction<<<<Self as NetworkBehaviour>::ProtocolsHandler as IntoProtocolsHandler>::Handler as ProtocolsHandler>::InEvent, <Self as NetworkBehaviour>::OutEvent>>{
-        // TODO: forward different events
-        Poll::Pending
+        if let Some(e) = self.events.pop_back() {
+            Poll::Ready(NetworkBehaviourAction::GenerateEvent(e))
+        } else {
+            Poll::Pending
+        }
     }
 }
 
-impl<T> NetworkBehaviourEventProcess<BalthBehaviourEvent> for BalthBehavioursWrapper<T>
+impl<T> NetworkBehaviourEventProcess<BalthBehaviourEventOut> for BalthBehavioursWrapper<T>
 where
     T: 'static + Send + Sync + Unpin + AsyncRead + AsyncWrite,
 {
-    fn inject_event(&mut self, event: BalthBehaviourEvent) {
-        eprintln!("Event from BalthBehaviourEvent for {:?}", event.peer_id());
+    fn inject_event(&mut self, event: BalthBehaviourEventOut) {
         self.events.push_front(event);
     }
 }
@@ -81,12 +83,7 @@ where
             for (peer_id, multiaddr) in list {
                 // println!("Mdns discovered: {:?} {:?}", peer_id, multiaddr);
                 self.kademlia.add_address(&peer_id, multiaddr.clone());
-                self.balthbehaviour
-                    .events_mut()
-                    .push_front(BalthBehaviourEvent::new(
-                        peer_id,
-                        BalthBehaviourKindOfEvent::Mdns(multiaddr),
-                    ));
+                self.balthbehaviour.inject_mdns_event(peer_id, multiaddr);
             }
         }
     }

@@ -41,7 +41,7 @@ pub fn run(node_type: NodeType<()>, listen_addr: Multiaddr, addresses_to_dial: &
 
         swarm
             .for_each(|e| {
-                eprintln!("Swarm event: {:?}", e);
+                eprintln!("S  --- event: {:?}", e);
                 future::ready(())
             })
             .await;

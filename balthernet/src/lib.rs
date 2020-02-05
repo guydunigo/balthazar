@@ -37,7 +37,7 @@ pub fn get_swarm(
     keypair: Keypair,
     listen_addr: Multiaddr,
     addresses_to_dial: &[Multiaddr],
-) -> impl Stream<Item = balthazar::BalthBehaviourEvent> {
+) -> impl Stream<Item = balthazar::BalthBehaviourEventOut> {
     let keypair_public = keypair.public();
     let peer_id = keypair_public.into_peer_id();
     let net_behaviour = BalthBehavioursWrapper::new(node_type, keypair.public());
