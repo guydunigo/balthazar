@@ -16,13 +16,14 @@ extern crate libp2p;
 extern crate tokio;
 extern crate void;
 
-use futures::Stream;
+use futures::{stream, Stream, StreamExt};
 use libp2p::build_development_transport;
 // use libp2p::build_tcp_ws_secio_mplex_yamux;
 /// To avoid importing the whole libp2p crate in another one...
 pub use libp2p::{identity, Multiaddr};
 use libp2p::{identity::Keypair, swarm::Swarm};
 use misc::NodeType;
+use std::task::{Context, Poll};
 use tokio::sync::mpsc::Sender;
 
 pub mod balthazar;
@@ -32,10 +33,6 @@ pub use balthazar::{EventIn, EventOut};
 pub use wrapper::BalthBehavioursWrapper;
 
 // TODO: Better interface with wrapper object
-// TODO: better control over Swarm object and solve return type hell: use of channel ?
-//      - https://docs.rs/libp2p/0.15.0/libp2p/swarm/struct.ExpandedSwarm.html#method.external_addresses
-//      - https://docs.rs/libp2p/0.15.0/libp2p/swarm/enum.SwarmEvent.html
-//      - https://docs.rs/futures/0.3.2/futures/stream/fn.poll_fn.html
 // TODO: NodeType containing manager to try ?
 /// Creates a new swarm based on [`BalthBehaviour`](`balthazar::BalthBehaviour`) and a default transport and returns
 /// a stream of event coming out of [`BalthBehaviour`](`balthazar::BalthBehaviour`).
@@ -70,7 +67,25 @@ pub fn get_swarm(
         println!("Listening on {}", addr);
     }
 
-    (swarm, tx)
+    let mut listening = false;
+
+    (
+        // TODO: not very clean... or is it ? (taken roughly from the examples)
+        stream::poll_fn(move |cx: &mut Context| {
+            let poll = swarm.poll_next_unpin(cx);
+            if let Poll::Pending = poll {
+                if !listening {
+                    for addr in Swarm::listeners(&swarm) {
+                        println!("Listening on {}", addr);
+                        listening = true;
+                    }
+                }
+            }
+
+            poll
+        }),
+        tx,
+    )
 }
 
 #[cfg(test)]
