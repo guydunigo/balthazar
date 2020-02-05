@@ -290,7 +290,7 @@ pub enum EventIn<TUserData> {
         user_data: TUserData,
     },
     NodeTypeAnswer {
-        node_type: NodeType<()>,
+        node_type: NodeType,
         request_id: RequestId,
     },
 }
@@ -304,7 +304,7 @@ pub enum EventIn<TUserData> {
 #[derive(Debug)]
 pub enum EventOut<TUserData> {
     NodeTypeAnswer {
-        node_type: NodeType<()>,
+        node_type: NodeType,
         user_data: TUserData,
     },
     NodeTypeRequest {

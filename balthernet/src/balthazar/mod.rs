@@ -59,7 +59,7 @@ pub enum EventIn {
 #[derive(Debug)]
 pub enum EventOut {
     /// Node type discovered for a peer.
-    PeerHasNewType(PeerId, NodeType<()>),
+    PeerHasNewType(PeerId, NodeType),
     /// Peer has been connected to given endpoint.
     PeerConnected(PeerId, ConnectedPoint),
     /// Peer has been disconnected from given endpoint.
@@ -85,7 +85,7 @@ struct Peer {
     /// TODO: use a date to recheck periodically ?
     dialed: bool,
     /// Defines the node type if it is known.
-    node_type: Option<NodeType<()>>,
+    node_type: Option<NodeType>,
 }
 
 impl Peer {
@@ -100,13 +100,11 @@ impl Peer {
     }
 }
 
-type BehaviourNodeType = NodeType<Option<PeerId>>;
-
 /// The [`NetworkBehaviour`] to manage the networking of the **Balthazar** node.
 pub struct BalthBehaviour<TSubstream> {
     inbound_rx: Receiver<EventIn>,
     // TODO: should the node_type be kept here, what happens if it changes elsewhere?
-    node_type: BehaviourNodeType,
+    node_type: NodeType,
     peers: HashMap<PeerId, Peer>,
     events: VecDeque<InternalEvent<QueryId>>,
     next_query_unique_id: QueryId,
@@ -116,9 +114,7 @@ pub struct BalthBehaviour<TSubstream> {
 impl<TSubstream> BalthBehaviour<TSubstream> {
     /// Creates a new [`BalthBehaviour`] and returns a [`Sender`] channel to communicate with it from
     /// the exterior of the Swarm.
-    pub fn new<T: Clone>(node_type: NodeType<T>) -> (Self, Sender<EventIn>) {
-        let node_type: BehaviourNodeType = node_type.map(|_| None);
-
+    pub fn new(node_type: NodeType) -> (Self, Sender<EventIn>) {
         let (tx, inbound_rx) = channel(CHANNEL_SIZE);
 
         (
@@ -290,7 +286,7 @@ where
                             Poll::Ready(NetworkBehaviourAction::SendEvent {
                                 peer_id: peer.peer_id.clone(),
                                 event: handler::EventIn::NodeTypeAnswer {
-                                    node_type: self.node_type.clone().map(|_| ()),
+                                    node_type: self.node_type,
                                     request_id,
                                 },
                             })
@@ -301,7 +297,7 @@ where
                                     eprintln!("E --- Peer `{:?}` answered a different node_type `{:?}` than before `{:?}`", peer.peer_id, known_node_type, node_type);
                                 }
                             } else {
-                                peer.node_type = Some(node_type.clone());
+                                peer.node_type = Some(node_type);
                                 self.inject_generate_event(EventOut::PeerHasNewType(
                                     peer_id, node_type,
                                 ));

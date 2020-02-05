@@ -37,7 +37,7 @@ pub use wrapper::BalthBehavioursWrapper;
 /// Creates a new swarm based on [`BalthBehaviour`](`balthazar::BalthBehaviour`) and a default transport and returns
 /// a stream of event coming out of [`BalthBehaviour`](`balthazar::BalthBehaviour`).
 pub fn get_swarm(
-    node_type: NodeType<()>,
+    node_type: NodeType,
     keypair: Keypair,
     listen_addr: Multiaddr,
     addresses_to_dial: &[Multiaddr],

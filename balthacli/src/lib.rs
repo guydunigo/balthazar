@@ -9,7 +9,7 @@ pub fn run() {
 
     let node_type = match &elm_type[..] {
         "0" => NodeType::Manager,
-        _ => NodeType::Worker(()),
+        _ => NodeType::Worker,
     };
 
     println!("Starting as {:?}...", node_type);
