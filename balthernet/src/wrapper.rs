@@ -2,7 +2,7 @@
 //! [`NetworkBehaviour`](`libp2p::swarm::NetworkBehaviour`) at the same time.
 use futures::io::{AsyncRead, AsyncWrite};
 use libp2p::{
-    identify::{Identify, IdentifyEvent},
+    // identify::{Identify, IdentifyEvent},
     identity::PublicKey,
     kad::{record::store::MemoryStore, Kademlia, KademliaEvent, PutRecordOk, Record},
     mdns::{Mdns, MdnsEvent},
@@ -30,7 +30,7 @@ where
     mdns: Mdns<TSubstream>,
     ping: Ping<TSubstream>,
     kademlia: Kademlia<TSubstream, MemoryStore>,
-    identify: Identify<TSubstream>,
+    // identify: Identify<TSubstream>,
 }
 
 impl<T> BalthBehavioursWrapper<T>
@@ -45,7 +45,7 @@ where
             mdns: Mdns::new().expect("Couldn't create a Mdns NetworkBehaviour"),
             ping: Ping::default(),
             kademlia: Kademlia::new(local_peer_id, store),
-            identify: Identify::new("1.0".to_string(), "3.0".to_string(), pub_key),
+            // identify: Identify::new("1.0".to_string(), "3.0".to_string(), pub_key),
         }
     }
 
@@ -118,6 +118,21 @@ where
     }
 }
 
+impl<T> NetworkBehaviourEventProcess<PingEvent> for BalthBehavioursWrapper<T>
+where
+    T: 'static + Send + Sync + Unpin + AsyncRead + AsyncWrite,
+{
+    fn inject_event(&mut self, _event: PingEvent) {
+        /*
+        match event.result {
+            Ok(s) => println!("{:?} : peer success : {:?}", event.peer, s),
+            Err(e) => println!("{:?} : peer error : {:?}", event.peer, e),
+        }
+        */
+    }
+}
+
+/*
 impl<T> NetworkBehaviourEventProcess<IdentifyEvent> for BalthBehavioursWrapper<T>
 where
     T: 'static + Send + Sync + Unpin + AsyncRead + AsyncWrite,
@@ -136,15 +151,4 @@ where
         }
     }
 }
-
-impl<T> NetworkBehaviourEventProcess<PingEvent> for BalthBehavioursWrapper<T>
-where
-    T: 'static + Send + Sync + Unpin + AsyncRead + AsyncWrite,
-{
-    fn inject_event(&mut self, event: PingEvent) {
-        match event.result {
-            Ok(s) => println!("{:?} : peer success : {:?}", event.peer, s),
-            Err(e) => println!("{:?} : peer error : {:?}", event.peer, e),
-        }
-    }
-}
+*/
