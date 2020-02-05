@@ -8,7 +8,7 @@
 //!
 //! Have a look at the [`handler`] module description to make the necessary updates.
 //!
-//! When extending [`InternalEvent`] or [`handler::handler::EventOut`], update the `poll` method
+//! When extending [`InternalEvent`] or [`handler::EventOut`], update the `poll` method
 //! from [`BalthBehaviour`].
 use futures::io::{AsyncRead, AsyncWrite};
 use libp2p::{

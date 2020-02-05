@@ -33,6 +33,9 @@ pub use wrapper::BalthBehavioursWrapper;
 
 // TODO: Better interface with wrapper object
 // TODO: better control over Swarm object and solve return type hell: use of channel ?
+//      - https://docs.rs/libp2p/0.15.0/libp2p/swarm/struct.ExpandedSwarm.html#method.external_addresses
+//      - https://docs.rs/libp2p/0.15.0/libp2p/swarm/enum.SwarmEvent.html
+//      - https://docs.rs/futures/0.3.2/futures/stream/fn.poll_fn.html
 // TODO: NodeType containing manager to try ?
 /// Creates a new swarm based on [`BalthBehaviour`](`balthazar::BalthBehaviour`) and a default transport and returns
 /// a stream of event coming out of [`BalthBehaviour`](`balthazar::BalthBehaviour`).
