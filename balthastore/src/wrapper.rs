@@ -107,13 +107,13 @@ impl Storage for StoragesWrapper {
     fn store_stream(
         &self,
         data_stream: GenericReader,
-    ) -> BoxFuture<Result<Vec<u8>, Box<dyn Error>>> {
+    ) -> BoxFuture<Result<Vec<u8>, Box<dyn Error + Send>>> {
         self.default_storage().store_stream(data_stream)
     }
 
     /// Tries to determine automatically the best [`Storage`] to retrieve data at `addr`
     /// using [`get_storage_type_based_on_address`](`StoragesWrapper::get_storage_type_based_on_address`).
-    fn get_stream(&self, addr: &[u8]) -> BoxStream<Result<Bytes, Box<dyn Error>>> {
+    fn get_stream(&self, addr: &[u8]) -> BoxStream<Result<Bytes, Box<dyn Error + Send>>> {
         self.get_storage_based_on_address(addr).get_stream(addr)
     }
 }

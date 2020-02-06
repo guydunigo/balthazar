@@ -38,12 +38,12 @@ pub trait Storage: Sync {
     fn store_stream(
         &self,
         data_stream: GenericReader,
-    ) -> BoxFuture<Result<Vec<u8>, Box<dyn Error>>>;
+    ) -> BoxFuture<Result<Vec<u8>, Box<dyn Error + Send>>>;
     /// Get the requested data from the Storage as a [`futures::Stream`]
-    fn get_stream(&self, addr: &[u8]) -> BoxStream<Result<Bytes, Box<dyn Error>>>;
+    fn get_stream(&self, addr: &[u8]) -> BoxStream<Result<Bytes, Box<dyn Error + Send>>>;
 
     /// Same as [`Storage::store_stream`] but to provide all the data as once.
-    fn store(&self, data: &[u8]) -> BoxFuture<Result<Vec<u8>, Box<dyn Error>>> {
+    fn store(&self, data: &[u8]) -> BoxFuture<Result<Vec<u8>, Box<dyn Error + Send>>> {
         // TODO: ugly? needed to avoid static lifetime on data...
         // let vec = Vec::from(data);
         // let mut cursor = io::Cursor::new(vec);
@@ -52,7 +52,7 @@ pub trait Storage: Sync {
     }
 
     /// Same as [`Storage::get_stream`] but to get all the data as once.
-    fn get<'a>(&'a self, addr: &'a [u8]) -> BoxFuture<'a, Result<Bytes, Box<dyn Error>>> {
+    fn get<'a>(&'a self, addr: &'a [u8]) -> BoxFuture<'a, Result<Bytes, Box<dyn Error + Send>>> {
         // TODO: not very efficient ?
         async move {
             let mut tmp = Vec::new();
@@ -73,11 +73,11 @@ impl<T: Storage> Storage for &T {
     fn store_stream(
         &self,
         data_stream: GenericReader,
-    ) -> BoxFuture<Result<Vec<u8>, Box<dyn Error>>> {
+    ) -> BoxFuture<Result<Vec<u8>, Box<dyn Error + Send>>> {
         (*self).store_stream(data_stream)
     }
 
-    fn get_stream(&self, addr: &[u8]) -> BoxStream<Result<Bytes, Box<dyn Error>>> {
+    fn get_stream(&self, addr: &[u8]) -> BoxStream<Result<Bytes, Box<dyn Error + Send>>> {
         (*self).get_stream(addr)
     }
 }

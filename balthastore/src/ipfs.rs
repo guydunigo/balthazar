@@ -72,14 +72,14 @@ impl Storage for IpfsStorage {
     fn store_stream(
         &self,
         data_stream: GenericReader,
-    ) -> BoxFuture<Result<Vec<u8>, Box<dyn Error>>> {
+    ) -> BoxFuture<Result<Vec<u8>, Box<dyn Error + Send>>> {
         let new_client = self.inner().clone();
         async move {
             let res = new_client.add(data_stream).await;
             match res {
                 Ok(res) => Ok(format!("/ipfs/{}", res.name).into()),
                 Err(error) => {
-                    let error: Box<dyn Error> = Box::new(IpfsApiResponseError::from(error));
+                    let error: Box<dyn Error + Send> = Box::new(IpfsApiResponseError::from(error));
                     Err(error)
                 }
             }
@@ -87,11 +87,11 @@ impl Storage for IpfsStorage {
         .boxed()
     }
 
-    fn get_stream(&self, addr: &[u8]) -> BoxStream<Result<Bytes, Box<dyn Error>>> {
+    fn get_stream(&self, addr: &[u8]) -> BoxStream<Result<Bytes, Box<dyn Error + Send>>> {
         self.ipfs_client
             .cat(&String::from_utf8_lossy(addr)[..])
             .map_err(|e| {
-                let error: Box<dyn Error> = Box::new(IpfsApiResponseError::from(e));
+                let error: Box<dyn Error + Send> = Box::new(IpfsApiResponseError::from(e));
                 error
             })
             .boxed()
