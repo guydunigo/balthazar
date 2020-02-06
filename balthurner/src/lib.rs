@@ -20,7 +20,7 @@ fn sleep_secs(duration: u64) {
 
 /// Contains the instance of a parsed WASM program.
 ///
-/// TODO: performance of recreating Instance each run ?
+/// TODO: performance of recreating Instance each run ? Maybe keep compiled form or something ?
 pub struct Runner {
     // instance: Instance,
     wasm: Bytes,

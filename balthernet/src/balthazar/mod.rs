@@ -55,6 +55,12 @@ pub enum EventIn {
     Ping,
     /// Sending a message to the peer (new request or answer to one from the exterior).
     Handler(PeerId, handler::EventIn<QueryId>),
+    /// Send ExecuteTask to peer.
+    ExecuteTask {
+        peer_id: PeerId,
+        job_addr: Vec<u8>,
+        argument: i32,
+    },
 }
 
 /// Event returned by [`BalthBehaviour`] towards the Swarm when polled.
@@ -342,6 +348,18 @@ where
                 Some(EventIn::Handler(peer_id, event)) => {
                     Poll::Ready(NetworkBehaviourAction::SendEvent { peer_id, event })
                 }
+                Some(EventIn::ExecuteTask {
+                    peer_id,
+                    job_addr,
+                    argument,
+                }) => Poll::Ready(NetworkBehaviourAction::SendEvent {
+                    peer_id,
+                    event: handler::EventIn::ExecuteTask {
+                        job_addr,
+                        argument,
+                        user_data: self.next_query_unique_id(),
+                    },
+                }),
                 // TODO: close the swarm if channel has been closed ?
                 None => unimplemented!("Channel was closed"),
             };

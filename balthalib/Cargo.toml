@@ -12,5 +12,5 @@ balthastore = { path = "../balthastore" }
 balthurner = { path = "../balthurner" }
 balthamisc = { path = "../balthamisc" }
 # TODO: restrict features to bare essentials.
-tokio = { version = "0.2.11", features = ["fs"] }
+tokio = { version = "0.2.11", features = ["full"] }
 futures = "0.3.2"

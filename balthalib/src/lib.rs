@@ -4,9 +4,9 @@ pub extern crate balthernet as net;
 pub extern crate balthurner as run;
 extern crate tokio;
 
-use futures::{executor::block_on, future, FutureExt, StreamExt};
+use futures::{future, FutureExt, StreamExt};
 use std::{fmt, future::Future, io, path::Path};
-use tokio::{fs, sync::mpsc::Sender};
+use tokio::{fs, runtime::Runtime, sync::mpsc::Sender};
 
 use misc::NodeType;
 use net::{
@@ -15,6 +15,8 @@ use net::{
 };
 use run::Runner;
 use store::Storage;
+
+const TEST_JOB_ADDR: &[u8] = b"/ipfs/QmSpTZ2RmiwDgxRuG7KsFFRH6xxkSF2vtGYHu7PJoGoD3g";
 
 #[derive(Debug)]
 pub enum BalthazarError {
@@ -36,6 +38,9 @@ pub async fn get_keypair(keyfile_path: &Path) -> Result<Keypair, BalthazarError>
     Keypair::rsa_from_pkcs8(&mut bytes).map_err(BalthazarError::KeyDecodingError)
 }
 
+/// Type to identify our queries within [`Balthandler`] to link answers to queries.
+pub type QueryId = usize;
+
 pub fn run(node_type: NodeType, listen_addr: Multiaddr, addresses_to_dial: &[Multiaddr]) {
     let fut = async move {
         let keypair = balthernet::identity::Keypair::generate_secp256k1();
@@ -45,28 +50,70 @@ pub fn run(node_type: NodeType, listen_addr: Multiaddr, addresses_to_dial: &[Mul
         inbound_tx.send(net::EventIn::Ping).await.unwrap();
 
         swarm
-            .for_each(|e| handle_event(e, inbound_tx.clone()))
+            .for_each(|e| handle_event(node_type, e, inbound_tx.clone()))
             .await;
     };
 
-    block_on(fut);
+    Runtime::new().unwrap().block_on(fut);
+}
+
+async fn send_msg_to_behaviour(mut inbound_tx: Sender<net::EventIn>, msg: net::EventIn) {
+    inbound_tx
+        .send(msg)
+        .await
+        .expect("BalthBehaviour inbound_tx has a problem (dropped?)")
 }
 
 /// Handle events coming out of Swarm:
 fn handle_event(
+    node_type: NodeType,
     event: net::EventOut,
-    mut inbound_tx: Sender<net::EventIn>,
+    inbound_tx: Sender<net::EventIn>,
 ) -> impl Future<Output = ()> {
     eprintln!("S --- event: {:?}", event);
 
-    match event {
-        net::EventOut::Handler(
-            peer_id,
-            net::HandlerOut::ExecuteTask {
-                job_addr,
-                argument,
-                request_id,
-            },
+    match (node_type, event) {
+        (NodeType::Manager, net::EventOut::PeerHasNewType(peer_id, NodeType::Worker)) => {
+            eprintln!(
+                "M --- Sending task `{}` with parameters `{}` to peer `{}`",
+                String::from_utf8_lossy(TEST_JOB_ADDR),
+                6,
+                peer_id
+            );
+            send_msg_to_behaviour(
+                inbound_tx,
+                net::EventIn::ExecuteTask {
+                    peer_id,
+                    job_addr: Vec::from(TEST_JOB_ADDR),
+                    argument: 6,
+                },
+            )
+            .boxed()
+        }
+        (_, net::EventOut::Handler(peer_id, net::HandlerOut::TaskResult { result, .. })) => {
+            eprintln!("S --- Result from peer `{}`: `{}`", peer_id, result);
+            future::ready(()).boxed()
+        }
+        (
+            NodeType::Manager,
+            net::EventOut::Handler(peer_id, net::HandlerOut::ExecuteTask { .. }),
+        ) => {
+            eprintln!(
+                "M --- Manager received ExecuteTask from peer `{}`, ignoring...",
+                peer_id
+            );
+            future::ready(()).boxed()
+        }
+        (
+            NodeType::Worker,
+            net::EventOut::Handler(
+                peer_id,
+                net::HandlerOut::ExecuteTask {
+                    job_addr,
+                    argument,
+                    request_id,
+                },
+            ),
         ) => async move {
             let storage = store::StoragesWrapper::default();
             let string_job_addr = String::from_utf8_lossy(&job_addr[..]);
@@ -84,13 +131,14 @@ fn handle_event(
                                 "W --- result for `{}` with `{}`: `{}`",
                                 string_job_addr, argument, result
                             );
-                            inbound_tx
-                                .send(net::EventIn::Handler(
+                            send_msg_to_behaviour(
+                                inbound_tx.clone(),
+                                net::EventIn::Handler(
                                     peer_id,
                                     net::HandlerIn::TaskResult { result, request_id },
-                                ))
-                                .await
-                                .expect("BalthBehaviour inbound_tx has a problem (dropped?)");
+                                ),
+                            )
+                            .await;
                         }
                         Err(error) => {
                             eprintln!(
