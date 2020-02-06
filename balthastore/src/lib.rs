@@ -22,11 +22,12 @@ use std::{error::Error, io};
 
 pub mod ipfs;
 mod multiaddr_tools;
-pub mod wrapper;
+mod wrapper;
 
 pub use multiaddr_tools::{
     try_internet_multiaddr_to_usual_format, MultiaddrToStringConversionError,
 };
+pub use wrapper::*;
 
 // TODO: That's a lot of boxes everywhere for Storage trait and GenericReader...
 
