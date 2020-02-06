@@ -31,10 +31,6 @@ pub use wrapper::*;
 
 // TODO: That's a lot of boxes everywhere for Storage trait and GenericReader...
 
-// TODO: Multiaddr?
-/// Value used to reference to a file on a [`Storage`].
-pub type FileAddr = String;
-
 /// This trait defines a generic interface for storage mechanisms so they can be used interchangeably.
 pub trait Storage: Sync {
     /// Stores provided data from the Storage coming from an async stream.
@@ -42,12 +38,12 @@ pub trait Storage: Sync {
     fn store_stream(
         &self,
         data_stream: GenericReader,
-    ) -> BoxFuture<Result<FileAddr, Box<dyn Error>>>;
+    ) -> BoxFuture<Result<Vec<u8>, Box<dyn Error>>>;
     /// Get the requested data from the Storage as a [`futures::Stream`]
-    fn get_stream(&self, addr: &FileAddr) -> BoxStream<Result<Bytes, Box<dyn Error>>>;
+    fn get_stream(&self, addr: &[u8]) -> BoxStream<Result<Bytes, Box<dyn Error>>>;
 
     /// Same as [`Storage::store_stream`] but to provide all the data as once.
-    fn store(&self, data: &[u8]) -> BoxFuture<Result<FileAddr, Box<dyn Error>>> {
+    fn store(&self, data: &[u8]) -> BoxFuture<Result<Vec<u8>, Box<dyn Error>>> {
         // TODO: ugly? needed to avoid static lifetime on data...
         // let vec = Vec::from(data);
         // let mut cursor = io::Cursor::new(vec);
@@ -56,7 +52,7 @@ pub trait Storage: Sync {
     }
 
     /// Same as [`Storage::get_stream`] but to get all the data as once.
-    fn get<'a>(&'a self, addr: &'a FileAddr) -> BoxFuture<'a, Result<Bytes, Box<dyn Error>>> {
+    fn get<'a>(&'a self, addr: &'a [u8]) -> BoxFuture<'a, Result<Bytes, Box<dyn Error>>> {
         // TODO: not very efficient ?
         async move {
             let mut tmp = Vec::new();
@@ -77,11 +73,11 @@ impl<T: Storage> Storage for &T {
     fn store_stream(
         &self,
         data_stream: GenericReader,
-    ) -> BoxFuture<Result<FileAddr, Box<dyn Error>>> {
+    ) -> BoxFuture<Result<Vec<u8>, Box<dyn Error>>> {
         (*self).store_stream(data_stream)
     }
 
-    fn get_stream(&self, addr: &FileAddr) -> BoxStream<Result<Bytes, Box<dyn Error>>> {
+    fn get_stream(&self, addr: &[u8]) -> BoxStream<Result<Bytes, Box<dyn Error>>> {
         (*self).get_stream(addr)
     }
 }

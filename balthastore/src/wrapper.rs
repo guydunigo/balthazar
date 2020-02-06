@@ -1,13 +1,13 @@
 //! Provides [`StoragesWrapper`] to use different [`Storage`] at once in a transparently.
 // TODO: Instructions to add new Storage
 
-use super::{ipfs, FileAddr, GenericReader, MultiaddrToStringConversionError, Storage};
+use super::{ipfs, GenericReader, MultiaddrToStringConversionError, Storage};
 use bytes::Bytes;
 use either::Either;
 use futures::{future::BoxFuture, stream::BoxStream};
 use http::uri::InvalidUri;
 use multiaddr::{AddrComponent, Multiaddr};
-use std::{error::Error, str::FromStr};
+use std::error::Error;
 
 /// This enum defines the different [`StorageType`] available for [`StoragesWrapper`].
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -75,18 +75,18 @@ impl StoragesWrapper {
     ///
     /// ## For example:
     /// ```rust
-    /// # use balthastore::wrapper::{StoragesWrapper, StorageType};
+    /// # use balthastore::{StoragesWrapper, StorageType};
     ///
     /// let wrapper = StoragesWrapper::default();
-    /// let addr = "/ipfs/QmPZ9gcCEpqKTo6aq61g2nXGUhM4iCL3ewB6LDXZCtioEB".to_string();
+    /// let addr = b"/ipfs/QmPZ9gcCEpqKTo6aq61g2nXGUhM4iCL3ewB6LDXZCtioEB";
     ///
-    /// let storage_type = wrapper.get_storage_type_based_on_address(&addr);
+    /// let storage_type = wrapper.get_storage_type_based_on_address(&addr[..]);
     ///
     /// assert_eq!(storage_type, StorageType::Ipfs);
     ///
     /// ```
-    pub fn get_storage_type_based_on_address(&self, addr: &FileAddr) -> StorageType {
-        match Multiaddr::from_str(addr) {
+    pub fn get_storage_type_based_on_address(&self, addr: &[u8]) -> StorageType {
+        match Multiaddr::from_bytes(addr.to_owned()) {
             Ok(multiaddr) => match multiaddr.iter().next() {
                 Some(AddrComponent::IPFS(_)) => StorageType::Ipfs,
                 _ => self.default_storage_type(),
@@ -96,7 +96,7 @@ impl StoragesWrapper {
     }
 
     /// Returns the [`Storage`] corresponding to the [`get_storage_type_based_on_address`](`StoragesWrapper::get_storage_type_based_on_address`) answer.
-    pub fn get_storage_based_on_address(&self, addr: &FileAddr) -> &dyn Storage {
+    pub fn get_storage_based_on_address(&self, addr: &[u8]) -> &dyn Storage {
         let storage_type = self.get_storage_type_based_on_address(addr);
         self.storage_type_to_storage(storage_type)
     }
@@ -107,13 +107,13 @@ impl Storage for StoragesWrapper {
     fn store_stream(
         &self,
         data_stream: GenericReader,
-    ) -> BoxFuture<Result<FileAddr, Box<dyn Error>>> {
+    ) -> BoxFuture<Result<Vec<u8>, Box<dyn Error>>> {
         self.default_storage().store_stream(data_stream)
     }
 
     /// Tries to determine automatically the best [`Storage`] to retrieve data at `addr`
     /// using [`get_storage_type_based_on_address`](`StoragesWrapper::get_storage_type_based_on_address`).
-    fn get_stream(&self, addr: &FileAddr) -> BoxStream<Result<Bytes, Box<dyn Error>>> {
+    fn get_stream(&self, addr: &[u8]) -> BoxStream<Result<Bytes, Box<dyn Error>>> {
         self.get_storage_based_on_address(addr).get_stream(addr)
     }
 }
@@ -122,7 +122,7 @@ impl Storage for StoragesWrapper {
 mod tests {
     use super::*;
 
-    fn check_correct_type_based_on_address(addr: FileAddr, expected_type: StorageType) {
+    fn check_correct_type_based_on_address(addr: Vec<u8>, expected_type: StorageType) {
         let wrapper = StoragesWrapper::default();
         let storage_type = wrapper.get_storage_type_based_on_address(&addr);
         assert_eq!(storage_type, expected_type);
@@ -130,7 +130,7 @@ mod tests {
 
     #[test]
     fn it_chooses_the_correct_storage_type_based_on_addres() {
-        let addr = "/ipfs/QmPZ9gcCEpqKTo6aq61g2nXGUhM4iCL3ewB6LDXZCtioEB".to_string();
+        let addr = Vec::from(&b"/ipfs/QmPZ9gcCEpqKTo6aq61g2nXGUhM4iCL3ewB6LDXZCtioEB"[..]);
         check_correct_type_based_on_address(addr, StorageType::Ipfs);
     }
 }

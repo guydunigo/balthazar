@@ -13,8 +13,8 @@ use multiaddr::Multiaddr;
 use std::{error::Error, fmt};
 
 use super::{
-    try_internet_multiaddr_to_usual_format, FileAddr, GenericReader,
-    MultiaddrToStringConversionError, Storage,
+    try_internet_multiaddr_to_usual_format, GenericReader, MultiaddrToStringConversionError,
+    Storage,
 };
 
 /// Wrapper arround [`ipfs_api::response::Error`] to implement trait [`std::error::Error`].
@@ -72,12 +72,12 @@ impl Storage for IpfsStorage {
     fn store_stream(
         &self,
         data_stream: GenericReader,
-    ) -> BoxFuture<Result<FileAddr, Box<dyn Error>>> {
+    ) -> BoxFuture<Result<Vec<u8>, Box<dyn Error>>> {
         let new_client = self.inner().clone();
         async move {
             let res = new_client.add(data_stream).await;
             match res {
-                Ok(res) => Ok(format!("/ipfs/{}", res.name)),
+                Ok(res) => Ok(format!("/ipfs/{}", res.name).into()),
                 Err(error) => {
                     let error: Box<dyn Error> = Box::new(IpfsApiResponseError::from(error));
                     Err(error)
@@ -87,9 +87,9 @@ impl Storage for IpfsStorage {
         .boxed()
     }
 
-    fn get_stream(&self, addr: &FileAddr) -> BoxStream<Result<Bytes, Box<dyn Error>>> {
+    fn get_stream(&self, addr: &[u8]) -> BoxStream<Result<Bytes, Box<dyn Error>>> {
         self.ipfs_client
-            .cat(addr)
+            .cat(&String::from_utf8_lossy(addr)[..])
             .map_err(|e| {
                 let error: Box<dyn Error> = Box::new(IpfsApiResponseError::from(e));
                 error
@@ -105,10 +105,10 @@ mod tests {
     use std::fs;
     use tokio::runtime::Runtime;
 
-    const TEST_FILE: &str = "/ipfs/QmPZ9gcCEpqKTo6aq61g2nXGUhM4iCL3ewB6LDXZCtioEB";
+    const TEST_FILE: &[u8] = b"/ipfs/QmPZ9gcCEpqKTo6aq61g2nXGUhM4iCL3ewB6LDXZCtioEB";
 
     fn get_test_file_name() -> String {
-        format!("{}{}", TEST_DIR, TEST_FILE)
+        format!("{}{}", TEST_DIR, String::from_utf8_lossy(TEST_FILE))
     }
 
     #[test]
@@ -117,7 +117,7 @@ mod tests {
 
         Runtime::new()
             .unwrap()
-            .block_on(storage.get(&TEST_FILE.to_string()))
+            .block_on(storage.get(&TEST_FILE[..]))
             .unwrap();
     }
 
@@ -131,7 +131,7 @@ mod tests {
             .block_on(storage.store_stream(GenericReader::new(file)))
             .unwrap();
 
-        assert_eq!(TEST_FILE, res);
+        assert_eq!(TEST_FILE, &res[..]);
     }
 
     #[test]
@@ -144,7 +144,7 @@ mod tests {
             .block_on(storage.store(&content[..]))
             .unwrap();
 
-        assert_eq!(TEST_FILE, file_name);
+        assert_eq!(TEST_FILE, &file_name[..]);
     }
 
     #[test]
@@ -154,7 +154,7 @@ mod tests {
 
         let data = Runtime::new()
             .unwrap()
-            .block_on(storage.get(&TEST_FILE.to_string()))
+            .block_on(storage.get(&TEST_FILE[..]))
             .unwrap();
 
         assert_eq!(content, data);
