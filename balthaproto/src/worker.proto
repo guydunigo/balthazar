@@ -2,9 +2,13 @@ syntax = "proto3";
 
 package worker;
 
-message Task {
- string job_addr = 1;
- string args = 2;
+service NodeTypeService {
+  rpc GetNodeType (NodeTypeRequest) returns (NodeTypeAnswer);
+}
+
+enum NodeType {
+ MANAGER = 0;
+ WORKER = 1;
 }
 
 message NodeTypeRequest {}
@@ -12,9 +16,15 @@ message NodeTypeAnswer {
  NodeType node_type = 1;
 }
 
-enum NodeType {
- MANAGER = 0;
- WORKER = 1;
+message ExecuteTask {
+ string job_addr = 1;
+ string args = 2;
+}
+
+message TaskResult {
+ string job_addr = 1;
+ string args = 2;
+ string result = 3;
 }
 
 message WorkerMsgWrapper {
