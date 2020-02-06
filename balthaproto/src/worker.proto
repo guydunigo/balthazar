@@ -17,19 +17,19 @@ message NodeTypeAnswer {
 }
 
 message ExecuteTask {
- string job_addr = 1;
- string args = 2;
+ bytes job_addr = 1;
+ int32 argument = 2;
 }
 
 message TaskResult {
- string job_addr = 1;
- string args = 2;
- string result = 3;
+ int32 result = 1;
 }
 
 message WorkerMsgWrapper {
  oneof msg {
    NodeTypeRequest node_type_request = 1;
    NodeTypeAnswer node_type_answer = 2;
+   ExecuteTask execute_task = 3;
+   TaskResult task_result = 4;
  }
 }

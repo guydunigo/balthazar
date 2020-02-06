@@ -53,6 +53,8 @@ enum InternalEvent<TUserData> {
 #[derive(Debug)]
 pub enum EventIn {
     Ping,
+    /// Sending a message to the peer (new request or answer to one from the exterior).
+    Handler(PeerId, handler::EventIn<QueryId>),
 }
 
 /// Event returned by [`BalthBehaviour`] towards the Swarm when polled.
@@ -336,6 +338,9 @@ where
             let action = match event_opt {
                 Some(EventIn::Ping) => {
                     Poll::Ready(NetworkBehaviourAction::GenerateEvent(EventOut::Pong))
+                }
+                Some(EventIn::Handler(peer_id, event)) => {
+                    Poll::Ready(NetworkBehaviourAction::SendEvent { peer_id, event })
                 }
                 // TODO: close the swarm if channel has been closed ?
                 None => unimplemented!("Channel was closed"),

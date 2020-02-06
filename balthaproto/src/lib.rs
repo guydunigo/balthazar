@@ -1,5 +1,7 @@
 //! This crate contains the base networking protocols to be used by **balthernet**
 //! as well as basic structures and functions to handle them.
+//!
+//! When adding new messages, you can add a from implementation as seen under here.
 extern crate bytes;
 extern crate futures;
 extern crate futures_codec;
@@ -40,6 +42,18 @@ pub mod worker {
     impl From<NodeTypeAnswer> for WorkerMsgWrapper {
         fn from(src: NodeTypeAnswer) -> Self {
             WorkerMsg::NodeTypeAnswer(src).into()
+        }
+    }
+
+    impl From<ExecuteTask> for WorkerMsgWrapper {
+        fn from(src: ExecuteTask) -> Self {
+            WorkerMsg::ExecuteTask(src).into()
+        }
+    }
+
+    impl From<TaskResult> for WorkerMsgWrapper {
+        fn from(src: TaskResult) -> Self {
+            WorkerMsg::TaskResult(src).into()
         }
     }
 }

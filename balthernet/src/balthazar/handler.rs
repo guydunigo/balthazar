@@ -179,6 +179,18 @@ where
                 };
                 inject_answer_event_to_peer_request(&mut self.substreams, request_id, msg)
             }
+            EventIn::ExecuteTask {
+                job_addr,
+                argument,
+                user_data,
+            } => {
+                let msg = worker::ExecuteTask { job_addr, argument }.into();
+                inject_new_request_event(&mut self.substreams, user_data, msg)
+            }
+            EventIn::TaskResult { result, request_id } => {
+                let msg = worker::TaskResult { result }.into();
+                inject_answer_event_to_peer_request(&mut self.substreams, request_id, msg)
+            }
         }
     }
 
@@ -275,6 +287,15 @@ pub enum EventIn<TUserData> {
         node_type: NodeType,
         request_id: RequestId,
     },
+    ExecuteTask {
+        job_addr: Vec<u8>,
+        argument: i32,
+        user_data: TUserData,
+    },
+    TaskResult {
+        result: i32,
+        request_id: RequestId,
+    },
 }
 
 /// Events coming out of [`Balthandler`]. It can be forwarding a message coming
@@ -296,6 +317,15 @@ pub enum EventOut<TUserData> {
         error: BalthandlerQueryErr,
         user_data: TUserData,
     },
+    ExecuteTask {
+        job_addr: Vec<u8>,
+        argument: i32,
+        request_id: RequestId,
+    },
+    TaskResult {
+        result: i32,
+        user_data: TUserData,
+    },
 }
 
 /// Processes a message that's expected to be a request from a remote.
@@ -308,6 +338,13 @@ fn process_request<TUserData>(
         match msg {
             WorkerMsg::NodeTypeRequest(worker::NodeTypeRequest {}) => {
                 Some(Ok(EventOut::NodeTypeRequest {
+                    request_id: RequestId::new(connec_unique_id),
+                }))
+            }
+            WorkerMsg::ExecuteTask(worker::ExecuteTask { job_addr, argument }) => {
+                Some(Ok(EventOut::ExecuteTask {
+                    job_addr,
+                    argument,
                     request_id: RequestId::new(connec_unique_id),
                 }))
             }
@@ -338,6 +375,12 @@ fn process_answer<TUserData>(
                 user_data,
             })
         }
+            WorkerMsg::TaskResult(worker::TaskResult { result }) => {
+                Some(EventOut::TaskResult {
+                    result,
+                    user_data,
+                })
+            }
         _ => None,
     }
     } else {

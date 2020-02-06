@@ -29,7 +29,10 @@ use tokio::sync::mpsc::Sender;
 pub mod balthazar;
 pub mod tcp_transport;
 mod wrapper;
-pub use balthazar::{EventIn, EventOut};
+pub use balthazar::{
+    handler::{EventIn as HandlerIn, EventOut as HandlerOut},
+    EventIn, EventOut,
+};
 pub use wrapper::BalthBehavioursWrapper;
 
 // TODO: Better interface with wrapper object
