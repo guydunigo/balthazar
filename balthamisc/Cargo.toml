@@ -8,3 +8,5 @@ edition = "2018"
 
 [dependencies]
 balthaproto = { path = "../balthaproto" }
+tokio = { version = "0.2.11", features = ["sync"] }
+futures = "0.3.3"
