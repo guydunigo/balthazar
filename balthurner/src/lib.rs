@@ -66,7 +66,8 @@ impl Runner {
 
         match result {
             Ok(Ok(val)) => Ok(val),
-            Ok(Err(e)) => Err(Either::Left(e.into())),
+            Ok(Err(e)) => Err(Either::Left(e)),
+
             Err(e) => Err(Either::Right(e)),
         }
     }
