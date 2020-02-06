@@ -8,3 +8,9 @@ edition = "2018"
 
 [dependencies]
 wasmer-runtime = "0.13.1"
+balthamisc = { path = "../balthamisc" }
+either = "1.5.3"
+bytes = "0.5.4"
+
+[dev-dependencies]
+futures = "0.3.3"

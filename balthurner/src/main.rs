@@ -12,8 +12,8 @@ fn main() -> error::Result<()> {
         fs::read(file_name).expect("Could not read file")
     };
 
-    let runner = Runner::new(&wasm[..])?;
-    let instance = runner.instance();
+    let runner = Runner::new(wasm.into());
+    let instance = runner.get_instance()?;
 
     let get_six: Func<(), i32> = instance.func("get_six")?;
     let double: Func<i32, i32> = instance.func("double")?;
