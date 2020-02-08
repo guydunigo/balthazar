@@ -17,8 +17,7 @@ extern crate tokio;
 extern crate void;
 
 use futures::{stream, Stream, StreamExt};
-use libp2p::build_development_transport;
-// use libp2p::build_tcp_ws_secio_mplex_yamux;
+use libp2p::build_tcp_ws_secio_mplex_yamux;
 /// To avoid importing the whole libp2p crate in another one...
 pub use libp2p::{identity, Multiaddr};
 use libp2p::{identity::Keypair, swarm::Swarm};
@@ -52,10 +51,7 @@ pub fn get_swarm(
     let peer_id = keypair_public.into_peer_id();
     let (net_behaviour, tx) = BalthBehavioursWrapper::new(node_type, keypair.public());
 
-    // TODO: inspect the two build things and errors
-    // let transport = tcp_transport::get_tcp_transport(keypair);
-    let transport = build_development_transport(keypair).unwrap();
-    // let transport = build_tcp_ws_secio_mplex_yamux(keypair).unwrap();
+    let transport = build_tcp_ws_secio_mplex_yamux(keypair).unwrap();
 
     let mut swarm = Swarm::new(transport, net_behaviour, peer_id);
 
