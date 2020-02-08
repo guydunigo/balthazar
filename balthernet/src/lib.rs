@@ -73,6 +73,7 @@ pub fn get_swarm(
     let mut listening = false;
 
     (
+        // TODO: use more general events: https://docs.rs/libp2p/0.15.0/libp2p/swarm/enum.SwarmEvent.html
         // TODO: not very clean... or is it ? (taken roughly from the examples)
         stream::poll_fn(move |cx: &mut Context| {
             let poll = swarm.poll_next_unpin(cx);
