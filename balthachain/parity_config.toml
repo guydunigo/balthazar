@@ -1,0 +1,21 @@
+# This config should be placed in following path:
+#   ~/.local/share/io.parity.ethereum/config.toml
+# Genenrated using : https://paritytech.github.io/parity-config-generator/
+
+[parity]
+# Local Development Chain
+chain = "parity_genesis.json"
+
+[network]
+# Override the bootnodes from selected chain file.
+bootnodes = ["enode://2de58e767d456cb755a8908a9ed756ed6011dad287839e4c63754036aaf2d71c879d6a8161749d2335bf4e6620978bf910fa0edb2969e1f1031f72a8eb0db0e2@141.59.26.31:30303", "enode://de622dabe50a3df9686be8ec6ec0bfd0b0197fb3812473259b10a61e8055c2a6682b9c9a4910ba8cb9fc4bf317afd5e470b009386fa02ae86a1fd7987202e28f@141.59.26.32:30303", "enode://eae9c7121ee21d46e881b580fa68e07eaede86fc2312c3a31b9fdd63cb1a8ac7ee2a497dd41d982285408e0a0652ebe1ce08d0f5bb3f6cd9208d2ef003eb716b@141.59.26.33:30303"]
+# Enable or disable new peers discovery.
+discovery = false
+# Specify a path to a file with peers' enodes to be always connected to.
+reserved_peers = "parity_reserved_peers"
+# Connect only to reserved nodes.
+reserved_only = true
+
+[rpc]
+#  JSON-RPC will be listening for connections on IP 0.0.0.0.
+interface = "127.0.0.1"
