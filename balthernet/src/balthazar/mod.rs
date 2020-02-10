@@ -215,6 +215,7 @@ where
             }
 
             peer.endpoint = Some(endpoint.clone());
+            // TODO: save peer address
 
             self.inject_generate_event(EventOut::PeerConnected(peer_id, endpoint));
         }
@@ -277,7 +278,6 @@ where
         while let Some(internal_evt) = self.events.pop_back() {
             let answer = match internal_evt {
                 InternalEvent::Mdns(peer_id, _) => {
-                    // TODO: use the multiaddr ?
                     let mut peer = self.get_peer_or_insert(&peer_id);
                     if !peer.dialed {
                         peer.dialed = true;
