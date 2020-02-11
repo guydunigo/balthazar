@@ -41,13 +41,25 @@ pub async fn get_keypair(keyfile_path: &Path) -> Result<Keypair, BalthazarError>
 /// Type to identify our queries within [`Balthandler`] to link answers to queries.
 pub type QueryId = usize;
 
+/*
+enum Events {
+    SwarmEvent(net::EventOut),
+    SendEventToSwarm(net::EventIn),
+}
+
+pub struct Balthazar {
+    swarm_in: Sender<net::EventIn>,
+
+}
+*/
+
 pub fn run(node_type: NodeType, listen_addr: Multiaddr, addresses_to_dial: &[Multiaddr]) {
     let fut = async move {
         let keypair = balthernet::identity::Keypair::generate_secp256k1();
-        let (swarm, mut inbound_tx) =
+        let (swarm, inbound_tx) =
             net::get_swarm(node_type, keypair, listen_addr, addresses_to_dial);
 
-        inbound_tx.send(net::EventIn::Ping).await.unwrap();
+        send_msg_to_behaviour(inbound_tx.clone(), net::EventIn::Ping).await;
 
         swarm
             .for_each(|e| handle_event(node_type, e, inbound_tx.clone()))

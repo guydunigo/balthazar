@@ -1,26 +1,11 @@
 //! Provides [`StoragesWrapper`] to use different [`Storage`] at once in a transparently.
 // TODO: Instructions to add new Storage
 
-use super::{ipfs, GenericReader, MultiaddrToStringConversionError, Storage};
+use super::{ipfs, GenericReader, Storage, StorageConfig, StorageType};
 use bytes::Bytes;
-use either::Either;
 use futures::{future::BoxFuture, stream::BoxStream};
-use http::uri::InvalidUri;
 use multiaddr::{AddrComponent, Multiaddr};
 use std::error::Error;
-
-/// This enum defines the different [`StorageType`] available for [`StoragesWrapper`].
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum StorageType {
-    Ipfs,
-    // TODO: Other(T) ?
-}
-
-impl Default for StorageType {
-    fn default() -> Self {
-        StorageType::Ipfs
-    }
-}
 
 /// This structure is a wrapper around different storages to automatically route the calls to the
 /// corresponding storage.
@@ -30,19 +15,28 @@ impl Default for StorageType {
 /// [`StoragesWrapper`] has a **default** storage defined and [`Storage::store`] calls will use it and [`Storage::get`] calls that couldn't be automatically linked to another [`Storage`] are sent to it as well.
 #[derive(Clone, Default)]
 pub struct StoragesWrapper {
-    default_storage_type: StorageType,
+    config: StorageConfig,
     ipfs: ipfs::IpfsStorage,
 }
 
 impl StoragesWrapper {
-    pub fn storage_type_to_storage(&self, storage_type: StorageType) -> &dyn Storage {
+    pub fn new_with_config(config: StorageConfig) -> Result<Self, ipfs::IpfsStorageCreationError> {
+        let ipfs = if let Some(addr) = config.ipfs_api() {
+            ipfs::IpfsStorage::new(addr.clone())?
+        } else {
+            Default::default()
+        };
+        Ok(StoragesWrapper { config, ipfs })
+    }
+
+    pub fn storage_type_to_storage(&self, storage_type: &StorageType) -> &dyn Storage {
         match storage_type {
             StorageType::Ipfs => self.storage_ipfs(),
         }
     }
 
-    pub fn default_storage_type(&self) -> StorageType {
-        self.default_storage_type
+    pub fn default_storage_type(&self) -> &StorageType {
+        self.config.default_storage()
     }
 
     /// Returns the [`Storage`] corresponding to the
@@ -51,20 +45,8 @@ impl StoragesWrapper {
         self.storage_type_to_storage(self.default_storage_type())
     }
 
-    pub fn set_default_storage_type(&mut self, default_storage_type: StorageType) {
-        self.default_storage_type = default_storage_type;
-    }
-
     pub fn storage_ipfs(&self) -> &ipfs::IpfsStorage {
         &self.ipfs
-    }
-
-    pub fn set_ipfs_listen_addr(
-        &mut self,
-        listen_addr: Multiaddr,
-    ) -> Result<(), Either<InvalidUri, MultiaddrToStringConversionError>> {
-        self.ipfs = ipfs::IpfsStorage::new(listen_addr)?;
-        Ok(())
     }
 
     /// Tries to determine the best storage to use to obtain `addr`.
@@ -89,16 +71,16 @@ impl StoragesWrapper {
         match Multiaddr::from_bytes(addr.to_owned()) {
             Ok(multiaddr) => match multiaddr.iter().next() {
                 Some(AddrComponent::IPFS(_)) => StorageType::Ipfs,
-                _ => self.default_storage_type(),
+                _ => *self.default_storage_type(),
             },
-            Err(_) => self.default_storage_type(),
+            Err(_) => *self.default_storage_type(),
         }
     }
 
     /// Returns the [`Storage`] corresponding to the [`get_storage_type_based_on_address`](`StoragesWrapper::get_storage_type_based_on_address`) answer.
     pub fn get_storage_based_on_address(&self, addr: &[u8]) -> &dyn Storage {
         let storage_type = self.get_storage_type_based_on_address(addr);
-        self.storage_type_to_storage(storage_type)
+        self.storage_type_to_storage(&storage_type)
     }
 }
 

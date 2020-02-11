@@ -44,11 +44,11 @@ pub struct IpfsStorage {
     ipfs_client: IpfsClient,
 }
 
+pub type IpfsStorageCreationError = Either<InvalidUri, MultiaddrToStringConversionError>;
+
 impl IpfsStorage {
     /// Creates a new client connecting to the listening multiaddr.
-    pub fn new(
-        listen_addr: Multiaddr,
-    ) -> Result<Self, Either<InvalidUri, MultiaddrToStringConversionError>> {
+    pub fn new(listen_addr: Multiaddr) -> Result<Self, IpfsStorageCreationError> {
         let usual_addr =
             try_internet_multiaddr_to_usual_format(&listen_addr).map_err(Either::Right)?;
         let http_addr = format!("http://{}", usual_addr);

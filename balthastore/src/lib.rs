@@ -20,9 +20,12 @@ use bytes::Bytes;
 use futures::{future::BoxFuture, stream::BoxStream, FutureExt, StreamExt};
 use std::{error::Error, io};
 
+mod config;
 pub mod ipfs;
 mod multiaddr_tools;
 mod wrapper;
+
+pub use config::{StorageConfig, StorageType};
 
 pub use multiaddr_tools::{
     try_internet_multiaddr_to_usual_format, MultiaddrToStringConversionError,
