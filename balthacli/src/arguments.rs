@@ -36,7 +36,7 @@ pub struct BalthazarArgs {
     #[clap(name = "worker", short, long, conflicts_with("manager"))]
     is_worker: bool,
     /// Disable locally listening, only dialing towards others peers.
-    #[clap(short = "L", long, group("Network"))]
+    #[clap(short = "L", long)]
     disable_listen: bool,
     /// Set a address to listen on, default : `/ip4/0.0.0.0/tcp/5003`.
     // TODO: extract value from const
@@ -48,24 +48,23 @@ pub struct BalthazarArgs {
     )]
     listen_addr: Option<Libp2pMultiaddr>,
     /// Peer to connect to when started (e.g. `/ip4/0.0.0.0/tcp/5003`).
-    #[clap(name = "peer", short, long, group("Network"))]
+    #[clap(name = "peer", short, long)]
     peers: Option<Vec<Libp2pMultiaddr>>,
     /// Address to connect to a running IPFS daemon, default: address in file `~/.ipfs/api` or `/ip4/127.0.0.1/5001`.
-    #[clap(short, long, group("Storage"))]
+    #[clap(short, long)]
     ipfs_api: Option<Multiaddr>,
     /// Storage to use as default for storing files, as well as for getting files when source
     /// couldn't be determined.
     #[clap(short = "s", long, case_insensitive(true),
         possible_values(&DefaultStorageArg::variants()),
         parse(try_from_str = try_parse_default_storage),
-        group("Storage"),
     )]
     default_storage: Option<StorageType>,
     /// Multiaddress of a managers this worker is athourized to respond to.
     /// If not defined, will accept any manager.
     /// (e.g. `/ip4/10.0.0.1/tcp/5003`, `/p2p/[PEER_ID]`, `/ip4/10.0.0.1/tcp/5003/p2p/[PEER_ID]`,
     /// ...)
-    #[clap(short, long, group("Worker specific arguments"), requires("worker"))]
+    #[clap(short, long, requires("worker"))]
     authorized_managers: Option<Vec<Libp2pMultiaddr>>,
 }
 
