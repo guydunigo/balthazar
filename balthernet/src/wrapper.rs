@@ -23,7 +23,6 @@ use super::{
     balthazar::{self, BalthBehaviour},
     NodeTypeConfig,
 };
-use misc::NodeType;
 
 /// Use several [`NetworkBehaviour`](`libp2p::swarm::NetworkBehaviour`) at the same time.
 #[derive(NetworkBehaviour)]

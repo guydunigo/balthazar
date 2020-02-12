@@ -45,6 +45,24 @@ pub mod worker {
         }
     }
 
+    impl From<ManagerRequest> for WorkerMsgWrapper {
+        fn from(src: ManagerRequest) -> Self {
+            WorkerMsg::ManagerRequest(src).into()
+        }
+    }
+
+    impl From<ManagerAnswer> for WorkerMsgWrapper {
+        fn from(src: ManagerAnswer) -> Self {
+            WorkerMsg::ManagerAnswer(src).into()
+        }
+    }
+
+    impl From<NotMyManager> for WorkerMsgWrapper {
+        fn from(src: NotMyManager) -> Self {
+            WorkerMsg::NotMyManager(src).into()
+        }
+    }
+
     impl From<ExecuteTask> for WorkerMsgWrapper {
         fn from(src: ExecuteTask) -> Self {
             WorkerMsg::ExecuteTask(src).into()

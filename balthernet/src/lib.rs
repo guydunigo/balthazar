@@ -13,6 +13,7 @@ extern crate balthamisc as misc;
 extern crate balthaproto as proto;
 extern crate futures;
 extern crate libp2p;
+extern crate parity_multiaddr;
 extern crate tokio;
 extern crate void;
 
@@ -21,7 +22,6 @@ use libp2p::build_tcp_ws_secio_mplex_yamux;
 /// To avoid importing the whole libp2p crate in another one...
 pub use libp2p::{identity, Multiaddr};
 use libp2p::{identity::Keypair, swarm::Swarm};
-use misc::NodeType;
 use std::task::{Context, Poll};
 use tokio::sync::mpsc::Sender;
 

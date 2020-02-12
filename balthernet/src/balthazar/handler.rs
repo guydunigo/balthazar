@@ -179,6 +179,21 @@ where
                 };
                 inject_answer_event_to_peer_request(&mut self.substreams, request_id, msg)
             }
+            EventIn::ManagerRequest { user_data } => {
+                let msg = worker::ManagerRequest {}.into();
+                inject_new_request_event(&mut self.substreams, user_data, msg)
+            }
+            EventIn::ManagerAnswer {
+                accepted,
+                request_id,
+            } => {
+                let msg = worker::ManagerAnswer { accepted }.into();
+                inject_answer_event_to_peer_request(&mut self.substreams, request_id, msg)
+            }
+            EventIn::NotMyManager { request_id } => {
+                let msg = worker::NotMyManager {}.into();
+                inject_answer_event_to_peer_request(&mut self.substreams, request_id, msg)
+            }
             EventIn::ExecuteTask {
                 job_addr,
                 argument,
@@ -287,6 +302,16 @@ pub enum EventIn<TUserData> {
         node_type: NodeType,
         request_id: RequestId,
     },
+    ManagerRequest {
+        user_data: TUserData,
+    },
+    ManagerAnswer {
+        accepted: bool,
+        request_id: RequestId,
+    },
+    NotMyManager {
+        request_id: RequestId,
+    },
     ExecuteTask {
         job_addr: Vec<u8>,
         argument: i32,
@@ -312,6 +337,16 @@ pub enum EventOut<TUserData> {
     },
     NodeTypeRequest {
         request_id: RequestId,
+    },
+    ManagerRequest {
+        request_id: RequestId,
+    },
+    ManagerAnswer {
+        accepted: bool,
+        user_data: TUserData,
+    },
+    NotMyManager {
+        user_data: TUserData,
     },
     QueryError {
         error: BalthandlerQueryErr,
@@ -348,6 +383,11 @@ fn process_request<TUserData>(
                     request_id: RequestId::new(connec_unique_id),
                 }))
             }
+            WorkerMsg::ManagerRequest(worker::ManagerRequest {}) => {
+                Some(Ok(EventOut::ManagerRequest {
+                    request_id: RequestId::new(connec_unique_id),
+                }))
+            }
             _ => None,
         }
     } else {
@@ -363,26 +403,32 @@ fn process_answer<TUserData>(
     // eprintln!("process_answer {:?}", event);
     if let Some(msg) = event.msg {
         match msg /*event.msg.expect("empty protobuf oneof")*/ {
-        WorkerMsg::NodeTypeAnswer(worker::NodeTypeAnswer { node_type }) => {
-            let node_type = worker::NodeType::from_i32(node_type)
-                .unwrap_or_else(|| panic!(
-                    "Unexpected i32 value in protobuf enum NodeTypeAnswer::node_type: `{}`",
-                    node_type
-                ))
-                .into();
-            Some(EventOut::NodeTypeAnswer {
-                node_type,
-                user_data,
-            })
-        }
+            WorkerMsg::NodeTypeAnswer(worker::NodeTypeAnswer { node_type }) => {
+                let node_type = worker::NodeType::from_i32(node_type)
+                    .unwrap_or_else(|| panic!(
+                        "Unexpected i32 value in protobuf enum NodeTypeAnswer::node_type: `{}`",
+                        node_type
+                    ))
+                    .into();
+                Some(EventOut::NodeTypeAnswer {
+                    node_type,
+                    user_data,
+                })
+            }
             WorkerMsg::TaskResult(worker::TaskResult { result }) => {
                 Some(EventOut::TaskResult {
                     result,
                     user_data,
                 })
             }
-        _ => None,
-    }
+            WorkerMsg::ManagerAnswer(worker::ManagerAnswer { accepted }) => {
+                Some(EventOut::ManagerAnswer { accepted, user_data })
+            }
+            WorkerMsg::NotMyManager(worker::NotMyManager {}) => {
+                Some(EventOut::NotMyManager { user_data })
+            }
+            _ => None,
+        }
     } else {
         None
     }

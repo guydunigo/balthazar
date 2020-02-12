@@ -16,11 +16,18 @@ message NodeTypeAnswer {
  NodeType node_type = 1;
 }
 
+message ManagerRequest {}
+message ManagerAnswer {
+    bool accepted = 1;
+}
+// When a node receives a message which can only be sent to a worker
+// from its registered manager.
+message NotMyManager {}
+
 message ExecuteTask {
  bytes job_addr = 1;
  int32 argument = 2;
 }
-
 message TaskResult {
  int32 result = 1;
 }
@@ -29,7 +36,10 @@ message WorkerMsgWrapper {
  oneof msg {
    NodeTypeRequest node_type_request = 1;
    NodeTypeAnswer node_type_answer = 2;
-   ExecuteTask execute_task = 3;
-   TaskResult task_result = 4;
+   ManagerRequest manager_request = 3;
+   ManagerAnswer manager_answer = 4;
+   NotMyManager not_my_manager = 5;
+   ExecuteTask execute_task = 6;
+   TaskResult task_result = 7;
  }
 }

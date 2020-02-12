@@ -256,6 +256,7 @@ dependencies = [
  "balthaproto",
  "futures 0.3.3",
  "libp2p",
+ "parity-multiaddr",
  "tokio",
  "void",
 ]

@@ -1,5 +1,6 @@
-use libp2p::Multiaddr;
+use libp2p::PeerId;
 use misc::{NodeType, NodeTypeContainer};
+use parity_multiaddr::{Multiaddr, Protocol};
 
 pub const DEFAULT_LISTENING_ADDRESS: &str = "/ip4/0.0.0.0/tcp/5003";
 
@@ -25,6 +26,51 @@ impl WorkerConfig {
     pub fn authorized_managers_mut(&mut self) -> &mut Vec<Multiaddr> {
         &mut self.authorized_managers
     }
+
+    // TODO: tests
+    /// Check through `authorized_managers` to see if one match.
+    pub fn is_manager_authorized(&self, peer_id: Option<PeerId>, addr: Option<Multiaddr>) -> bool {
+        if self.authorized_managers.is_empty() {
+            // If it's empty, everyone is accepted.
+            true
+        } else {
+            self.authorized_managers.iter().any(|a| {
+                let mut a_clone = a.clone();
+                // If we have a PeerId at the end of the multihash (`.../p2p/[MULTIHASH]`).
+                if let Some(Protocol::P2p(multihash)) = a_clone.pop() {
+                    // If a PeerId was provided by argument.
+                    if let Some(peer_id) = &peer_id {
+                        // If a PeerId can be matched after being extracted from addr.
+                        if let Ok(a_peer_id) = PeerId::from_multihash(multihash) {
+                            // PeerIds must match
+                            &a_peer_id == peer_id
+                                && if let Some(addr) = &addr {
+                                    // Addresses must match
+                                    &a_clone == addr
+                                } else {
+                                    // addr is None, so `a` mustn't contain an address either.
+                                    a_clone.pop().is_none()
+                                }
+                        } else {
+                            // If a PeerId can't be matched after being extracted from addr,
+                            // nothing can match it.
+                            false
+                        }
+                    } else {
+                        // No peer_id was provided but one was found in `a`.
+                        false
+                    }
+                } else if let Some(addr) = &addr {
+                    // No peer_id in `a` so it all goes back to comparing addresses.
+                    a == addr
+                } else {
+                    // No address was provided and `a` doesn't contain any PeerId,
+                    // so we don't have anything to compare against.
+                    false
+                }
+            })
+        }
+    }
 }
 
 /// Configuration for the network part.
@@ -34,6 +80,8 @@ pub struct NetConfig {
     listen_addr: Option<Multiaddr>,
     /// Peers to connect to when start up...
     bootstrap_peers: Vec<Multiaddr>,
+    // TODO: good idea to have duplicate node type ?
+    /// Configuration relative to node type.
     node_type_configuration: NodeTypeContainer<ManagerConfig, WorkerConfig>,
 }
 
@@ -80,5 +128,48 @@ impl NetConfig {
         &mut self,
     ) -> &mut NodeTypeContainer<ManagerConfig, WorkerConfig> {
         &mut self.node_type_configuration
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::WorkerConfig;
+    use libp2p::PeerId;
+    use parity_multiaddr::{Multiaddr, Protocol};
+
+    #[test]
+    fn it_correctly_checks_managers_authorized_empty() {
+        let conf = WorkerConfig::default();
+        let res = conf.is_manager_authorized(None, None);
+
+        assert_eq!(res, true);
+    }
+
+    #[test]
+    fn it_correctly_checks_managers_authorized() {
+        let mut conf = WorkerConfig::default();
+        let mut peer_id: Multiaddr = "/p2p/QmdenMRzgF5SVBThqQzhe8usVsoBrnn7Y2Vg33GooVDuyf"
+            .parse()
+            .unwrap();
+
+        conf.authorized_managers_mut()
+            .push("/ip4/127.0.0.1/tcp/3333".parse().unwrap());
+        conf.authorized_managers_mut().push(peer_id.clone());
+
+        let res_2 = if let Some(Protocol::P2p(multihash)) = peer_id.pop() {
+            let peer_id = PeerId::from_multihash(multihash).unwrap();
+            conf.is_manager_authorized(Some(peer_id), None)
+        } else {
+            unreachable!();
+        };
+
+        let res_0 =
+            conf.is_manager_authorized(None, Some("/ip4/127.0.0.1/tcp/3333".parse().unwrap()));
+        let res_1 =
+            conf.is_manager_authorized(None, Some("/ip4/127.0.0.1/tcp/3334".parse().unwrap()));
+
+        assert_eq!(res_0, true);
+        assert_eq!(res_1, false);
+        assert_eq!(res_2, true);
     }
 }
