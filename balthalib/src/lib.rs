@@ -9,12 +9,12 @@ use std::{fmt, future::Future, io, path::Path};
 use tokio::{fs, runtime::Runtime, sync::mpsc::Sender};
 
 use misc::NodeType;
-use net::{
-    identity::{error::DecodingError, Keypair},
-    Multiaddr,
-};
+use net::identity::{error::DecodingError, Keypair};
 use run::Runner;
 use store::Storage;
+
+mod config;
+pub use config::BalthazarConfig;
 
 const TEST_JOB_ADDR: &[u8] = b"/ipfs/QmSpTZ2RmiwDgxRuG7KsFFRH6xxkSF2vtGYHu7PJoGoD3g";
 
@@ -53,16 +53,15 @@ pub struct Balthazar {
 }
 */
 
-pub fn run(node_type: NodeType, listen_addr: Multiaddr, addresses_to_dial: &[Multiaddr]) {
+pub fn run(config: BalthazarConfig) {
     let fut = async move {
         let keypair = balthernet::identity::Keypair::generate_secp256k1();
-        let (swarm, inbound_tx) =
-            net::get_swarm(node_type, keypair, listen_addr, addresses_to_dial);
+        let (swarm, inbound_tx) = net::get_swarm(*config.node_type(), keypair, config.net());
 
         send_msg_to_behaviour(inbound_tx.clone(), net::EventIn::Ping).await;
 
         swarm
-            .for_each(|e| handle_event(node_type, e, inbound_tx.clone()))
+            .for_each(|e| handle_event(*config.node_type(), e, inbound_tx.clone()))
             .await;
     };
 

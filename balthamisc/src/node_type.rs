@@ -1,4 +1,5 @@
 use proto::worker::NodeType as ProtoNodeType;
+use std::fmt;
 
 /// Defines the type of the current node,
 /// it can also contain information about a known manager.
@@ -6,8 +7,25 @@ use proto::worker::NodeType as ProtoNodeType;
 /// TODO: Useful? Why not use directly the Message type?
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NodeType {
-    Worker,
     Manager,
+    Worker,
+}
+
+impl fmt::Display for NodeType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            NodeType::Manager => write!(f, "Manager"),
+            NodeType::Worker => write!(f, "Worker"),
+        }
+    }
+}
+
+impl Default for NodeType {
+    /// By default the node is a [`Manager`](`NodeType::Manager`)
+    fn default() -> Self {
+        // TODO: really ?
+        NodeType::Manager
+    }
 }
 
 impl From<ProtoNodeType> for NodeType {
