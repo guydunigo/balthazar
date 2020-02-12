@@ -45,8 +45,7 @@ impl From<NodeType> for ProtoNodeType {
     }
 }
 
-/// Defines the type of the current node,
-/// it can also contain information.
+/// Defines the type of the current node with information specific to each type.
 #[derive(Clone, Debug)]
 pub enum NodeTypeContainer<M, W> {
     Manager(M),

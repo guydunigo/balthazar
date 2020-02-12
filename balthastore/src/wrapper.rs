@@ -7,6 +7,8 @@ use futures::{future::BoxFuture, stream::BoxStream};
 use multiaddr::{AddrComponent, Multiaddr};
 use std::error::Error;
 
+pub type StoragesWrapperCreationError = ipfs::IpfsStorageCreationError;
+
 /// This structure is a wrapper around different storages to automatically route the calls to the
 /// corresponding storage.
 /// For instance, files named using the format `/ipfs/[MULTIHASH]` will be routed towards the
@@ -20,7 +22,7 @@ pub struct StoragesWrapper {
 }
 
 impl StoragesWrapper {
-    pub fn new_with_config(config: &StorageConfig) -> Result<Self, ipfs::IpfsStorageCreationError> {
+    pub fn new_with_config(config: &StorageConfig) -> Result<Self, StoragesWrapperCreationError> {
         let ipfs = if let Some(addr) = config.ipfs_api() {
             ipfs::IpfsStorage::new(addr.clone())?
         } else {
