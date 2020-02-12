@@ -1,8 +1,7 @@
 use proto::worker::NodeType as ProtoNodeType;
 use std::fmt;
 
-/// Defines the type of the current node,
-/// it can also contain information about a known manager.
+/// Defines the type of the current node.
 ///
 /// TODO: Useful? Why not use directly the Message type?
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -42,6 +41,47 @@ impl From<NodeType> for ProtoNodeType {
         match src {
             NodeType::Manager => ProtoNodeType::Manager,
             NodeType::Worker => ProtoNodeType::Worker,
+        }
+    }
+}
+
+/// Defines the type of the current node,
+/// it can also contain information.
+#[derive(Clone, Debug)]
+pub enum NodeTypeContainer<M, W> {
+    Manager(M),
+    Worker(W),
+}
+
+impl<M, W> fmt::Display for NodeTypeContainer<M, W> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        NodeType::from(self).fmt(f)
+    }
+}
+
+impl<M, W> From<&NodeTypeContainer<M, W>> for NodeType {
+    fn from(src: &NodeTypeContainer<M, W>) -> Self {
+        match src {
+            NodeTypeContainer::Manager(_) => NodeType::Manager,
+            NodeTypeContainer::Worker(_) => NodeType::Worker,
+        }
+    }
+}
+
+impl<M, W> From<NodeTypeContainer<M, W>> for NodeType {
+    fn from(src: NodeTypeContainer<M, W>) -> Self {
+        match src {
+            NodeTypeContainer::Manager(_) => NodeType::Manager,
+            NodeTypeContainer::Worker(_) => NodeType::Worker,
+        }
+    }
+}
+
+impl<M: Default, W: Default> From<NodeType> for NodeTypeContainer<M, W> {
+    fn from(src: NodeType) -> Self {
+        match src {
+            NodeType::Manager => NodeTypeContainer::Manager(Default::default()),
+            NodeType::Worker => NodeTypeContainer::Worker(Default::default()),
         }
     }
 }

@@ -6,7 +6,7 @@ use std::{future::Future, pin::Pin, thread};
 use tokio::sync::oneshot::{self, error::RecvError};
 
 mod node_type;
-pub use node_type::NodeType;
+pub use node_type::{NodeType, NodeTypeContainer};
 
 /// Alias for [`tokio::sync::oneshot::error::RecvError`].
 pub type SpawnThreadError = RecvError;
