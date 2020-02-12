@@ -38,10 +38,10 @@ pub async fn get_keypair(keyfile_path: &Path) -> Result<Keypair, BalthazarError>
     Keypair::rsa_from_pkcs8(&mut bytes).map_err(BalthazarError::KeyDecodingError)
 }
 
+/*
 /// Type to identify our queries within [`Balthandler`] to link answers to queries.
 pub type QueryId = usize;
 
-/*
 enum Events {
     SwarmEvent(net::EventOut),
     SendEventToSwarm(net::EventIn),
