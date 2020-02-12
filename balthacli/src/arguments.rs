@@ -33,8 +33,8 @@ pub struct BalthazarArgs {
     #[clap(short = "l", long = "listen", conflicts_with("disable_listen"))]
     listen_addr: Option<Libp2pMultiaddr>,
     /// Peer to connect to when started (e.g. `/ip4/0.0.0.0/tcp/5003`).
-    #[clap(short, long)]
-    peer: Option<Vec<Libp2pMultiaddr>>,
+    #[clap(name = "peer", short, long)]
+    peers: Option<Vec<Libp2pMultiaddr>>,
     /// Address to connect to a running IPFS daemon, default: address in file `~/.ipfs/api` or `/ip4/127.0.0.1/5001`.
     #[clap(short, long)]
     ipfs_api: Option<Multiaddr>,
