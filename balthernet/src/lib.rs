@@ -33,7 +33,7 @@ pub use balthazar::{
     handler::{EventIn as HandlerIn, EventOut as HandlerOut},
     EventIn, EventOut,
 };
-pub use config::NetConfig;
+pub use config::*;
 pub use wrapper::BalthBehavioursWrapper;
 
 // TODO: Better interface with wrapper object
@@ -41,16 +41,16 @@ pub use wrapper::BalthBehavioursWrapper;
 /// Creates a new swarm based on [`BalthBehaviour`](`balthazar::BalthBehaviour`) and a default transport and returns
 /// a stream of event coming out of [`BalthBehaviour`](`balthazar::BalthBehaviour`).
 pub fn get_swarm(
-    node_type: NodeType,
     keypair: Keypair,
     config: &NetConfig,
 ) -> (
-    impl Stream<Item = balthazar::EventOut>,
     Sender<balthazar::EventIn>,
+    impl Stream<Item = balthazar::EventOut>,
 ) {
     let keypair_public = keypair.public();
     let peer_id = keypair_public.into_peer_id();
-    let (net_behaviour, tx) = BalthBehavioursWrapper::new(node_type, keypair.public());
+    let (net_behaviour, tx) =
+        BalthBehavioursWrapper::new(config.node_type_configuration(), keypair.public());
 
     let transport = build_tcp_ws_secio_mplex_yamux(keypair).unwrap();
 
@@ -71,6 +71,7 @@ pub fn get_swarm(
 
     let mut listening = false;
     (
+        tx,
         // TODO: use more general events: https://docs.rs/libp2p/0.15.0/libp2p/swarm/enum.SwarmEvent.html
         // TODO: not very clean... or is it ? (taken roughly from the examples)
         stream::poll_fn(move |cx: &mut Context| {
@@ -86,7 +87,6 @@ pub fn get_swarm(
 
             poll
         }),
-        tx,
     )
 }
 

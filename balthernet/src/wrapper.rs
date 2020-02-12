@@ -19,7 +19,10 @@ use std::{
 };
 use tokio::sync::mpsc::Sender;
 
-use super::balthazar::{self, BalthBehaviour};
+use super::{
+    balthazar::{self, BalthBehaviour},
+    NodeTypeConfig,
+};
 use misc::NodeType;
 
 /// Use several [`NetworkBehaviour`](`libp2p::swarm::NetworkBehaviour`) at the same time.
@@ -45,10 +48,13 @@ where
 {
     /// Creates a new [`BalthBehavioursWrapper`] and returns a [`Sender`] channel
     /// to communicate with it from the exterior of the Swarm.
-    pub fn new(node_type: NodeType, pub_key: PublicKey) -> (Self, Sender<balthazar::EventIn>) {
+    pub fn new(
+        node_type_conf: &NodeTypeConfig,
+        pub_key: PublicKey,
+    ) -> (Self, Sender<balthazar::EventIn>) {
         let local_peer_id = pub_key.into_peer_id();
         let store = MemoryStore::new(local_peer_id.clone());
-        let (balthbehaviour, tx) = BalthBehaviour::new(node_type);
+        let (balthbehaviour, tx) = BalthBehaviour::new(node_type_conf);
 
         (
             BalthBehavioursWrapper {

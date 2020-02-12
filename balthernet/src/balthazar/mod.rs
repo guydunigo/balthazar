@@ -29,6 +29,7 @@ use std::{
 use tokio::sync::mpsc::{channel, Receiver, Sender};
 
 pub mod handler;
+use super::NodeTypeConfig;
 use handler::Balthandler;
 use misc::NodeType;
 
@@ -112,7 +113,7 @@ impl Peer {
 pub struct BalthBehaviour<TSubstream> {
     inbound_rx: Receiver<EventIn>,
     // TODO: should the node_type be kept here, what happens if it changes elsewhere?
-    node_type: NodeType,
+    node_type_conf: NodeTypeConfig,
     peers: HashMap<PeerId, Peer>,
     events: VecDeque<InternalEvent<QueryId>>,
     next_query_unique_id: QueryId,
@@ -122,13 +123,13 @@ pub struct BalthBehaviour<TSubstream> {
 impl<TSubstream> BalthBehaviour<TSubstream> {
     /// Creates a new [`BalthBehaviour`] and returns a [`Sender`] channel to communicate with it from
     /// the exterior of the Swarm.
-    pub fn new(node_type: NodeType) -> (Self, Sender<EventIn>) {
+    pub fn new(node_type_conf: &NodeTypeConfig) -> (Self, Sender<EventIn>) {
         let (tx, inbound_rx) = channel(CHANNEL_SIZE);
 
         (
             BalthBehaviour {
                 inbound_rx,
-                node_type,
+                node_type_conf: node_type_conf.clone(),
                 peers: HashMap::new(),
                 events: VecDeque::new(),
                 next_query_unique_id: 0,
@@ -294,7 +295,7 @@ where
                             Poll::Ready(NetworkBehaviourAction::SendEvent {
                                 peer_id: peer.peer_id.clone(),
                                 event: handler::EventIn::NodeTypeAnswer {
-                                    node_type: self.node_type,
+                                    node_type: (&self.node_type_conf).into(),
                                     request_id,
                                 },
                             })

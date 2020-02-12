@@ -36,6 +36,7 @@ impl BalthazarConfig {
     }
     pub fn set_node_type(&mut self, new: NodeType) {
         self.node_type = new;
+        self.net_mut().set_node_type(new);
     }
 
     pub fn storage(&self) -> &StorageConfig {
