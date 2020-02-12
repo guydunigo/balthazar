@@ -1,6 +1,8 @@
+use super::ipfs;
 use multiaddr::Multiaddr;
 
-/// This enum defines the different [`StorageType`] available for [`StoragesWrapper`].
+/// This enum defines the different [`StorageType`] available for
+/// [`StoragesWrapper`](`super::StoragesWrapper`).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum StorageType {
     Ipfs,
@@ -17,7 +19,7 @@ impl Default for StorageType {
 #[derive(Clone, Default, Debug)]
 pub struct StorageConfig {
     /// The address to connect the IPFS API, see [the default implementation of
-    /// IpfsClient](`ipfs_api::IpfsClient::default`).
+    /// IpfsClient](`ipfs_api::IpfsClient`).
     ipfs_api: Option<Multiaddr>,
     /// Default storage type see [`StoragesWrapper`](`super::StoragesWrapper`) for more
     /// information.
@@ -28,8 +30,16 @@ impl StorageConfig {
     pub fn ipfs_api(&self) -> &Option<Multiaddr> {
         &self.ipfs_api
     }
-    pub fn set_ipfs_api(&mut self, new: Option<Multiaddr>) {
-        self.ipfs_api = new
+    /// Returns an Error if the address provided can't be used to access the IPFS API.
+    pub fn set_ipfs_api(
+        &mut self,
+        new: Option<Multiaddr>,
+    ) -> Result<(), ipfs::IpfsStorageCreationError> {
+        if let Some(ref addr) = new {
+            ipfs::IpfsStorage::new(addr.clone())?;
+        }
+        self.ipfs_api = new;
+        Ok(())
     }
 
     pub fn default_storage(&self) -> &StorageType {

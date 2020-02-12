@@ -20,13 +20,17 @@ pub struct StoragesWrapper {
 }
 
 impl StoragesWrapper {
-    pub fn new_with_config(config: StorageConfig) -> Result<Self, ipfs::IpfsStorageCreationError> {
+    pub fn new_with_config(config: &StorageConfig) -> Result<Self, ipfs::IpfsStorageCreationError> {
         let ipfs = if let Some(addr) = config.ipfs_api() {
             ipfs::IpfsStorage::new(addr.clone())?
         } else {
             Default::default()
         };
-        Ok(StoragesWrapper { config, ipfs })
+
+        Ok(StoragesWrapper {
+            config: config.clone(),
+            ipfs,
+        })
     }
 
     pub fn storage_type_to_storage(&self, storage_type: &StorageType) -> &dyn Storage {

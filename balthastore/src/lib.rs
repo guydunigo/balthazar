@@ -27,6 +27,7 @@ mod wrapper;
 
 pub use config::{StorageConfig, StorageType};
 
+pub use multiaddr::Multiaddr;
 pub use multiaddr_tools::{
     try_internet_multiaddr_to_usual_format, MultiaddrToStringConversionError,
 };
