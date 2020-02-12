@@ -26,12 +26,14 @@ use std::task::{Context, Poll};
 use tokio::sync::mpsc::Sender;
 
 pub mod balthazar;
+mod config;
 pub mod tcp_transport;
 mod wrapper;
 pub use balthazar::{
     handler::{EventIn as HandlerIn, EventOut as HandlerOut},
     EventIn, EventOut,
 };
+pub use config::NetConfig;
 pub use wrapper::BalthBehavioursWrapper;
 
 // TODO: Better interface with wrapper object
@@ -41,8 +43,7 @@ pub use wrapper::BalthBehavioursWrapper;
 pub fn get_swarm(
     node_type: NodeType,
     keypair: Keypair,
-    listen_addr: Multiaddr,
-    addresses_to_dial: &[Multiaddr],
+    config: &NetConfig,
 ) -> (
     impl Stream<Item = balthazar::EventOut>,
     Sender<balthazar::EventIn>,
@@ -55,9 +56,11 @@ pub fn get_swarm(
 
     let mut swarm = Swarm::new(transport, net_behaviour, peer_id);
 
-    Swarm::listen_on(&mut swarm, listen_addr).unwrap();
+    if let Some(addr) = config.listen_addr() {
+        Swarm::listen_on(&mut swarm, addr.clone()).unwrap();
+    }
 
-    addresses_to_dial.iter().for_each(|addr| {
+    config.bootstrap_peers().iter().for_each(|addr| {
         Swarm::dial_addr(&mut swarm, addr.clone()).unwrap();
         println!("Dialed {:?}", addr);
     });
@@ -67,7 +70,6 @@ pub fn get_swarm(
     }
 
     let mut listening = false;
-
     (
         // TODO: use more general events: https://docs.rs/libp2p/0.15.0/libp2p/swarm/enum.SwarmEvent.html
         // TODO: not very clean... or is it ? (taken roughly from the examples)
