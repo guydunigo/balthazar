@@ -27,9 +27,11 @@ impl WorkerConfig {
         &mut self.authorized_managers
     }
 
-    // TODO: tests
     /// Check through `authorized_managers` to see if one match.
-    pub fn is_manager_authorized(&self, peer_id: Option<PeerId>, addr: Option<Multiaddr>) -> bool {
+    /// `authorized_managers` elements containing a PeerId or an address or both,
+    /// for at least one element, the parameters must contain at least the same components
+    /// and they must match.
+    pub fn is_manager_authorized(&self, peer_id: Option<&PeerId>, addrs: &[Multiaddr]) -> bool {
         if self.authorized_managers.is_empty() {
             // If it's empty, everyone is accepted.
             true
@@ -39,18 +41,14 @@ impl WorkerConfig {
                 // If we have a PeerId at the end of the multihash (`.../p2p/[MULTIHASH]`).
                 if let Some(Protocol::P2p(multihash)) = a_clone.pop() {
                     // If a PeerId was provided by argument.
-                    if let Some(peer_id) = &peer_id {
+                    if let Some(peer_id) = peer_id {
                         // If a PeerId can be matched after being extracted from addr.
                         if let Ok(a_peer_id) = PeerId::from_multihash(multihash) {
                             // PeerIds must match
+                            // If `a` contains an address, one of the addrs must match.
                             &a_peer_id == peer_id
-                                && if let Some(addr) = &addr {
-                                    // Addresses must match
-                                    &a_clone == addr
-                                } else {
-                                    // addr is None, so `a` mustn't contain an address either.
-                                    a_clone.pop().is_none()
-                                }
+                                && (a_clone.iter().next().is_none()
+                                    || addrs.iter().any(|addr| &a_clone == addr))
                         } else {
                             // If a PeerId can't be matched after being extracted from addr,
                             // nothing can match it.
@@ -60,13 +58,9 @@ impl WorkerConfig {
                         // No peer_id was provided but one was found in `a`.
                         false
                     }
-                } else if let Some(addr) = &addr {
-                    // No peer_id in `a` so it all goes back to comparing addresses.
-                    a == addr
                 } else {
-                    // No address was provided and `a` doesn't contain any PeerId,
-                    // so we don't have anything to compare against.
-                    false
+                    // No peer_id in `a` so it all goes back to comparing addresses.
+                    addrs.iter().any(|addr| a == addr)
                 }
             })
         }
@@ -140,11 +134,12 @@ mod tests {
     #[test]
     fn it_correctly_checks_managers_authorized_empty() {
         let conf = WorkerConfig::default();
-        let res = conf.is_manager_authorized(None, None);
+        let res = conf.is_manager_authorized(None, &[]);
 
         assert_eq!(res, true);
     }
 
+    // TODO: better, more exhaustive tests
     #[test]
     fn it_correctly_checks_managers_authorized() {
         let mut conf = WorkerConfig::default();
@@ -158,15 +153,13 @@ mod tests {
 
         let res_2 = if let Some(Protocol::P2p(multihash)) = peer_id.pop() {
             let peer_id = PeerId::from_multihash(multihash).unwrap();
-            conf.is_manager_authorized(Some(peer_id), None)
+            conf.is_manager_authorized(Some(&peer_id), &[])
         } else {
             unreachable!();
         };
 
-        let res_0 =
-            conf.is_manager_authorized(None, Some("/ip4/127.0.0.1/tcp/3333".parse().unwrap()));
-        let res_1 =
-            conf.is_manager_authorized(None, Some("/ip4/127.0.0.1/tcp/3334".parse().unwrap()));
+        let res_0 = conf.is_manager_authorized(None, &["/ip4/127.0.0.1/tcp/3333".parse().unwrap()]);
+        let res_1 = conf.is_manager_authorized(None, &["/ip4/127.0.0.1/tcp/3334".parse().unwrap()]);
 
         assert_eq!(res_0, true);
         assert_eq!(res_1, false);
