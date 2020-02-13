@@ -57,9 +57,21 @@ pub mod worker {
         }
     }
 
-    impl From<NotMyManager> for WorkerMsgWrapper {
-        fn from(src: NotMyManager) -> Self {
-            WorkerMsg::NotMyManager(src).into()
+    impl From<NotMine> for WorkerMsgWrapper {
+        fn from(src: NotMine) -> Self {
+            WorkerMsg::NotMine(src).into()
+        }
+    }
+
+    impl From<ManagerBye> for WorkerMsgWrapper {
+        fn from(src: ManagerBye) -> Self {
+            WorkerMsg::ManagerBye(src).into()
+        }
+    }
+
+    impl From<ManagerByeAnswer> for WorkerMsgWrapper {
+        fn from(src: ManagerByeAnswer) -> Self {
+            WorkerMsg::ManagerByeAnswer(src).into()
         }
     }
 

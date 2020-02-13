@@ -105,9 +105,9 @@ impl Balthazar {
         eprintln!("S --- event: {:?}", event);
 
         match (node_type, event) {
-            (NodeType::Manager, net::EventOut::PeerHasNewType(peer_id, NodeType::Worker)) => {
+            (NodeType::Manager, net::EventOut::WorkerNew(peer_id)) => {
                 eprintln!(
-                    "M --- Sending task `{}` with parameters `{}` to peer `{}`",
+                    "M --- Sending task `{}` with parameters `{}` to worker `{}`",
                     String::from_utf8_lossy(TEST_JOB_ADDR),
                     6,
                     peer_id
@@ -126,15 +126,9 @@ impl Balthazar {
                 eprintln!("S --- Result from peer `{}`: `{}`", peer_id, result);
                 future::ready(()).boxed()
             }
-            (
-                NodeType::Manager,
-                net::EventOut::Handler(peer_id, net::HandlerOut::ExecuteTask { .. }),
-            ) => {
-                eprintln!(
-                    "M --- Manager received ExecuteTask from peer `{}`, ignoring...",
-                    peer_id
-                );
-                future::ready(()).boxed()
+            (NodeType::Manager, net::EventOut::Handler(_, net::HandlerOut::ExecuteTask { .. })) => {
+                // Normally caught by NetworkBehaviour.
+                unreachable!();
             }
             (
                 NodeType::Worker,

@@ -190,8 +190,16 @@ where
                 let msg = worker::ManagerAnswer { accepted }.into();
                 inject_answer_event_to_peer_request(&mut self.substreams, request_id, msg)
             }
-            EventIn::NotMyManager { request_id } => {
-                let msg = worker::NotMyManager {}.into();
+            EventIn::NotMine { request_id } => {
+                let msg = worker::NotMine {}.into();
+                inject_answer_event_to_peer_request(&mut self.substreams, request_id, msg)
+            }
+            EventIn::ManagerBye { user_data } => {
+                let msg = worker::ManagerBye {}.into();
+                inject_new_request_event(&mut self.substreams, user_data, msg)
+            }
+            EventIn::ManagerByeAnswer { request_id } => {
+                let msg = worker::ManagerBye {}.into();
                 inject_answer_event_to_peer_request(&mut self.substreams, request_id, msg)
             }
             EventIn::ExecuteTask {
@@ -309,7 +317,7 @@ pub enum EventIn<TUserData> {
         accepted: bool,
         request_id: RequestId,
     },
-    NotMyManager {
+    NotMine {
         request_id: RequestId,
     },
     ExecuteTask {
@@ -319,6 +327,12 @@ pub enum EventIn<TUserData> {
     },
     TaskResult {
         result: i32,
+        request_id: RequestId,
+    },
+    ManagerBye {
+        user_data: TUserData,
+    },
+    ManagerByeAnswer {
         request_id: RequestId,
     },
 }
@@ -345,7 +359,7 @@ pub enum EventOut<TUserData> {
         accepted: bool,
         user_data: TUserData,
     },
-    NotMyManager {
+    NotMine {
         user_data: TUserData,
     },
     QueryError {
@@ -360,6 +374,9 @@ pub enum EventOut<TUserData> {
     TaskResult {
         result: i32,
         user_data: TUserData,
+    },
+    ManagerBye {
+        request_id: RequestId,
     },
 }
 
@@ -388,6 +405,9 @@ fn process_request<TUserData>(
                     request_id: RequestId::new(connec_unique_id),
                 }))
             }
+            WorkerMsg::ManagerBye(worker::ManagerBye {}) => Some(Ok(EventOut::ManagerBye {
+                request_id: RequestId::new(connec_unique_id),
+            })),
             _ => None,
         }
     } else {
@@ -424,8 +444,12 @@ fn process_answer<TUserData>(
             WorkerMsg::ManagerAnswer(worker::ManagerAnswer { accepted }) => {
                 Some(EventOut::ManagerAnswer { accepted, user_data })
             }
-            WorkerMsg::NotMyManager(worker::NotMyManager {}) => {
-                Some(EventOut::NotMyManager { user_data })
+            WorkerMsg::NotMine(worker::NotMine {}) => {
+                Some(EventOut::NotMine { user_data })
+            }
+            WorkerMsg::ManagerByeAnswer(_) => {
+                // We don't need to process such answer, as it was just a notice message.
+                None
             }
             _ => None,
         }

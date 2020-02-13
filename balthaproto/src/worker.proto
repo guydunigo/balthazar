@@ -22,7 +22,13 @@ message ManagerAnswer {
 }
 // When a node receives a message which can only be sent to a worker
 // from its registered manager.
-message NotMyManager {}
+// Or when a node receives a message which can only be sent to a manager
+// from one of its registered workers.
+message NotMine {}
+
+// When a manager or a worker want to unsubscribe to one another
+message ManagerBye {}
+message ManagerByeAnswer {}
 
 message ExecuteTask {
  bytes job_addr = 1;
@@ -38,8 +44,10 @@ message WorkerMsgWrapper {
    NodeTypeAnswer node_type_answer = 2;
    ManagerRequest manager_request = 3;
    ManagerAnswer manager_answer = 4;
-   NotMyManager not_my_manager = 5;
-   ExecuteTask execute_task = 6;
-   TaskResult task_result = 7;
+   NotMine not_mine = 5;
+   ManagerBye manager_bye = 6;
+   ManagerByeAnswer manager_bye_answer = 7;
+   ExecuteTask execute_task = 9;
+   TaskResult task_result = 10;
  }
 }

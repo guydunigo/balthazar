@@ -8,7 +8,7 @@
 //!
 //! Have a look at the [`handler`] module description to make the necessary updates.
 //!
-//! When extending [`InternalEvent`] or [`handler::EventOut`], update the `poll` method
+//! When extending [`InternalEvent`] or [`HandlerOut`], update the `poll` method
 //! from [`BalthBehaviour`].
 use futures::io::{AsyncRead, AsyncWrite};
 use libp2p::{
@@ -32,7 +32,7 @@ use tokio::sync::mpsc::{channel, Receiver, Sender};
 
 pub mod handler;
 use super::{ManagerConfig, NodeTypeConfig, WorkerConfig};
-use handler::Balthandler;
+use handler::{Balthandler, EventIn as HandlerIn, EventOut as HandlerOut};
 use misc::{NodeType, NodeTypeContainer};
 
 const CHANNEL_SIZE: usize = 1024;
@@ -58,7 +58,7 @@ enum InternalEvent<TUserData> {
     /// Event created when the [`Mdns`](`libp2p::mdns::Mdns`) discovers a new peer at given multiaddress.
     Mdns(PeerId, Multiaddr),
     /// Event originating from [`Balthandler`].
-    Handler(PeerId, handler::EventOut<TUserData>),
+    Handler(PeerId, HandlerOut<TUserData>),
     /// Request a node type.
     /// TODO: delete and delegate to outside, or default here?
     AskNodeType(PeerId),
@@ -71,7 +71,7 @@ enum InternalEvent<TUserData> {
 pub enum EventIn {
     Ping,
     /// Sending a message to the peer (new request or answer to one from the exterior).
-    Handler(PeerId, handler::EventIn<QueryId>),
+    Handler(PeerId, HandlerIn<QueryId>),
     /// Send ExecuteTask to peer.
     ExecuteTask {
         peer_id: PeerId,
@@ -92,22 +92,38 @@ pub enum EventOut {
     /// Answer to a [`EventIn::Ping`].
     Pong,
     /// Events created by [`Balthandler`] which are not handled directly in [`BalthBehaviour`]
-    Handler(PeerId, handler::EventOut<QueryId>),
+    Handler(PeerId, HandlerOut<QueryId>),
+    /// A new worker is now managed by us.
+    WorkerNew(PeerId),
+    /// When a worker stops being managed by us.
+    WorkerBye(PeerId),
+    /// When a worker sends us a message as if we were its manager.
+    NotMyWorker(PeerId, HandlerOut<QueryId>),
+    /// A manager has accepted acting as our manager, so we will receive orders from it now on.
     ManagerNew(PeerId),
+    /// The manager we requested refused.
     ManagerRefused(PeerId),
+    /// When the manager stops managing us.
+    ManagerBye(PeerId),
+    /// A manager accepted managing us, but it isn't authorized.
+    ManagerUnauthorized(PeerId),
+    /// A manager accepted managing us, but we already have one.
     ManagerAlreadyHasOne(PeerId),
+    /// When a manager sends us a message as if we were one of its workers.
+    NotMyManager(PeerId, HandlerOut<QueryId>),
+    /// A message was received but we are the wrong NodeType to handle it.
     MsgForIncorrectNodeType {
         peer_id: PeerId,
         expected_type: NodeType,
-        event: handler::EventOut<QueryId>,
+        event: HandlerOut<QueryId>,
     },
+    /// A message has been received from a peer which doesn't have the correct NodeType.
     MsgFromIncorrectNodeType {
         peer_id: PeerId,
         known_type: Option<NodeType>,
         expected_type: NodeType,
-        event: handler::EventOut<QueryId>,
+        event: HandlerOut<QueryId>,
     },
-    UnknownPeerType(PeerId, handler::EventOut<QueryId>),
 }
 
 /// Type to identify our queries within [`Balthandler`] to link answers to queries.
@@ -193,7 +209,7 @@ impl<TSubstream> BalthBehaviour<TSubstream> {
             .push_front(InternalEvent::Mdns(peer_id, multiaddr));
     }
 
-    fn inject_handler_event(&mut self, peer_id: PeerId, handler_evt: handler::EventOut<QueryId>) {
+    fn inject_handler_event(&mut self, peer_id: PeerId, handler_evt: HandlerOut<QueryId>) {
         self.events
             .push_front(InternalEvent::Handler(peer_id, handler_evt));
     }
@@ -334,90 +350,300 @@ where
                 // TODO: better match `answers` to `requests`?
                 InternalEvent::Handler(peer_id, event) => {
                     let peer_rc = self.get_peer_or_insert(&peer_id);
-                    let mut peer = peer_rc.borrow_mut();
 
                     match event {
-                        handler::EventOut::NodeTypeRequest { request_id } => {
+                        HandlerOut::NodeTypeRequest { request_id } => {
                             Poll::Ready(NetworkBehaviourAction::SendEvent {
-                                peer_id: peer.peer_id.clone(),
-                                event: handler::EventIn::NodeTypeAnswer {
+                                peer_id,
+                                event: HandlerIn::NodeTypeAnswer {
                                     node_type: (&self.node_type_data).into(),
                                     request_id,
                                 },
                             })
                         }
-                        handler::EventOut::NodeTypeAnswer { node_type, .. } => {
+                        HandlerOut::NodeTypeAnswer { node_type, .. } => {
+                            let mut peer = peer_rc.borrow_mut();
+
                             if let Some(ref known_node_type) = peer.node_type {
                                 if *known_node_type != node_type {
                                     eprintln!("E --- Peer `{:?}` answered a different node_type `{:?}` than before `{:?}`", peer.peer_id, known_node_type, node_type);
+                                    // TODO: better error reporting
                                 }
+
+                                Poll::Pending
                             } else {
+                                let request_man = if let NodeType::Manager = node_type {
+                                    if let NodeTypeData::Worker(ref data) = self.node_type_data {
+                                        data.manager.is_none()
+                                            && data.config.is_manager_authorized(
+                                                Some(&peer.peer_id),
+                                                &peer.addrs[..],
+                                            )
+                                    } else {
+                                        false
+                                    }
+                                } else {
+                                    false
+                                };
+
                                 peer.node_type = Some(node_type);
                                 self.inject_generate_event(EventOut::PeerHasNewType(
-                                    peer_id, node_type,
+                                    peer_id.clone(),
+                                    node_type,
                                 ));
+
+                                if request_man {
+                                    Poll::Ready(NetworkBehaviourAction::SendEvent {
+                                        peer_id,
+                                        event: HandlerIn::ManagerRequest {
+                                            user_data: self.next_query_unique_id(),
+                                        },
+                                    })
+                                } else {
+                                    Poll::Pending
+                                }
                             }
-                            Poll::Pending
                         }
-                        handler::EventOut::ManagerRequest { request_id } => {
+                        HandlerOut::ManagerRequest { request_id } => {
                             if let NodeTypeData::Manager(ref mut data) = self.node_type_data {
                                 // TODO: more conditions for accepting workers ?
                                 // TODO: limit ?
-                                data.workers.insert(peer.peer_id.clone(), peer_rc.clone());
+                                data.workers.insert(peer_id.clone(), peer_rc.clone());
+                                self.inject_generate_event(EventOut::WorkerNew(peer_id.clone()));
                                 Poll::Ready(NetworkBehaviourAction::SendEvent {
-                                    peer_id: peer.peer_id.clone(),
-                                    event: handler::EventIn::ManagerAnswer {
+                                    peer_id,
+                                    event: HandlerIn::ManagerAnswer {
                                         accepted: true,
                                         request_id,
                                     },
                                 })
                             } else {
                                 // If we aren't a Manager, we have to refuse such requests.
+                                self.inject_generate_event(EventOut::MsgForIncorrectNodeType {
+                                    peer_id: peer_id.clone(),
+                                    expected_type: NodeType::Manager,
+                                    event: HandlerOut::ManagerRequest {
+                                        request_id: request_id.clone_dangerous(),
+                                    },
+                                });
                                 Poll::Ready(NetworkBehaviourAction::SendEvent {
-                                    peer_id: peer.peer_id.clone(),
-                                    event: handler::EventIn::ManagerAnswer {
+                                    peer_id,
+                                    event: HandlerIn::ManagerAnswer {
                                         accepted: false,
                                         request_id,
                                     },
                                 })
                             }
                         }
-                        handler::EventOut::ManagerAnswer { accepted, .. } => {
-                            let evt =
+                        HandlerOut::ManagerAnswer { accepted, .. } => {
+                            let peer_id_clone = peer_id.clone();
+                            let peer = peer_rc.borrow();
+
+                            let (evt, send_bye) =
                                 if let NodeTypeData::Worker(ref mut data) = self.node_type_data {
                                     match (accepted, data.manager.is_none(), peer.node_type) {
                                         (true, true, Some(NodeType::Manager)) => {
-                                            data.manager = Some(peer_rc.clone());
-                                            EventOut::ManagerNew(peer_id)
+                                            if data.config.is_manager_authorized(
+                                                Some(&peer_id),
+                                                &peer.addrs[..],
+                                            ) {
+                                                data.manager = Some(peer_rc.clone());
+                                                (EventOut::ManagerNew(peer_id), false)
+                                            } else {
+                                                (EventOut::ManagerUnauthorized(peer_id), true)
+                                            }
                                         }
-                                        (_, false, Some(NodeType::Manager)) => {
-                                            EventOut::ManagerAlreadyHasOne(peer_id)
+                                        (accepted, false, Some(NodeType::Manager)) => {
+                                            (EventOut::ManagerAlreadyHasOne(peer_id), accepted)
                                         }
                                         (false, true, Some(NodeType::Manager)) => {
-                                            EventOut::ManagerRefused(peer_id)
+                                            (EventOut::ManagerRefused(peer_id), false)
                                         }
-                                        (_, _, Some(NodeType::Worker)) => {
+                                        (accepted, _, Some(NodeType::Worker)) => (
                                             EventOut::MsgFromIncorrectNodeType {
                                                 peer_id,
                                                 known_type: peer.node_type,
                                                 expected_type: NodeType::Manager,
                                                 event,
-                                            }
-                                        }
-                                        (_, _, None) => EventOut::UnknownPeerType(peer_id, event),
+                                            },
+                                            accepted,
+                                        ),
+                                        (accepted, _, None) => (
+                                            EventOut::MsgFromIncorrectNodeType {
+                                                peer_id,
+                                                known_type: None,
+                                                expected_type: NodeType::Manager,
+                                                event,
+                                            },
+                                            accepted,
+                                        ),
                                     }
                                 } else {
-                                    EventOut::MsgForIncorrectNodeType {
-                                        peer_id,
-                                        expected_type: NodeType::Worker,
-                                        event,
-                                    }
+                                    (
+                                        EventOut::MsgForIncorrectNodeType {
+                                            peer_id,
+                                            expected_type: NodeType::Worker,
+                                            event,
+                                        },
+                                        accepted,
+                                    )
                                 };
+
                             self.inject_generate_event(evt);
+
+                            if send_bye {
+                                Poll::Ready(NetworkBehaviourAction::SendEvent {
+                                    peer_id: peer_id_clone,
+                                    event: HandlerIn::ManagerBye {
+                                        user_data: self.next_query_unique_id(),
+                                    },
+                                })
+                            } else {
+                                Poll::Pending
+                            }
+                        }
+                        HandlerOut::NotMine { .. } => {
+                            match self.node_type_data {
+                                NodeTypeData::Manager(ref mut data) => {
+                                    if data.workers.remove(&peer_id).is_some() {
+                                        self.inject_generate_event(EventOut::WorkerBye(peer_id));
+                                    }
+                                }
+                                NodeTypeData::Worker(ref mut data) => {
+                                    let remove_man = if let Some(ref man) = data.manager {
+                                        man.borrow().peer_id == peer_id
+                                    } else {
+                                        false
+                                    };
+
+                                    if remove_man {
+                                        data.manager.take();
+                                        self.inject_generate_event(EventOut::ManagerBye(peer_id));
+                                    }
+                                }
+                            }
+
                             Poll::Pending
                         }
-                        handler::EventOut::NotMyManager { .. } => {
-                            unimplemented!();
+                        HandlerOut::ManagerBye { request_id } => {
+                            let evt = match self.node_type_data {
+                                NodeTypeData::Manager(ref mut data) => {
+                                    if data.workers.get(&peer_id).is_some() {
+                                        data.workers.remove(&peer_id);
+                                        EventOut::WorkerBye(peer_id.clone())
+                                    } else {
+                                        EventOut::NotMyWorker(
+                                            peer_id.clone(),
+                                            HandlerOut::ManagerBye {
+                                                request_id: request_id.clone_dangerous(),
+                                            },
+                                        )
+                                    }
+                                }
+                                NodeTypeData::Worker(ref mut data) => {
+                                    if let Some(ref manager) = data.manager {
+                                        if manager.borrow().peer_id == peer_id {
+                                            EventOut::ManagerBye(peer_id.clone())
+                                        } else {
+                                            EventOut::NotMyManager(
+                                                peer_id.clone(),
+                                                HandlerOut::ManagerBye {
+                                                    request_id: request_id.clone_dangerous(),
+                                                },
+                                            )
+                                        }
+                                    } else {
+                                        EventOut::NotMyManager(
+                                            peer_id.clone(),
+                                            HandlerOut::ManagerBye {
+                                                request_id: request_id.clone_dangerous(),
+                                            },
+                                        )
+                                    }
+                                }
+                            };
+                            self.inject_generate_event(evt);
+
+                            Poll::Ready(NetworkBehaviourAction::SendEvent {
+                                peer_id,
+                                event: HandlerIn::ManagerByeAnswer { request_id },
+                            })
+                        }
+                        HandlerOut::ExecuteTask {
+                            job_addr,
+                            argument,
+                            request_id,
+                        } => {
+                            let peer_id_clone = peer_id.clone();
+                            let send_not_mine = |request_id| {
+                                Poll::Ready(NetworkBehaviourAction::SendEvent {
+                                    peer_id: peer_id_clone,
+                                    event: HandlerIn::NotMine { request_id },
+                                })
+                            };
+                            let clone_evt = |request_id| HandlerOut::ExecuteTask {
+                                job_addr,
+                                argument,
+                                request_id,
+                            };
+
+                            let (evt, res) =
+                                if let NodeTypeData::Worker(ref data) = self.node_type_data {
+                                    if let Some(ref man) = data.manager {
+                                        if man.borrow().peer_id == peer_id {
+                                            (
+                                                EventOut::Handler(peer_id, clone_evt(request_id)),
+                                                Poll::Pending,
+                                            )
+                                        } else {
+                                            (
+                                                EventOut::NotMyManager(
+                                                    peer_id,
+                                                    clone_evt(request_id.clone_dangerous()),
+                                                ),
+                                                send_not_mine(request_id),
+                                            )
+                                        }
+                                    } else {
+                                        (
+                                            EventOut::NotMyManager(
+                                                peer_id,
+                                                clone_evt(request_id.clone_dangerous()),
+                                            ),
+                                            send_not_mine(request_id),
+                                        )
+                                    }
+                                } else {
+                                    (
+                                        EventOut::MsgForIncorrectNodeType {
+                                            peer_id,
+                                            expected_type: NodeType::Worker,
+                                            event: clone_evt(request_id.clone_dangerous()),
+                                        },
+                                        send_not_mine(request_id),
+                                    )
+                                };
+                            self.inject_generate_event(evt);
+
+                            res
+                        }
+                        HandlerOut::TaskResult { .. } => {
+                            let evt = if let NodeTypeData::Manager(ref data) = self.node_type_data {
+                                if data.workers.get(&peer_id).is_some() {
+                                    EventOut::Handler(peer_id, event)
+                                } else {
+                                    EventOut::NotMyWorker(peer_id, event)
+                                }
+                            } else {
+                                EventOut::MsgForIncorrectNodeType {
+                                    peer_id,
+                                    expected_type: NodeType::Manager,
+                                    event,
+                                }
+                            };
+                            self.inject_generate_event(evt);
+
+                            Poll::Pending
                         }
                         _ => {
                             self.inject_generate_event(EventOut::Handler(peer_id, event));
@@ -434,7 +660,7 @@ where
                 {
                     Poll::Ready(NetworkBehaviourAction::SendEvent {
                         peer_id,
-                        event: handler::EventIn::NodeTypeRequest {
+                        event: HandlerIn::NodeTypeRequest {
                             user_data: self.next_query_unique_id(),
                         },
                     })
@@ -465,7 +691,7 @@ where
                     argument,
                 }) => Poll::Ready(NetworkBehaviourAction::SendEvent {
                     peer_id,
-                    event: handler::EventIn::ExecuteTask {
+                    event: HandlerIn::ExecuteTask {
                         job_addr,
                         argument,
                         user_data: self.next_query_unique_id(),

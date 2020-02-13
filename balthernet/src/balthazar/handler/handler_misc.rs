@@ -47,6 +47,20 @@ impl RequestId {
         }
     }
 
+    /// Returns a dummy RequestId.
+    /// **Warning: This is probably non-unique and should be used only for logging and such!**
+    pub fn dummy_dangerous() -> Self {
+        RequestId::new(UniqueConnecId(0))
+    }
+
+    /// Returns a dummy RequestId.
+    ///
+    /// > **Warning: This is not actual cloning and should be avoided when possible!**
+    /// > **This is probably non-unique and should be used only for logging and such!**
+    pub fn clone_dangerous(&self) -> Self {
+        Self::dummy_dangerous()
+    }
+
     pub fn connec_unique_id(&self) -> &UniqueConnecId {
         &self.connec_unique_id
     }
