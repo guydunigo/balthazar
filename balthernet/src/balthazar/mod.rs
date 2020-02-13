@@ -21,7 +21,7 @@ use libp2p::{
 };
 use std::{
     cell::RefCell,
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     error,
     fmt::Debug,
     marker::PhantomData,
@@ -134,7 +134,7 @@ pub type QueryId = usize;
 struct Peer {
     peer_id: PeerId,
     /// Known addresses
-    addrs: Vec<Multiaddr>,
+    addrs: HashSet<Multiaddr>,
     /// If there's an open connection, the connection infos
     endpoint: Option<ConnectedPoint>,
     /// Has it already been dialed at least once?
@@ -148,11 +148,15 @@ impl Peer {
     pub fn new(peer_id: PeerId) -> Self {
         Peer {
             peer_id,
-            addrs: Vec::new(),
+            addrs: HashSet::new(),
             endpoint: None,
             dialed: false,
             node_type: None,
         }
+    }
+
+    pub fn addrs_as_vec(&self) -> Vec<Multiaddr> {
+        self.addrs.iter().cloned().collect()
     }
 }
 
@@ -252,7 +256,7 @@ where
         // println!("Addresses of {:?} : {:?}", peer_id, addresses);
         self.peers
             .get(peer_id)
-            .map(|p| p.borrow().addrs.clone())
+            .map(|p| p.borrow().addrs_as_vec())
             .unwrap_or_else(Vec::new)
     }
 
@@ -272,8 +276,16 @@ where
                     .push_front(InternalEvent::AskNodeType(peer_id.clone()));
             }
 
+            match endpoint.clone() {
+                ConnectedPoint::Dialer { address } => {
+                    peer.addrs.insert(address);
+                }
+                ConnectedPoint::Listener { send_back_addr, .. } => {
+                    peer.addrs.insert(send_back_addr);
+                }
+            }
+
             peer.endpoint = Some(endpoint.clone());
-            // TODO: save peer address
 
             self.inject_generate_event(EventOut::PeerConnected(peer_id, endpoint));
         }
@@ -335,9 +347,10 @@ where
         // Go through the queued events and handle them:
         while let Some(internal_evt) = self.events.pop_back() {
             let answer = match internal_evt {
-                InternalEvent::Mdns(peer_id, _) => {
+                InternalEvent::Mdns(peer_id, address) => {
                     let peer = self.get_peer_or_insert(&peer_id);
                     let mut peer = peer.borrow_mut();
+                    peer.addrs.insert(address);
 
                     if !peer.dialed {
                         peer.dialed = true;
@@ -377,7 +390,7 @@ where
                                         data.manager.is_none()
                                             && data.config.is_manager_authorized(
                                                 Some(&peer.peer_id),
-                                                &peer.addrs[..],
+                                                &peer.addrs_as_vec()[..],
                                             )
                                     } else {
                                         false
@@ -445,7 +458,7 @@ where
                                         (true, true, Some(NodeType::Manager)) => {
                                             if data.config.is_manager_authorized(
                                                 Some(&peer_id),
-                                                &peer.addrs[..],
+                                                &peer.addrs_as_vec()[..],
                                             ) {
                                                 data.manager = Some(peer_rc.clone());
                                                 (EventOut::ManagerNew(peer_id), false)
