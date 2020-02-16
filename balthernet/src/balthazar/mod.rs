@@ -421,6 +421,7 @@ where
                             if let NodeTypeData::Manager(ref mut data) = self.node_type_data {
                                 // TODO: more conditions for accepting workers ?
                                 // TODO: limit ?
+                                // TODO: check if peer is worker ?
                                 data.workers.insert(peer_id.clone(), peer_rc.clone());
                                 self.inject_generate_event(EventOut::WorkerNew(peer_id.clone()));
                                 Poll::Ready(NetworkBehaviourAction::SendEvent {
