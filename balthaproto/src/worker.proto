@@ -49,27 +49,29 @@ message TasksExecute {
  repeated TaskExecute tasks = 1;
 }
 
-enum ErrorKind {
+enum TaskErrorKind {
  TIMEDOUT = 0;
  DOWNLOAD = 1;
  RUNNING = 2;
+ ABORTED = 3;
+ UNKNOWN = 4;
 }
 message TasksPing {
  repeated bytes task_ids = 1;
 }
 message TasksPong {
- repeated TaskStatus task_statuses = 1;
+ repeated TaskStatus statuses = 1;
 }
 
 message Null {}
 message TaskStatus {
  bytes task_id = 1;
  oneof status_data {
-  Null pending = 3; // bool value isn't importent, just that it is defined or not.
+  Null pending = 3;
   int64 start_time = 4; // Started
-  ErrorKind error = 5;
+  TaskErrorKind error = 5;
   bytes result = 6; // Completed
-  Null unknown = 7; // bool value isn't importent, just that it is defined or not.
+  Null unknown = 7;
  }
 }
 

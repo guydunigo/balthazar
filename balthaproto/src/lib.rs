@@ -17,10 +17,11 @@ pub mod worker {
     /// The version number of the worker protocol
     ///
     /// TODO: Use the crate version ?
-    pub const PROTOCOL_VERSION: &[u8] = b"/balthazar/worker/0.1.0";
+    pub const PROTOCOL_VERSION: &str = concat!("/balthazar/worker/", env!("CARGO_PKG_VERSION"));
 
     pub fn new_worker_protocol() -> ProtoBufProtocol<WorkerMsgWrapper> {
-        ProtoBufProtocol::new(PROTOCOL_VERSION)
+        eprintln!("{}", PROTOCOL_VERSION);
+        ProtoBufProtocol::new(PROTOCOL_VERSION.as_bytes())
     }
 
     include!(concat!(env!("OUT_DIR"), "/worker.rs"));
