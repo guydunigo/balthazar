@@ -26,7 +26,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use misc::NodeType;
+use misc::{NodeType, TaskStatus};
 use proto::{protobuf::ProtoBufProtocol, worker};
 
 mod handler_misc;
@@ -310,30 +310,48 @@ pub enum EventIn<TUserData> {
         node_type: NodeType,
         request_id: RequestId,
     },
+    NotMine {
+        request_id: RequestId,
+    },
+    Ack {
+        request_id: RequestId,
+    },
     ManagerRequest {
+        cpu_count: u64,
+        memory: u64,
+        network_speed: u64,
+        worker_price: u64,
         user_data: TUserData,
     },
     ManagerAnswer {
         accepted: bool,
         request_id: RequestId,
     },
-    NotMine {
-        request_id: RequestId,
-    },
-    ExecuteTask {
-        job_addr: Vec<u8>,
-        argument: i32,
-        user_data: TUserData,
-    },
-    TaskResult {
-        result: i32,
-        request_id: RequestId,
-    },
     ManagerBye {
         user_data: TUserData,
     },
-    ManagerByeAnswer {
+    ManagerPing {
+        user_data: TUserData,
+    },
+    ManagerPong {
         request_id: RequestId,
+    },
+    TasksExecute {
+        job_id: Vec<u8>,
+        user_data: TUserData,
+    },
+    TasksPing {
+        task_ids: Vec<Vec<u8>>,
+        user_data: TUserData,
+    },
+    TasksPong {
+        statuses: Vec<(Vec<u8>, TaskStatus)>,
+        request_id: RequestId,
+    },
+    TaskStatus {
+        task_id: Vec<u8>,
+        status: TaskStatus,
+        user_data: TUserData,
     },
 }
 
@@ -352,31 +370,50 @@ pub enum EventOut<TUserData> {
     NodeTypeRequest {
         request_id: RequestId,
     },
+    NotMine {
+        user_data: TUserData,
+    },
     ManagerRequest {
+        cpu_count: u64,
+        memory: u64,
+        network_speed: u64,
+        worker_price: u64,
         request_id: RequestId,
     },
     ManagerAnswer {
         accepted: bool,
         user_data: TUserData,
     },
-    NotMine {
+    ManagerBye {
+        request_id: RequestId,
+    },
+    ManagerPing {
+        request_id: RequestId,
+    },
+    // TODO: useful to propagate since it doesn't create any actions ?
+    ManagerPong {
         user_data: TUserData,
+    },
+    TasksExecute {
+        job_id: Vec<u8>,
+        request_id: RequestId,
+    },
+    TasksPing {
+        task_ids: Vec<Vec<u8>>,
+        request_id: RequestId,
+    },
+    TasksPong {
+        statuses: Vec<(Vec<u8>, TaskStatus)>,
+        user_data: TUserData,
+    },
+    TaskStatus {
+        task_id: Vec<u8>,
+        status: TaskStatus,
+        request_id: RequestId,
     },
     QueryError {
         error: BalthandlerQueryErr,
         user_data: TUserData,
-    },
-    ExecuteTask {
-        job_addr: Vec<u8>,
-        argument: i32,
-        request_id: RequestId,
-    },
-    TaskResult {
-        result: i32,
-        user_data: TUserData,
-    },
-    ManagerBye {
-        request_id: RequestId,
     },
 }
 
