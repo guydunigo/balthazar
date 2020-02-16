@@ -1,7 +1,10 @@
 syntax = "proto3";
 
+// See protocol.md for specification and description.
+
 package worker;
 
+// Test
 service NodeTypeService {
   rpc GetNodeType (NodeTypeRequest) returns (NodeTypeAnswer);
 }
@@ -10,44 +13,80 @@ enum NodeType {
  MANAGER = 0;
  WORKER = 1;
 }
-
-message NodeTypeRequest {}
+message NodeTypeRequest {
+ NodeType node_type = 1;
+}
 message NodeTypeAnswer {
  NodeType node_type = 1;
 }
 
-message ManagerRequest {}
-message ManagerAnswer {
-    bool accepted = 1;
-}
-// When a node receives a message which can only be sent to a worker
-// from its registered manager.
-// Or when a node receives a message which can only be sent to a manager
-// from one of its registered workers.
 message NotMine {}
+message Ack {}
 
-// When a manager or a worker want to unsubscribe to one another
-message ManagerBye {}
-message ManagerByeAnswer {}
-
-message ExecuteTask {
- bytes job_addr = 1;
- int32 argument = 2;
+message ManagerRequest {
+ uint64 cpu_count = 1;
+ uint64 memory = 2;
+ uint64 network_speed = 3;
+ uint64 worker_price = 4;
 }
-message TaskResult {
- int32 result = 1;
+message ManagerAnswer {
+ bool accepted = 1;
+}
+
+message ManagerBye {}
+
+message ManagerPing {}
+message ManagerPong {}
+
+message TasksExecute {
+ message TaskExecute {
+  bytes job_id = 1;
+  bytes task_id = 2;
+  repeated bytes job_addr = 3;
+  bytes arguments = 4;
+ }
+
+ repeated TaskExecute tasks = 1;
+}
+
+enum ErrorKind {
+ TIMEDOUT = 0;
+ DOWNLOAD = 1;
+ RUNNING = 2;
+}
+message TasksPing {
+ repeated bytes task_ids = 1;
+}
+message TasksPong {
+ repeated TaskStatus task_statuses = 1;
+}
+
+message Null {}
+message TaskStatus {
+ bytes task_id = 1;
+ oneof status_data {
+  Null pending = 3; // bool value isn't importent, just that it is defined or not.
+  int64 start_time = 4; // Started
+  ErrorKind error = 5;
+  bytes result = 6; // Completed
+  Null unknown = 7; // bool value isn't importent, just that it is defined or not.
+ }
 }
 
 message WorkerMsgWrapper {
  oneof msg {
    NodeTypeRequest node_type_request = 1;
    NodeTypeAnswer node_type_answer = 2;
-   ManagerRequest manager_request = 3;
-   ManagerAnswer manager_answer = 4;
-   NotMine not_mine = 5;
-   ManagerBye manager_bye = 6;
-   ManagerByeAnswer manager_bye_answer = 7;
-   ExecuteTask execute_task = 9;
-   TaskResult task_result = 10;
+   NotMine not_mine = 3;
+   Ack ack = 4;
+   ManagerRequest manager_request = 5;
+   ManagerAnswer manager_answer = 6;
+   ManagerBye manager_bye = 7;
+   ManagerPing manager_ping = 8;
+   ManagerPong manager_pong = 9;
+   TasksExecute tasks_execute = 10;
+   TasksPing tasks_ping = 11;
+   TasksPong tasks_pong = 12;
+   TaskStatus task_status = 13;
  }
 }

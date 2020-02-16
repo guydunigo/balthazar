@@ -45,6 +45,18 @@ pub mod worker {
         }
     }
 
+    impl From<Ack> for WorkerMsgWrapper {
+        fn from(src: Ack) -> Self {
+            WorkerMsg::Ack(src).into()
+        }
+    }
+
+    impl From<NotMine> for WorkerMsgWrapper {
+        fn from(src: NotMine) -> Self {
+            WorkerMsg::NotMine(src).into()
+        }
+    }
+
     impl From<ManagerRequest> for WorkerMsgWrapper {
         fn from(src: ManagerRequest) -> Self {
             WorkerMsg::ManagerRequest(src).into()
@@ -57,33 +69,45 @@ pub mod worker {
         }
     }
 
-    impl From<NotMine> for WorkerMsgWrapper {
-        fn from(src: NotMine) -> Self {
-            WorkerMsg::NotMine(src).into()
-        }
-    }
-
     impl From<ManagerBye> for WorkerMsgWrapper {
         fn from(src: ManagerBye) -> Self {
             WorkerMsg::ManagerBye(src).into()
         }
     }
 
-    impl From<ManagerByeAnswer> for WorkerMsgWrapper {
-        fn from(src: ManagerByeAnswer) -> Self {
-            WorkerMsg::ManagerByeAnswer(src).into()
+    impl From<ManagerPing> for WorkerMsgWrapper {
+        fn from(src: ManagerPing) -> Self {
+            WorkerMsg::ManagerPing(src).into()
         }
     }
 
-    impl From<ExecuteTask> for WorkerMsgWrapper {
-        fn from(src: ExecuteTask) -> Self {
-            WorkerMsg::ExecuteTask(src).into()
+    impl From<ManagerPong> for WorkerMsgWrapper {
+        fn from(src: ManagerPong) -> Self {
+            WorkerMsg::ManagerPong(src).into()
         }
     }
 
-    impl From<TaskResult> for WorkerMsgWrapper {
-        fn from(src: TaskResult) -> Self {
-            WorkerMsg::TaskResult(src).into()
+    impl From<TasksExecute> for WorkerMsgWrapper {
+        fn from(src: TasksExecute) -> Self {
+            WorkerMsg::TasksExecute(src).into()
+        }
+    }
+
+    impl From<TasksPing> for WorkerMsgWrapper {
+        fn from(src: TasksPing) -> Self {
+            WorkerMsg::TasksPing(src).into()
+        }
+    }
+
+    impl From<TasksPong> for WorkerMsgWrapper {
+        fn from(src: TasksPong) -> Self {
+            WorkerMsg::TasksPong(src).into()
+        }
+    }
+
+    impl From<TaskStatus> for WorkerMsgWrapper {
+        fn from(src: TaskStatus) -> Self {
+            WorkerMsg::TaskStatus(src).into()
         }
     }
 }
