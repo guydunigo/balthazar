@@ -26,6 +26,7 @@ pub mod worker {
 
     include!(concat!(env!("OUT_DIR"), "/worker.rs"));
 
+    pub use tasks_execute::TaskExecute;
     pub use worker_msg_wrapper::Msg as WorkerMsg;
 
     impl From<WorkerMsg> for WorkerMsgWrapper {
@@ -103,6 +104,12 @@ pub mod worker {
     impl From<TasksPong> for WorkerMsgWrapper {
         fn from(src: TasksPong) -> Self {
             WorkerMsg::TasksPong(src).into()
+        }
+    }
+
+    impl From<TasksAbord> for WorkerMsgWrapper {
+        fn from(src: TasksAbord) -> Self {
+            WorkerMsg::TasksAbord(src).into()
         }
     }
 

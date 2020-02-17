@@ -44,6 +44,7 @@ message TasksExecute {
   bytes task_id = 2;
   repeated bytes job_addr = 3;
   bytes arguments = 4;
+  uint64 timeout = 5;
  }
 
  repeated TaskExecute tasks = 1;
@@ -61,6 +62,10 @@ message TasksPing {
 }
 message TasksPong {
  repeated TaskStatus statuses = 1;
+}
+
+message TasksAbord {
+ repeated bytes task_ids = 1;
 }
 
 message Null {}
@@ -89,6 +94,7 @@ message WorkerMsgWrapper {
    TasksExecute tasks_execute = 10;
    TasksPing tasks_ping = 11;
    TasksPong tasks_pong = 12;
-   TaskStatus task_status = 13;
+   TasksAbord tasks_abord = 13;
+   TaskStatus task_status = 14;
  }
 }

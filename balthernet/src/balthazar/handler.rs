@@ -21,7 +21,9 @@ use libp2p::{
 };
 use proto::worker::{WorkerMsg, WorkerMsgWrapper};
 use std::{
+    collections::HashMap,
     fmt, io,
+    iter::FromIterator,
     task::{Context, Poll},
     time::{Duration, Instant},
 };
@@ -164,8 +166,14 @@ where
 
         // eprintln!("Event injected in Handler from Behaviour: {:?}", event);
         match event {
-            EventIn::NodeTypeRequest { user_data } => {
-                let msg = worker::NodeTypeRequest {}.into();
+            EventIn::NodeTypeRequest {
+                node_type,
+                user_data,
+            } => {
+                let msg = worker::NodeTypeRequest {
+                    node_type: node_type.into(),
+                }
+                .into();
                 inject_new_request_event(&mut self.substreams, user_data, msg)
             }
             EventIn::NodeTypeAnswer {
@@ -179,8 +187,28 @@ where
                 };
                 inject_answer_event_to_peer_request(&mut self.substreams, request_id, msg)
             }
-            EventIn::ManagerRequest { user_data } => {
-                let msg = worker::ManagerRequest {}.into();
+            EventIn::NotMine { request_id } => {
+                let msg = worker::NotMine {}.into();
+                inject_answer_event_to_peer_request(&mut self.substreams, request_id, msg)
+            }
+            EventIn::Ack { request_id } => {
+                let msg = worker::Ack {}.into();
+                inject_answer_event_to_peer_request(&mut self.substreams, request_id, msg)
+            }
+            EventIn::ManagerRequest {
+                cpu_count,
+                memory,
+                network_speed,
+                worker_price,
+                user_data,
+            } => {
+                let msg = worker::ManagerRequest {
+                    cpu_count,
+                    memory,
+                    network_speed,
+                    worker_price,
+                }
+                .into();
                 inject_new_request_event(&mut self.substreams, user_data, msg)
             }
             EventIn::ManagerAnswer {
@@ -190,29 +218,66 @@ where
                 let msg = worker::ManagerAnswer { accepted }.into();
                 inject_answer_event_to_peer_request(&mut self.substreams, request_id, msg)
             }
-            EventIn::NotMine { request_id } => {
-                let msg = worker::NotMine {}.into();
-                inject_answer_event_to_peer_request(&mut self.substreams, request_id, msg)
-            }
             EventIn::ManagerBye { user_data } => {
                 let msg = worker::ManagerBye {}.into();
                 inject_new_request_event(&mut self.substreams, user_data, msg)
             }
-            EventIn::ManagerByeAnswer { request_id } => {
-                let msg = worker::ManagerBye {}.into();
-                inject_answer_event_to_peer_request(&mut self.substreams, request_id, msg)
-            }
-            EventIn::ExecuteTask {
-                job_addr,
-                argument,
-                user_data,
-            } => {
-                let msg = worker::ExecuteTask { job_addr, argument }.into();
+            EventIn::ManagerPing { user_data } => {
+                let msg = worker::ManagerPing {}.into();
                 inject_new_request_event(&mut self.substreams, user_data, msg)
             }
-            EventIn::TaskResult { result, request_id } => {
-                let msg = worker::TaskResult { result }.into();
+            EventIn::ManagerPong { request_id } => {
+                let msg = worker::ManagerPing {}.into();
                 inject_answer_event_to_peer_request(&mut self.substreams, request_id, msg)
+            }
+            EventIn::TasksExecute { tasks, user_data } => {
+                let msg = worker::TasksExecute {
+                    tasks: tasks.drain().map(|(_, t)| t).collect(),
+                }
+                .into();
+                inject_new_request_event(&mut self.substreams, user_data, msg)
+            }
+            EventIn::TasksPing {
+                task_ids,
+                user_data,
+            } => {
+                let msg = worker::TasksPing { task_ids }.into();
+                inject_new_request_event(&mut self.substreams, user_data, msg)
+            }
+            EventIn::TasksPong {
+                statuses,
+                request_id,
+            } => {
+                let msg = worker::TasksPong {
+                    statuses: statuses
+                        .drain()
+                        .map(|(i, s)| worker::TaskStatus {
+                            task_id: i,
+                            status_data: s.into(),
+                        })
+                        .collect(),
+                }
+                .into();
+                inject_answer_event_to_peer_request(&mut self.substreams, request_id, msg)
+            }
+            EventIn::TasksAbord {
+                task_ids,
+                user_data,
+            } => {
+                let msg = worker::TasksAbord { task_ids }.into();
+                inject_new_request_event(&mut self.substreams, user_data, msg)
+            }
+            EventIn::TaskStatus {
+                task_id,
+                status,
+                user_data,
+            } => {
+                let msg = worker::TaskStatus {
+                    task_id,
+                    status_data: status.into(),
+                }
+                .into();
+                inject_new_request_event(&mut self.substreams, user_data, msg)
             }
         }
     }
@@ -304,6 +369,7 @@ where
 #[derive(Debug)]
 pub enum EventIn<TUserData> {
     NodeTypeRequest {
+        node_type: NodeType,
         user_data: TUserData,
     },
     NodeTypeAnswer {
@@ -337,7 +403,7 @@ pub enum EventIn<TUserData> {
         request_id: RequestId,
     },
     TasksExecute {
-        job_id: Vec<u8>,
+        tasks: HashMap<Vec<u8>, worker::TaskExecute>,
         user_data: TUserData,
     },
     TasksPing {
@@ -345,8 +411,12 @@ pub enum EventIn<TUserData> {
         user_data: TUserData,
     },
     TasksPong {
-        statuses: Vec<(Vec<u8>, TaskStatus)>,
+        statuses: HashMap<Vec<u8>, TaskStatus>,
         request_id: RequestId,
+    },
+    TasksAbord {
+        task_ids: Vec<Vec<u8>>,
+        user_data: TUserData,
     },
     TaskStatus {
         task_id: Vec<u8>,
@@ -363,12 +433,13 @@ pub enum EventIn<TUserData> {
 /// - `request_id`: for requests coming from the peer (i.e. through the [`BalthBehaviour`](`super::BalthBehaviour`)).
 #[derive(Debug)]
 pub enum EventOut<TUserData> {
+    NodeTypeRequest {
+        node_type: NodeType,
+        request_id: RequestId,
+    },
     NodeTypeAnswer {
         node_type: NodeType,
         user_data: TUserData,
-    },
-    NodeTypeRequest {
-        request_id: RequestId,
     },
     NotMine {
         user_data: TUserData,
@@ -395,7 +466,7 @@ pub enum EventOut<TUserData> {
         user_data: TUserData,
     },
     TasksExecute {
-        job_id: Vec<u8>,
+        tasks: HashMap<Vec<u8>, worker::TaskExecute>,
         request_id: RequestId,
     },
     TasksPing {
@@ -403,8 +474,12 @@ pub enum EventOut<TUserData> {
         request_id: RequestId,
     },
     TasksPong {
-        statuses: Vec<(Vec<u8>, TaskStatus)>,
+        statuses: HashMap<Vec<u8>, TaskStatus>,
         user_data: TUserData,
+    },
+    TasksAbord {
+        task_ids: Vec<Vec<u8>>,
+        request_id: RequestId,
     },
     TaskStatus {
         task_id: Vec<u8>,
@@ -418,6 +493,7 @@ pub enum EventOut<TUserData> {
 }
 
 /// Processes a message that's expected to be a request from a remote.
+/// Basically transforms request messages into handler's [`EventOut`].
 fn process_request<TUserData>(
     event: WorkerMsgWrapper,
     connec_unique_id: UniqueConnecId,
@@ -425,24 +501,61 @@ fn process_request<TUserData>(
     // eprintln!("process_request {:?}", event);
     if let Some(msg) = event.msg {
         match msg {
-            WorkerMsg::NodeTypeRequest(worker::NodeTypeRequest {}) => {
+            WorkerMsg::NodeTypeRequest(worker::NodeTypeRequest { node_type }) => {
+                let node_type = worker::NodeType::from_i32(node_type)
+                    .unwrap_or_else(|| {
+                        eprintln!(
+                        "E -- Unexpected i32 value in protobuf enum NodeTypeAnswer::node_type: `{}`, using default: `{:?}`.",
+                        node_type,
+                        worker::NodeType::default()
+                    );
+                        worker::NodeType::default()
+                    });
                 Some(Ok(EventOut::NodeTypeRequest {
+                    node_type,
                     request_id: RequestId::new(connec_unique_id),
                 }))
             }
-            WorkerMsg::ExecuteTask(worker::ExecuteTask { job_addr, argument }) => {
-                Some(Ok(EventOut::ExecuteTask {
-                    job_addr,
-                    argument,
-                    request_id: RequestId::new(connec_unique_id),
-                }))
-            }
-            WorkerMsg::ManagerRequest(worker::ManagerRequest {}) => {
-                Some(Ok(EventOut::ManagerRequest {
-                    request_id: RequestId::new(connec_unique_id),
-                }))
-            }
+            WorkerMsg::ManagerRequest(worker::ManagerRequest {
+                cpu_count,
+                memory,
+                network_speed,
+                worker_price,
+            }) => Some(Ok(EventOut::ManagerRequest {
+                cpu_count,
+                memory,
+                network_speed,
+                worker_price,
+                request_id: RequestId::new(connec_unique_id),
+            })),
             WorkerMsg::ManagerBye(worker::ManagerBye {}) => Some(Ok(EventOut::ManagerBye {
+                request_id: RequestId::new(connec_unique_id),
+            })),
+            WorkerMsg::ManagerPing(worker::ManagerPing {}) => Some(Ok(EventOut::ManagerPing {
+                request_id: RequestId::new(connec_unique_id),
+            })),
+            WorkerMsg::TasksExecute(worker::TasksExecute { tasks }) => {
+                Some(Ok(EventOut::TasksExecute {
+                    tasks: HashMap::from_iter(tasks.drain(..).map(|t| (t.job_id, t))),
+                    request_id: RequestId::new(connec_unique_id),
+                }))
+            }
+            WorkerMsg::TasksPing(worker::TasksPing { task_ids }) => Some(Ok(EventOut::TasksPing {
+                task_ids,
+                request_id: RequestId::new(connec_unique_id),
+            })),
+            WorkerMsg::TasksAbord(worker::TasksAbord { task_ids }) => {
+                Some(Ok(EventOut::TasksAbord {
+                    task_ids,
+                    request_id: RequestId::new(connec_unique_id),
+                }))
+            }
+            WorkerMsg::TaskStatus(worker::TaskStatus {
+                task_id,
+                status_data,
+            }) => Some(Ok(EventOut::TaskStatus {
+                task_id,
+                status: status_data.into(),
                 request_id: RequestId::new(connec_unique_id),
             })),
             _ => None,
@@ -453,6 +566,7 @@ fn process_request<TUserData>(
 }
 
 /// Process a message that's supposed to be an answer to one of our requests.
+/// Basically transforms answer messages into handler's [`EventOut`].
 fn process_answer<TUserData>(
     event: WorkerMsgWrapper,
     user_data: TUserData,
@@ -462,31 +576,34 @@ fn process_answer<TUserData>(
         match msg /*event.msg.expect("empty protobuf oneof")*/ {
             WorkerMsg::NodeTypeAnswer(worker::NodeTypeAnswer { node_type }) => {
                 let node_type = worker::NodeType::from_i32(node_type)
-                    .unwrap_or_else(|| panic!(
-                        "Unexpected i32 value in protobuf enum NodeTypeAnswer::node_type: `{}`",
-                        node_type
-                    ))
-                    .into();
+                    .unwrap_or_else(|| {
+                        eprintln!(
+                        "E -- Unexpected i32 value in protobuf enum NodeTypeAnswer::node_type: `{}`, using default: `{:?}`.",
+                        node_type,
+                        worker::NodeType::default()
+                    );
+                        worker::NodeType::default()
+                    });
                 Some(EventOut::NodeTypeAnswer {
                     node_type,
                     user_data,
                 })
             }
-            WorkerMsg::TaskResult(worker::TaskResult { result }) => {
-                Some(EventOut::TaskResult {
-                    result,
-                    user_data,
-                })
-            }
-            WorkerMsg::ManagerAnswer(worker::ManagerAnswer { accepted }) => {
-                Some(EventOut::ManagerAnswer { accepted, user_data })
-            }
             WorkerMsg::NotMine(worker::NotMine {}) => {
                 Some(EventOut::NotMine { user_data })
             }
-            WorkerMsg::ManagerByeAnswer(_) => {
-                // We don't need to process such answer, as it was just a notice message.
-                None
+            WorkerMsg::Ack(worker::Ack {}) => None,
+            WorkerMsg::ManagerAnswer(worker::ManagerAnswer { accepted }) => {
+                Some(EventOut::ManagerAnswer { accepted, user_data })
+            }
+            WorkerMsg::ManagerPong(worker::ManagerPong { }) => {
+                Some(EventOut::ManagerPong { user_data })
+            }
+            WorkerMsg::TasksPong(worker::TasksPong { statuses }) => {
+                Some(EventOut::TasksPong {
+                    statuses: HashMap::from_iter(statuses.iter().map(|s| (s.task_id,s.status_data.into()))),
+                    user_data,
+                })
             }
             _ => None,
         }

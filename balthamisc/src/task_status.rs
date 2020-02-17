@@ -59,3 +59,19 @@ impl From<TaskStatus> for ProtoTaskStatus {
         }
     }
 }
+
+impl From<Option<ProtoTaskStatus>> for TaskStatus {
+    fn from(src: Option<ProtoTaskStatus>) -> Self {
+        if let Some(status) = src {
+            status.into()
+        } else {
+            TaskStatus::Unknown
+        }
+    }
+}
+
+impl From<TaskStatus> for Option<ProtoTaskStatus> {
+    fn from(src: TaskStatus) -> Self {
+        Some(src.into())
+    }
+}
