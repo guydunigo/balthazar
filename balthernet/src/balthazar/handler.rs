@@ -183,7 +183,7 @@ where
             } => {
                 let msg = {
                     let mut msg = worker::NodeTypeAnswer::default();
-                    msg.set_node_type(node_type.into());
+                    msg.set_node_type(node_type);
                     msg.into()
                 };
                 inject_answer_event_to_peer_request(&mut self.substreams, request_id, msg)
@@ -197,20 +197,15 @@ where
                 inject_answer_event_to_peer_request(&mut self.substreams, request_id, msg)
             }
             EventIn::ManagerRequest {
-                worker_specs:
-                    WorkerSpecs {
-                        cpu_count,
-                        memory,
-                        network_speed,
-                        worker_price,
-                    },
+                worker_specs,
                 user_data,
             } => {
                 let msg = worker::ManagerRequest {
-                    cpu_count,
-                    memory,
-                    network_speed,
-                    worker_price,
+                    cpu_count: worker_specs.cpu_count(),
+                    memory: worker_specs.memory(),
+                    network_speed: worker_specs.network_speed(),
+                    worker_price: worker_specs.worker_price(),
+                    network_price: worker_specs.network_price(),
                 }
                 .into();
                 inject_new_request_event(&mut self.substreams, user_data, msg)
@@ -518,13 +513,15 @@ fn process_request<TUserData>(
                 memory,
                 network_speed,
                 worker_price,
+                network_price,
             }) => Some(Ok(EventOut::ManagerRequest {
-                worker_specs: WorkerSpecs {
+                worker_specs: WorkerSpecs::new(
                     cpu_count,
                     memory,
                     network_speed,
                     worker_price,
-                },
+                    network_price,
+                ),
                 request_id: RequestId::new(connec_unique_id),
             })),
             WorkerMsg::ManagerBye(worker::ManagerBye {}) => Some(Ok(EventOut::ManagerBye {

@@ -28,6 +28,7 @@ message ManagerRequest {
  uint64 memory = 2;
  uint64 network_speed = 3;
  uint64 worker_price = 4;
+ uint64 network_price = 5;
 }
 message ManagerAnswer {
  bool accepted = 1;

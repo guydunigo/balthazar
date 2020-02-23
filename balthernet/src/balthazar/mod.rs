@@ -18,6 +18,7 @@ use libp2p::{
     },
     Multiaddr, PeerId,
 };
+use proto::worker;
 use std::{
     cell::RefCell,
     collections::{HashMap, HashSet, VecDeque},
@@ -72,12 +73,6 @@ pub enum EventIn {
     Ping,
     /// Sending a message to the peer (new request or answer to one from the exterior).
     Handler(PeerId, HandlerIn<QueryId>),
-    /// Send ExecuteTask to peer.
-    ExecuteTask {
-        peer_id: PeerId,
-        job_addr: Vec<u8>,
-        argument: i32,
-    },
 }
 
 /// Event returned by [`BalthBehaviour`] towards the Swarm when polled.
@@ -91,14 +86,14 @@ pub enum EventOut {
     PeerDisconnected(PeerId, ConnectedPoint),
     /// Answer to a [`EventIn::Ping`].
     Pong,
+    /// When a peer sends us a message, but we aren't in a worker-manager relationship.
+    NotMine(PeerId, HandlerOut<QueryId>),
     /// Events created by [`Balthandler`] which are not handled directly in [`BalthBehaviour`]
     Handler(PeerId, HandlerOut<QueryId>),
     /// A new worker is now managed by us.
     WorkerNew(PeerId),
     /// When a worker stops being managed by us.
     WorkerBye(PeerId),
-    /// When a worker sends us a message as if we were its manager.
-    NotMyWorker(PeerId, HandlerOut<QueryId>),
     /// A manager has accepted acting as our manager, so we will receive orders from it now on.
     ManagerNew(PeerId),
     /// The manager we requested refused.
@@ -109,8 +104,6 @@ pub enum EventOut {
     ManagerUnauthorized(PeerId),
     /// A manager accepted managing us, but we already have one.
     ManagerAlreadyHasOne(PeerId),
-    /// When a manager sends us a message as if we were one of its workers.
-    NotMyManager(PeerId, HandlerOut<QueryId>),
     /// A message was received but we are the wrong NodeType to handle it.
     MsgForIncorrectNodeType {
         peer_id: PeerId,
@@ -130,6 +123,7 @@ pub enum EventOut {
         previous: NodeType,
         new: NodeType,
     },
+    TasksExecute(HashMap<Vec<u8>, worker::TaskExecute>),
 }
 
 /// Type to identify our queries within [`Balthandler`] to link answers to queries.
@@ -168,7 +162,7 @@ impl Peer {
 
     /// Transforms the inner `node_type` [`NodeTypeContainer`] data into a simpler [`NodeType`].
     pub fn node_type_into(&self) -> Option<NodeType> {
-        self.node_type.map(|t| t.into())
+        self.node_type.as_ref().map(|t| t.into())
     }
 }
 
@@ -220,6 +214,15 @@ impl<TSubstream> BalthBehaviour<TSubstream> {
             },
             tx,
         )
+    }
+
+    /// If we are a worker: checks if given peer is our manager,
+    /// if we are a manager: checks if given peer is one of our workers.
+    fn is_in_relationship_with(&self, peer_rc: Rc<RefCell<Peer>>) -> bool {
+        match &self.node_type_data {
+            NodeTypeData::Manager(data) => data.workers.get(&peer_rc.borrow().peer_id).is_some(),
+            NodeTypeData::Worker(data) => data.manager.as_ref().map_or(false, |m| *m == peer_rc),
+        }
     }
 
     /// Gets a new unique identifier for a new message request generates a new one.
@@ -412,7 +415,7 @@ where
                     Poll::Ready(NetworkBehaviourAction::SendEvent {
                         peer_id,
                         event: HandlerIn::NodeTypeRequest {
-                            node_type: self.node_type_data.into(),
+                            node_type: (&self.node_type_data).into(),
                             user_data: self.next_query_unique_id(),
                         },
                     })
@@ -434,18 +437,6 @@ where
                 Some(EventIn::Handler(peer_id, event)) => {
                     Poll::Ready(NetworkBehaviourAction::SendEvent { peer_id, event })
                 }
-                Some(EventIn::ExecuteTask {
-                    peer_id,
-                    job_addr,
-                    argument,
-                }) => Poll::Ready(NetworkBehaviourAction::SendEvent {
-                    peer_id,
-                    event: HandlerIn::ExecuteTask {
-                        job_addr,
-                        argument,
-                        user_data: self.next_query_unique_id(),
-                    },
-                }),
                 // TODO: close the swarm if channel has been closed ?
                 None => unimplemented!("Channel was closed"),
             };
@@ -460,21 +451,26 @@ where
 }
 
 /// Handle an event coming out of the handler.
-fn handler_event<F, TSubstream>(
+///
+/// > **Note when adding new events:** For request messages, the handling function has to return
+/// > a `Poll::Ready(NetworkBehaviourAction::SendEvent {..})` value.
+/// > To make sure of this (and panic if it's not the case),
+/// > wrap the handler function into [`ensure_answer`].
+fn handler_event<TSubstream>(
     behaviour: &mut BalthBehaviour<TSubstream>,
     peer_id: PeerId,
     event: HandlerOut<QueryId>,
-) -> Poll<NetworkBehaviourAction<HandlerIn<QueryId>, EventOut>>
-where
-    F: FnOnce() -> QueryId,
-{
+) -> Poll<NetworkBehaviourAction<HandlerIn<QueryId>, EventOut>> {
     let peer_rc = behaviour.get_peer_or_insert(&peer_id);
 
     match event {
         HandlerOut::NodeTypeRequest {
             node_type,
             request_id,
-        } => node_type_request(behaviour, peer_rc, peer_id, node_type, request_id),
+        } => wrap_answer(
+            peer_id.clone(),
+            node_type_request(behaviour, peer_rc, peer_id, node_type, request_id),
+        ),
         HandlerOut::NodeTypeAnswer { node_type, .. } => {
             node_type_answer(behaviour, peer_rc, peer_id, node_type)
         }
@@ -482,159 +478,123 @@ where
         HandlerOut::ManagerRequest {
             worker_specs,
             request_id,
-        } => manager_request(behaviour, peer_rc, peer_id, worker_specs, request_id, event),
-        HandlerOut::ManagerAnswer { accepted, .. } => {
-            manager_answer(behaviour, peer_rc, peer_id, accepted, event)
-        }
-        HandlerOut::NotMine { .. } => {
-            match behaviour.node_type_data {
-                NodeTypeData::Manager(ref mut data) => {
-                    if data.workers.remove(&peer_id).is_some() {
-                        behaviour.inject_generate_event(EventOut::WorkerBye(peer_id));
-                    }
-                }
-                NodeTypeData::Worker(ref mut data) => {
-                    let remove_man = if let Some(ref man) = data.manager {
-                        man.borrow().peer_id == peer_id
-                    } else {
-                        false
-                    };
-
-                    if remove_man {
-                        data.manager.take();
-                        behaviour.inject_generate_event(EventOut::ManagerBye(peer_id));
-                    }
-                }
-            }
-
-            Poll::Pending
-        }
-        HandlerOut::ManagerBye { request_id } => {
-            let evt = match behaviour.node_type_data {
-                NodeTypeData::Manager(ref mut data) => {
-                    if data.workers.get(&peer_id).is_some() {
-                        data.workers.remove(&peer_id);
-                        EventOut::WorkerBye(peer_id.clone())
-                    } else {
-                        EventOut::NotMyWorker(
-                            peer_id.clone(),
-                            HandlerOut::ManagerBye {
-                                request_id: request_id.clone_dangerous(),
-                            },
-                        )
-                    }
-                }
-                NodeTypeData::Worker(ref mut data) => {
-                    if let Some(ref manager) = data.manager {
-                        if manager.borrow().peer_id == peer_id {
-                            EventOut::ManagerBye(peer_id.clone())
-                        } else {
-                            EventOut::NotMyManager(
-                                peer_id.clone(),
-                                HandlerOut::ManagerBye {
-                                    request_id: request_id.clone_dangerous(),
-                                },
-                            )
-                        }
-                    } else {
-                        EventOut::NotMyManager(
-                            peer_id.clone(),
-                            HandlerOut::ManagerBye {
-                                request_id: request_id.clone_dangerous(),
-                            },
-                        )
-                    }
-                }
-            };
-            behaviour.inject_generate_event(evt);
-
-            Poll::Ready(NetworkBehaviourAction::SendEvent {
-                peer_id,
-                event: HandlerIn::ManagerByeAnswer { request_id },
-            })
-        }
-        HandlerOut::ExecuteTask {
-            job_addr,
-            argument,
-            request_id,
-        } => {
-            let peer_id_clone = peer_id.clone();
-            let send_not_mine = |request_id| {
-                Poll::Ready(NetworkBehaviourAction::SendEvent {
-                    peer_id: peer_id_clone,
-                    event: HandlerIn::NotMine { request_id },
-                })
-            };
-            let clone_evt = |request_id| HandlerOut::ExecuteTask {
-                job_addr,
-                argument,
-                request_id,
-            };
-
-            let (evt, res) = if let NodeTypeData::Worker(ref data) = behaviour.node_type_data {
-                if let Some(ref man) = data.manager {
-                    if man.borrow().peer_id == peer_id {
-                        (
-                            EventOut::Handler(peer_id, clone_evt(request_id)),
-                            Poll::Pending,
-                        )
-                    } else {
-                        (
-                            EventOut::NotMyManager(
-                                peer_id,
-                                clone_evt(request_id.clone_dangerous()),
-                            ),
-                            send_not_mine(request_id),
-                        )
-                    }
-                } else {
-                    (
-                        EventOut::NotMyManager(peer_id, clone_evt(request_id.clone_dangerous())),
-                        send_not_mine(request_id),
-                    )
-                }
-            } else {
-                (
-                    EventOut::MsgForIncorrectNodeType {
-                        peer_id,
-                        expected_type: NodeType::Worker,
-                        event: clone_evt(request_id.clone_dangerous()),
-                    },
-                    send_not_mine(request_id),
-                )
-            };
-            behaviour.inject_generate_event(evt);
-
-            res
-        }
-        HandlerOut::TaskResult { .. } => {
-            let evt = if let NodeTypeData::Manager(ref data) = behaviour.node_type_data {
-                if data.workers.get(&peer_id).is_some() {
-                    EventOut::Handler(peer_id, event)
-                } else {
-                    EventOut::NotMyWorker(peer_id, event)
-                }
-            } else {
-                EventOut::MsgForIncorrectNodeType {
+        } => wrap_answer(
+            peer_id.clone(),
+            manager_request(behaviour, peer_rc, peer_id, worker_specs, request_id),
+        ),
+        HandlerOut::ManagerAnswer {
+            accepted,
+            user_data,
+        } => manager_answer(behaviour, peer_rc, peer_id, accepted, user_data),
+        HandlerOut::ManagerBye { request_id } => wrap_answer(
+            peer_id.clone(),
+            manager_bye(behaviour, peer_rc, peer_id, request_id),
+        ),
+        HandlerOut::ManagerPing { request_id } => {
+            let id_clone = request_id.clone_dangerous();
+            wrap_answer(
+                peer_id.clone(),
+                need_relashionship_with(
+                    behaviour,
+                    peer_rc,
                     peer_id,
-                    expected_type: NodeType::Manager,
-                    event,
-                }
-            };
-            behaviour.inject_generate_event(evt);
-
+                    request_id,
+                    |_, r| manager_ping(r),
+                    || HandlerOut::ManagerPing {
+                        request_id: id_clone,
+                    },
+                ),
+            )
+        }
+        HandlerOut::TasksExecute { tasks, request_id } => {
+            let id_clone = request_id.clone_dangerous();
+            wrap_answer(
+                peer_id.clone(),
+                need_relashionship_with(
+                    behaviour,
+                    peer_rc,
+                    peer_id,
+                    request_id,
+                    |b, r| tasks_execute(b, tasks, r),
+                    || HandlerOut::TasksExecute {
+                        tasks: HashMap::new(),
+                        request_id: id_clone,
+                    },
+                ),
+            )
+        }
+        _ => {
+            behaviour.inject_generate_event(EventOut::Handler(peer_id, event));
             Poll::Pending
-        } /*
-          _ => {
-              behaviour.inject_generate_event(EventOut::Handler(peer_id, event));
-              Poll::Pending
-          }
-          */
+        }
     }
 }
 
 // TODO: stop using behaviour directly ?
 // TODO: tests
+
+fn wrap_answer(
+    peer_id: PeerId,
+    event: HandlerIn<QueryId>,
+) -> Poll<NetworkBehaviourAction<HandlerIn<QueryId>, EventOut>> {
+    Poll::Ready(NetworkBehaviourAction::SendEvent { peer_id, event })
+}
+
+/// Check if the peer is in relationship with us, if yes does the given action,
+/// otherwise sends [`worker::NotMine`] to the peer.
+fn need_relashionship_with<TSubstream, F, G>(
+    behaviour: &mut BalthBehaviour<TSubstream>,
+    peer_rc: Rc<RefCell<Peer>>,
+    peer_id: PeerId,
+    request_id: RequestId,
+    action_if_in_relashionship: F,
+    clone_event: G,
+) -> HandlerIn<QueryId>
+where
+    F: FnOnce(&mut BalthBehaviour<TSubstream>, RequestId) -> HandlerIn<QueryId>,
+    G: FnOnce() -> HandlerOut<QueryId>,
+{
+    if behaviour.is_in_relationship_with(peer_rc) {
+        action_if_in_relashionship(behaviour, request_id)
+    } else {
+        behaviour.inject_generate_event(EventOut::NotMine(peer_id, clone_event()));
+
+        HandlerIn::NotMine { request_id }
+    }
+}
+
+/// If the two nodes are in a relationship, breaks it, otherwise does nothing.
+fn break_worker_manager_relationship(
+    node_type_data: &mut NodeTypeData,
+    peer_rc: Rc<RefCell<Peer>>,
+    peer_id: PeerId,
+) -> Poll<NetworkBehaviourAction<HandlerIn<QueryId>, EventOut>> {
+    match node_type_data {
+        NodeTypeData::Worker(data) => {
+            if let Some(man) = &data.manager {
+                if peer_rc == *man {
+                    data.manager = None;
+                    Poll::Ready(NetworkBehaviourAction::GenerateEvent(EventOut::ManagerBye(
+                        peer_id,
+                    )))
+                } else {
+                    Poll::Pending
+                }
+            } else {
+                Poll::Pending
+            }
+        }
+        NodeTypeData::Manager(data) => {
+            if data.workers.remove(&peer_id).is_some() {
+                Poll::Ready(NetworkBehaviourAction::GenerateEvent(EventOut::WorkerBye(
+                    peer_id,
+                )))
+            } else {
+                Poll::Pending
+            }
+        }
+    }
+}
 
 /// A node has advertised its node type via [`worker::NodeTypeRequest`].
 fn node_type_request<TSubstream>(
@@ -643,20 +603,17 @@ fn node_type_request<TSubstream>(
     peer_id: PeerId,
     node_type: NodeType,
     request_id: RequestId,
-) -> Poll<NetworkBehaviourAction<HandlerIn<QueryId>, EventOut>> {
+) -> HandlerIn<QueryId> {
     // We act as NodeTypeAnswer to register the peers type,
     // and then answer with our own type.
     if let Poll::Ready(action) = node_type_answer(behaviour, peer_rc, peer_id, node_type) {
         behaviour.inject_behaviour_action(action);
     }
 
-    Poll::Ready(NetworkBehaviourAction::SendEvent {
-        peer_id,
-        event: HandlerIn::NodeTypeAnswer {
-            node_type: (&behaviour.node_type_data).into(),
-            request_id,
-        },
-    })
+    HandlerIn::NodeTypeAnswer {
+        node_type: (&behaviour.node_type_data).into(),
+        request_id,
+    }
 }
 
 /// A node has advertised its node type (via [`worker::NodeTypeRequest`] or
@@ -671,7 +628,7 @@ fn node_type_answer<TSubstream>(
 
     if let Some(ref previous) = peer.node_type {
         let previous = previous.into();
-        if previous != node_type.into() {
+        if previous != node_type {
             Poll::Ready(NetworkBehaviourAction::GenerateEvent(
                 EventOut::PeerGivesDifferentNodeType {
                     peer_id,
@@ -684,7 +641,7 @@ fn node_type_answer<TSubstream>(
         }
     } else {
         let request_man = if let (NodeType::Manager, NodeTypeData::Worker(data)) =
-            (node_type, behaviour.node_type_data)
+            (node_type, &behaviour.node_type_data)
         {
             if data.manager.is_none()
                 && data
@@ -716,37 +673,14 @@ fn node_type_answer<TSubstream>(
     }
 }
 
+// TODO: function alias ?
 /// We received a [`worker::NotMine`].
-fn not_mine<TSubstream>(
+fn not_mine(
     node_type_data: &mut NodeTypeData,
     peer_rc: Rc<RefCell<Peer>>,
     peer_id: PeerId,
 ) -> Poll<NetworkBehaviourAction<HandlerIn<QueryId>, EventOut>> {
-    match node_type_data {
-        NodeTypeData::Worker(data) => {
-            if let Some(man) = data.manager {
-                if *peer_rc == *man {
-                    data.manager = None;
-                    Poll::Ready(NetworkBehaviourAction::GenerateEvent(EventOut::WorkerBye(
-                        peer_id,
-                    )))
-                } else {
-                    Poll::Pending
-                }
-            } else {
-                Poll::Pending
-            }
-        }
-        NodeTypeData::Manager(data) => {
-            if data.workers.remove(&peer_id).is_some() {
-                Poll::Ready(NetworkBehaviourAction::GenerateEvent(EventOut::WorkerBye(
-                    peer_id,
-                )))
-            } else {
-                Poll::Pending
-            }
-        }
-    }
+    break_worker_manager_relationship(node_type_data, peer_rc, peer_id)
 }
 
 /// We received a [`worker::ManagerRequest`].
@@ -756,8 +690,7 @@ fn manager_request<TSubstream>(
     peer_id: PeerId,
     worker_specs: WorkerSpecs,
     request_id: RequestId,
-    event: HandlerOut<QueryId>,
-) -> Poll<NetworkBehaviourAction<HandlerIn<QueryId>, EventOut>> {
+) -> HandlerIn<QueryId> {
     if let NodeTypeData::Manager(ref mut data) = behaviour.node_type_data {
         // TODO: more conditions for accepting workers ?
         // TODO: limit ?
@@ -765,41 +698,40 @@ fn manager_request<TSubstream>(
             // TODO: what should be done if some specs are already known ?
             *specs_opt = Some(worker_specs);
             data.workers.insert(peer_id.clone(), peer_rc.clone());
-            behaviour.inject_generate_event(EventOut::WorkerNew(peer_id.clone()));
-            Poll::Ready(NetworkBehaviourAction::SendEvent {
-                peer_id,
-                event: HandlerIn::ManagerAnswer {
-                    accepted: true,
-                    request_id,
-                },
-            })
+            behaviour.inject_generate_event(EventOut::WorkerNew(peer_id));
+            HandlerIn::ManagerAnswer {
+                accepted: true,
+                request_id,
+            }
         } else {
-            Poll::Ready(NetworkBehaviourAction::GenerateEvent(
-                EventOut::MsgFromIncorrectNodeType {
-                    peer_id,
-                    known_type: peer_rc.borrow().node_type_into(),
-                    expected_type: NodeType::Worker,
-                    event,
+            behaviour.inject_generate_event(EventOut::MsgFromIncorrectNodeType {
+                peer_id,
+                known_type: peer_rc.borrow().node_type_into(),
+                expected_type: NodeType::Worker,
+                event: HandlerOut::ManagerRequest {
+                    worker_specs,
+                    request_id: request_id.clone_dangerous(),
                 },
-            ))
+            });
+            HandlerIn::ManagerAnswer {
+                accepted: false,
+                request_id,
+            }
         }
     } else {
         // If we aren't a Manager, we have to refuse such requests.
         behaviour.inject_generate_event(EventOut::MsgForIncorrectNodeType {
-            peer_id: peer_id.clone(),
+            peer_id,
             expected_type: NodeType::Manager,
             event: HandlerOut::ManagerRequest {
                 worker_specs,
                 request_id: request_id.clone_dangerous(),
             },
         });
-        Poll::Ready(NetworkBehaviourAction::SendEvent {
-            peer_id,
-            event: HandlerIn::ManagerAnswer {
-                accepted: false,
-                request_id,
-            },
-        })
+        HandlerIn::ManagerAnswer {
+            accepted: false,
+            request_id,
+        }
     }
 }
 
@@ -809,11 +741,11 @@ fn manager_answer<TSubstream>(
     peer_rc: Rc<RefCell<Peer>>,
     peer_id: PeerId,
     accepted: bool,
-    event: HandlerOut<QueryId>,
+    user_data: QueryId,
 ) -> Poll<NetworkBehaviourAction<HandlerIn<QueryId>, EventOut>> {
     let peer_id_clone = peer_id.clone();
     let (evt, send_bye) = if let NodeTypeData::Worker(ref mut data) = behaviour.node_type_data {
-        match (accepted, data.manager, peer_rc.borrow().node_type_into()) {
+        match (accepted, &data.manager, peer_rc.borrow().node_type_into()) {
             (true, None, Some(NodeType::Manager)) => {
                 if data
                     .config
@@ -826,13 +758,10 @@ fn manager_answer<TSubstream>(
                 }
             }
             (accepted, Some(manager), Some(NodeType::Manager)) => {
-                if *manager == *peer_rc {
-                    behaviour.inject_send_to_peer_event(
-                        peer_id,
-                        HandlerIn::ManagerPing {
-                            user_data: behaviour.next_query_unique_id(),
-                        },
-                    );
+                if *manager == peer_rc {
+                    let user_data = behaviour.next_query_unique_id();
+                    behaviour
+                        .inject_send_to_peer_event(peer_id, HandlerIn::ManagerPing { user_data });
                     (None, false)
                 } else {
                     (Some(EventOut::ManagerAlreadyHasOne(peer_id)), accepted)
@@ -841,21 +770,15 @@ fn manager_answer<TSubstream>(
             (false, None, Some(NodeType::Manager)) => {
                 (Some(EventOut::ManagerRefused(peer_id)), false)
             }
-            (accepted, _, Some(NodeType::Worker)) => (
+            (accepted, _, _) => (
                 Some(EventOut::MsgFromIncorrectNodeType {
                     peer_id,
                     known_type: peer_rc.borrow().node_type_into(),
                     expected_type: NodeType::Manager,
-                    event,
-                }),
-                accepted,
-            ),
-            (accepted, _, None) => (
-                Some(EventOut::MsgFromIncorrectNodeType {
-                    peer_id,
-                    known_type: None,
-                    expected_type: NodeType::Manager,
-                    event,
+                    event: HandlerOut::ManagerAnswer {
+                        accepted,
+                        user_data,
+                    },
                 }),
                 accepted,
             ),
@@ -865,7 +788,10 @@ fn manager_answer<TSubstream>(
             Some(EventOut::MsgForIncorrectNodeType {
                 peer_id,
                 expected_type: NodeType::Worker,
-                event,
+                event: HandlerOut::ManagerAnswer {
+                    accepted,
+                    user_data,
+                },
             }),
             accepted,
         )
@@ -887,4 +813,35 @@ fn manager_answer<TSubstream>(
     } else {
         Poll::Pending
     }
+}
+
+/// We received a [`worker::ManagerBye`].
+fn manager_bye<TSubstream>(
+    behaviour: &mut BalthBehaviour<TSubstream>,
+    peer_rc: Rc<RefCell<Peer>>,
+    peer_id: PeerId,
+    request_id: RequestId,
+) -> HandlerIn<QueryId> {
+    let evt = break_worker_manager_relationship(&mut behaviour.node_type_data, peer_rc, peer_id);
+    if let Poll::Ready(evt) = evt {
+        behaviour.inject_behaviour_action(evt);
+    }
+
+    HandlerIn::Ack { request_id }
+}
+
+/// We received a [`worker::ManagerPing`].
+fn manager_ping(request_id: RequestId) -> HandlerIn<QueryId> {
+    HandlerIn::ManagerPong { request_id }
+}
+
+/// We received a [`worker::TasksExecute`].
+fn tasks_execute<TSubstream>(
+    behaviour: &mut BalthBehaviour<TSubstream>,
+    tasks: HashMap<Vec<u8>, worker::TaskExecute>,
+    request_id: RequestId,
+) -> HandlerIn<QueryId> {
+    behaviour.inject_generate_event(EventOut::TasksExecute(tasks));
+
+    HandlerIn::Ack { request_id }
 }
