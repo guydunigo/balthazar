@@ -13,6 +13,7 @@ use libp2p::{
     },
     NetworkBehaviour,
 };
+use misc::{NodeTypeContainer, WorkerSpecs};
 use std::{
     collections::VecDeque,
     task::{Context, Poll},
@@ -21,7 +22,7 @@ use tokio::sync::mpsc::Sender;
 
 use super::{
     balthazar::{self, BalthBehaviour},
-    NodeTypeConfig,
+    ManagerConfig, WorkerConfig,
 };
 
 /// Use several [`NetworkBehaviour`](`libp2p::swarm::NetworkBehaviour`) at the same time.
@@ -48,7 +49,7 @@ where
     /// Creates a new [`BalthBehavioursWrapper`] and returns a [`Sender`] channel
     /// to communicate with it from the exterior of the Swarm.
     pub fn new(
-        node_type_conf: &NodeTypeConfig,
+        node_type_conf: NodeTypeContainer<ManagerConfig, (WorkerConfig, WorkerSpecs)>,
         pub_key: PublicKey,
     ) -> (Self, Sender<balthazar::EventIn>) {
         let local_peer_id = pub_key.into_peer_id();

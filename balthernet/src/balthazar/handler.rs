@@ -28,10 +28,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-use misc::{NodeType, TaskStatus};
+use misc::{NodeType, TaskStatus, WorkerSpecs};
 use proto::{protobuf::ProtoBufProtocol, worker};
 
 mod handler_misc;
+pub use handler_misc::RequestId;
 use handler_misc::*;
 
 /// Default time to keep alive time to determine how long should the connection be
@@ -196,10 +197,13 @@ where
                 inject_answer_event_to_peer_request(&mut self.substreams, request_id, msg)
             }
             EventIn::ManagerRequest {
-                cpu_count,
-                memory,
-                network_speed,
-                worker_price,
+                worker_specs:
+                    WorkerSpecs {
+                        cpu_count,
+                        memory,
+                        network_speed,
+                        worker_price,
+                    },
                 user_data,
             } => {
                 let msg = worker::ManagerRequest {
@@ -383,10 +387,7 @@ pub enum EventIn<TUserData> {
         request_id: RequestId,
     },
     ManagerRequest {
-        cpu_count: u64,
-        memory: u64,
-        network_speed: u64,
-        worker_price: u64,
+        worker_specs: WorkerSpecs,
         user_data: TUserData,
     },
     ManagerAnswer {
@@ -445,10 +446,7 @@ pub enum EventOut<TUserData> {
         user_data: TUserData,
     },
     ManagerRequest {
-        cpu_count: u64,
-        memory: u64,
-        network_speed: u64,
-        worker_price: u64,
+        worker_specs: WorkerSpecs,
         request_id: RequestId,
     },
     ManagerAnswer {
@@ -522,10 +520,12 @@ fn process_request<TUserData>(
                 network_speed,
                 worker_price,
             }) => Some(Ok(EventOut::ManagerRequest {
-                cpu_count,
-                memory,
-                network_speed,
-                worker_price,
+                worker_specs: WorkerSpecs {
+                    cpu_count,
+                    memory,
+                    network_speed,
+                    worker_price,
+                },
                 request_id: RequestId::new(connec_unique_id),
             })),
             WorkerMsg::ManagerBye(worker::ManagerBye {}) => Some(Ok(EventOut::ManagerBye {

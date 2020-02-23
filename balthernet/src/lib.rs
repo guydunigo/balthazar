@@ -22,6 +22,7 @@ use libp2p::build_tcp_ws_secio_mplex_yamux;
 /// To avoid importing the whole libp2p crate in another one...
 pub use libp2p::{identity, Multiaddr};
 use libp2p::{identity::Keypair, swarm::Swarm};
+use misc::WorkerSpecs;
 use std::task::{Context, Poll};
 use tokio::sync::mpsc::Sender;
 
@@ -40,17 +41,27 @@ pub use wrapper::BalthBehavioursWrapper;
 // TODO: NodeType containing manager to try ?
 /// Creates a new swarm based on [`BalthBehaviour`](`balthazar::BalthBehaviour`) and a default transport and returns
 /// a stream of event coming out of [`BalthBehaviour`](`balthazar::BalthBehaviour`).
-pub fn get_swarm(
+pub fn get_swarm<'a>(
     keypair: Keypair,
-    config: &NetConfig,
+    config: &'a NetConfig,
+    worker_specs: Option<&'a WorkerSpecs>,
 ) -> (
     Sender<balthazar::EventIn>,
     impl Stream<Item = balthazar::EventOut>,
 ) {
+    eprintln!("nodetype default {:?}", proto::worker::NodeType::default());
     let keypair_public = keypair.public();
     let peer_id = keypair_public.into_peer_id();
-    let (net_behaviour, tx) =
-        BalthBehavioursWrapper::new(config.node_type_configuration(), keypair.public());
+    let (net_behaviour, tx) = BalthBehavioursWrapper::new(
+        config.node_type_configuration().clone().map_worker(|w| {
+            if let Some(specs) = worker_specs {
+               (w, specs.clone())
+            } else {
+                panic!("No worker specs were provided, but the NetConfig provided contains worker config info.");
+            }
+        }),
+        keypair.public(),
+    );
 
     let transport = build_tcp_ws_secio_mplex_yamux(keypair).unwrap();
 
