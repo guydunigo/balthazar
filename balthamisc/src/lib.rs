@@ -9,6 +9,8 @@ mod node_type;
 pub use node_type::{NodeType, NodeTypeContainer};
 mod task_status;
 pub use task_status::{TaskErrorKind, TaskStatus};
+mod worker_specs;
+pub use worker_specs::WorkerSpecs;
 
 /// Alias for [`tokio::sync::oneshot::error::RecvError`].
 pub type SpawnThreadError = RecvError;

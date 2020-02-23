@@ -9,6 +9,46 @@ pub enum NodeTypeContainer<M, W> {
     Worker(W),
 }
 
+impl<M, W> NodeTypeContainer<M, W> {
+    pub fn map_manager<F, MOut>(self, f: F) -> NodeTypeContainer<MOut, W>
+    where
+        F: FnOnce(M) -> MOut,
+    {
+        match self {
+            NodeTypeContainer::Manager(m) => NodeTypeContainer::Manager(f(m)),
+            NodeTypeContainer::Worker(w) => NodeTypeContainer::Worker(w),
+        }
+    }
+    pub fn map_manager_ref<F, MOut>(&self, f: F) -> NodeTypeContainer<MOut, &W>
+    where
+        F: FnOnce(&M) -> MOut,
+    {
+        match self {
+            NodeTypeContainer::Manager(m) => NodeTypeContainer::Manager(f(&m)),
+            NodeTypeContainer::Worker(w) => NodeTypeContainer::Worker(&w),
+        }
+    }
+
+    pub fn map_worker<F, WOut>(self, f: F) -> NodeTypeContainer<M, WOut>
+    where
+        F: FnOnce(W) -> WOut,
+    {
+        match self {
+            NodeTypeContainer::Manager(m) => NodeTypeContainer::Manager(m),
+            NodeTypeContainer::Worker(w) => NodeTypeContainer::Worker(f(w)),
+        }
+    }
+    pub fn map_worker_ref<F, WOut>(&self, f: F) -> NodeTypeContainer<&M, WOut>
+    where
+        F: FnOnce(&W) -> WOut,
+    {
+        match self {
+            NodeTypeContainer::Manager(m) => NodeTypeContainer::Manager(&m),
+            NodeTypeContainer::Worker(w) => NodeTypeContainer::Worker(f(&w)),
+        }
+    }
+}
+
 impl<M, W> fmt::Display for NodeTypeContainer<M, W> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         NodeType::from(self).fmt(f)
