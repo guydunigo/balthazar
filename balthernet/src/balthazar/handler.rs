@@ -234,7 +234,10 @@ where
                 let msg = worker::ManagerPing {}.into();
                 inject_answer_event_to_peer_request(&mut self.substreams, request_id, msg)
             }
-            EventIn::TasksExecute { tasks, user_data } => {
+            EventIn::TasksExecute {
+                mut tasks,
+                user_data,
+            } => {
                 let msg = worker::TasksExecute {
                     tasks: tasks.drain().map(|(_, t)| t).collect(),
                 }
@@ -249,7 +252,7 @@ where
                 inject_new_request_event(&mut self.substreams, user_data, msg)
             }
             EventIn::TasksPong {
-                statuses,
+                mut statuses,
                 request_id,
             } => {
                 let msg = worker::TasksPong {
@@ -459,10 +462,6 @@ pub enum EventOut<TUserData> {
     ManagerPing {
         request_id: RequestId,
     },
-    // TODO: useful to propagate since it doesn't create any actions ?
-    ManagerPong {
-        user_data: TUserData,
-    },
     TasksExecute {
         tasks: HashMap<Vec<u8>, worker::TaskExecute>,
         request_id: RequestId,
@@ -534,9 +533,9 @@ fn process_request<TUserData>(
             WorkerMsg::ManagerPing(worker::ManagerPing {}) => Some(Ok(EventOut::ManagerPing {
                 request_id: RequestId::new(connec_unique_id),
             })),
-            WorkerMsg::TasksExecute(worker::TasksExecute { tasks }) => {
+            WorkerMsg::TasksExecute(worker::TasksExecute { mut tasks }) => {
                 Some(Ok(EventOut::TasksExecute {
-                    tasks: HashMap::from_iter(tasks.drain(..).map(|t| (t.job_id, t))),
+                    tasks: HashMap::from_iter(tasks.drain(..).map(|t| (t.job_id.clone(), t))),
                     request_id: RequestId::new(connec_unique_id),
                 }))
             }
@@ -567,6 +566,8 @@ fn process_request<TUserData>(
 
 /// Process a message that's supposed to be an answer to one of our requests.
 /// Basically transforms answer messages into handler's [`EventOut`].
+///
+/// When returning [`None`], the handler doesn't propagate the message to the behaviour.
 fn process_answer<TUserData>(
     event: WorkerMsgWrapper,
     user_data: TUserData,
@@ -596,12 +597,10 @@ fn process_answer<TUserData>(
             WorkerMsg::ManagerAnswer(worker::ManagerAnswer { accepted }) => {
                 Some(EventOut::ManagerAnswer { accepted, user_data })
             }
-            WorkerMsg::ManagerPong(worker::ManagerPong { }) => {
-                Some(EventOut::ManagerPong { user_data })
-            }
-            WorkerMsg::TasksPong(worker::TasksPong { statuses }) => {
+            WorkerMsg::ManagerPong(worker::ManagerPong { }) => None,
+            WorkerMsg::TasksPong(worker::TasksPong { mut statuses }) => {
                 Some(EventOut::TasksPong {
-                    statuses: HashMap::from_iter(statuses.iter().map(|s| (s.task_id,s.status_data.into()))),
+                    statuses: HashMap::from_iter(statuses.drain(..).map(|s| (s.task_id,s.status_data.into()))),
                     user_data,
                 })
             }
