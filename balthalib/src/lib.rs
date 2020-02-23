@@ -71,6 +71,7 @@ pub fn run(config: BalthazarConfig) -> Result<(), Error> {
 
 impl Balthazar {
     pub async fn run(config: BalthazarConfig) -> Result<(), Error> {
+        println!("Starting as... {}", config.node_type);
         let keypair = balthernet::identity::Keypair::generate_secp256k1();
         let (swarm_in, swarm_out) = net::get_swarm(keypair.clone(), config.net());
         /*
