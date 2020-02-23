@@ -1,6 +1,7 @@
 extern crate balthalib as lib;
 extern crate clap;
 
+use clap::Clap;
 use std::convert::TryInto;
 
 mod arguments;

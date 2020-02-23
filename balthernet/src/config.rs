@@ -1,6 +1,5 @@
-use libp2p::PeerId;
+use libp2p::{core::multiaddr::Protocol, Multiaddr, PeerId};
 use misc::{NodeType, NodeTypeContainer};
-use parity_multiaddr::{Multiaddr, Protocol};
 
 pub const DEFAULT_LISTENING_ADDRESS: &str = "/ip4/0.0.0.0/tcp/5003";
 
@@ -128,8 +127,7 @@ impl NetConfig {
 #[cfg(test)]
 mod tests {
     use super::WorkerConfig;
-    use libp2p::PeerId;
-    use parity_multiaddr::{Multiaddr, Protocol};
+    use libp2p::{core::multiaddr::Protocol, Multiaddr, PeerId};
 
     #[test]
     fn it_correctly_checks_managers_authorized_empty() {

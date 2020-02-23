@@ -1,11 +1,7 @@
 //! Different classes/functions used by the [`Balthandler`](`super::Balthandler`).
 //!
 //! This module is greatly inspired from [`libp2p::kad::handler::KademliaHandler`].
-use futures::{
-    io::{AsyncRead, AsyncWrite},
-    sink::Sink,
-    Stream,
-};
+use futures::{sink::Sink, Stream};
 use libp2p::swarm::{ProtocolsHandlerEvent, ProtocolsHandlerUpgrErr, SubstreamProtocol};
 use proto::protobuf::ProtoBufProtocol;
 use proto::protobuf::ProtoBufProtocolSink;
@@ -179,7 +175,7 @@ impl<TMessage, TUserData> SubstreamState<TMessage, TUserData> {
 ///
 /// Returns the new state for that substream, an event to generate, and whether the substream
 /// should be polled again.
-pub fn advance_substream<TSubstream, TUserData>(
+pub fn advance_substream<TUserData>(
     state: SubstreamState<WorkerMsgWrapper, TUserData>,
     upgrade: ProtoBufProtocol<WorkerMsgWrapper>,
     cx: &mut Context,
@@ -198,10 +194,7 @@ pub fn advance_substream<TSubstream, TUserData>(
     >,
     // Should the substream be polled again:
     bool,
-)
-where
-    TSubstream: AsyncRead + AsyncWrite + Unpin,
-{
+) {
     use SubstreamState::*;
     match state {
         OutPendingOpen(msg, user_data) => {

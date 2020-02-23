@@ -8,6 +8,5 @@ edition = "2018"
 
 [dependencies]
 balthalib = { path = "../balthalib" }
-# clap = "3"
-clap = { git = "https://github.com/clap-rs/clap/" }
+clap = "3.0.0-beta.1"
 multiaddr = "0.3.1"

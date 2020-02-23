@@ -11,12 +11,11 @@
 //!    the `process_request` function to create the corresponding [`EventOut`],
 //! 4. for each new answer message which should be forwarded to the behviour, extend
 //!    the `process_answer` function to create the corresponding [`EventOut`].
-use futures::io::{AsyncRead, AsyncWrite};
 use libp2p::{
     core::{InboundUpgrade, OutboundUpgrade},
     swarm::{
-        KeepAlive, ProtocolsHandler, ProtocolsHandlerEvent, ProtocolsHandlerUpgrErr,
-        SubstreamProtocol,
+        KeepAlive, NegotiatedSubstream, ProtocolsHandler, ProtocolsHandlerEvent,
+        ProtocolsHandlerUpgrErr, SubstreamProtocol,
     },
 };
 use proto::worker::{WorkerMsg, WorkerMsgWrapper};
@@ -41,21 +40,14 @@ pub const DEFAULT_KEEP_ALIVE_DURATION_SECS: u64 = 10;
 
 /// This structure implements the [`ProtocolsHandler`] trait to handle a connection with
 /// another peer.
-pub struct Balthandler<TSubstream, TUserData>
-where
-    TSubstream: AsyncRead + AsyncWrite + Unpin,
-{
+pub struct Balthandler<TUserData> {
     substreams: Vec<SubstreamState<WorkerMsgWrapper, TUserData>>,
     proto: ProtoBufProtocol<WorkerMsgWrapper>,
     keep_alive: KeepAlive,
     next_connec_unique_id: UniqueConnecId,
-    _marker: std::marker::PhantomData<TSubstream>,
 }
 
-impl<TSubstream, TUserData> Balthandler<TSubstream, TUserData>
-where
-    TSubstream: AsyncRead + AsyncWrite + Unpin,
-{
+impl<TUserData> Balthandler<TUserData> {
     pub fn new() -> Self {
         Self::default()
     }
@@ -76,30 +68,24 @@ where
     }
 }
 
-impl<TSubstream, TUserData> Default for Balthandler<TSubstream, TUserData>
-where
-    TSubstream: AsyncRead + AsyncWrite + Unpin,
-{
+impl<TUserData> Default for Balthandler<TUserData> {
     fn default() -> Self {
         Balthandler {
             substreams: Vec::new(),
             proto: worker::new_worker_protocol(),
             keep_alive: Self::default_keep_alive(),
             next_connec_unique_id: Default::default(),
-            _marker: Default::default(),
         }
     }
 }
 
-impl<TSubstream, TUserData> ProtocolsHandler for Balthandler<TSubstream, TUserData>
+impl<TUserData> ProtocolsHandler for Balthandler<TUserData>
 where
-    TSubstream: AsyncRead + AsyncWrite + Send + Unpin + 'static,
-    TUserData: fmt::Debug,
+    TUserData: fmt::Debug + Send + 'static,
 {
     type InEvent = EventIn<TUserData>;
     type OutEvent = EventOut<TUserData>;
     type Error = io::Error;
-    type Substream = TSubstream;
     type InboundProtocol = ProtoBufProtocol<WorkerMsgWrapper>;
     type OutboundProtocol = ProtoBufProtocol<WorkerMsgWrapper>;
     type OutboundOpenInfo = (WorkerMsgWrapper, Option<TUserData>);
@@ -111,7 +97,7 @@ where
 
     fn inject_fully_negotiated_inbound(
         &mut self,
-        sink: <Self::InboundProtocol as InboundUpgrade<TSubstream>>::Output,
+        sink: <Self::InboundProtocol as InboundUpgrade<NegotiatedSubstream>>::Output,
     ) {
         // eprintln!("New Inbound Frame received after successful upgrade.");
         let next_connec_unique_id = self.next_connec_unique_id();
@@ -123,7 +109,7 @@ where
 
     fn inject_fully_negotiated_outbound(
         &mut self,
-        sink: <Self::OutboundProtocol as OutboundUpgrade<TSubstream>>::Output,
+        sink: <Self::OutboundProtocol as OutboundUpgrade<NegotiatedSubstream>>::Output,
         (msg, user_data): Self::OutboundOpenInfo,
     ) {
         // eprintln!("New Outbout Frame received after successful upgrade.");
@@ -288,7 +274,7 @@ where
         &mut self,
         (_, user_data): Self::OutboundOpenInfo,
         error: ProtocolsHandlerUpgrErr<
-            <Self::OutboundProtocol as OutboundUpgrade<TSubstream>>::Error,
+            <Self::OutboundProtocol as OutboundUpgrade<NegotiatedSubstream>>::Error,
         >,
     ) {
         eprintln!("Dial upgrade error: {:?}", error);
@@ -326,8 +312,7 @@ where
             let mut substream = self.substreams.swap_remove(n);
 
             loop {
-                match advance_substream::<TSubstream, TUserData>(substream, self.proto.clone(), cx)
-                {
+                match advance_substream::<TUserData>(substream, self.proto.clone(), cx) {
                     (Some(new_state), Some(evt), _) => {
                         // eprintln!("A : {}", self.substreams.len());
                         self.substreams.push(new_state);

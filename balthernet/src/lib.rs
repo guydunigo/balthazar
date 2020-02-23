@@ -13,7 +13,6 @@ extern crate balthamisc as misc;
 extern crate balthaproto as proto;
 extern crate futures;
 extern crate libp2p;
-extern crate parity_multiaddr;
 extern crate tokio;
 extern crate void;
 
@@ -49,7 +48,6 @@ pub fn get_swarm<'a>(
     Sender<balthazar::EventIn>,
     impl Stream<Item = balthazar::EventOut>,
 ) {
-    eprintln!("nodetype default {:?}", proto::worker::NodeType::default());
     let keypair_public = keypair.public();
     let peer_id = keypair_public.into_peer_id();
     let (net_behaviour, tx) = BalthBehavioursWrapper::new(

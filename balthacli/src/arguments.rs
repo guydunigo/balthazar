@@ -60,7 +60,8 @@ pub struct BalthazarArgs {
         parse(try_from_str = try_parse_default_storage),
     )]
     default_storage: Option<StorageType>,
-    /// Multiaddress of a managers this worker is athourized to respond to.
+    /// Multiaddresses of a managers this worker is authorized to respond to.
+    /// Those multiaddresses will be dialed the same way as the `--peer` command.
     /// If not defined, will accept any manager.
     /// (e.g. `/ip4/10.0.0.1/tcp/5003`, `/p2p/[PEER_ID]`, `/ip4/10.0.0.1/tcp/5003/p2p/[PEER_ID]`,
     /// ...)
@@ -87,6 +88,12 @@ impl std::convert::TryInto<BalthazarConfig> for BalthazarArgs {
                 } else {
                     panic!("`authorized_manager` was defined when node type isn't `Worker`.");
                 }
+
+                // TODO: check the addresses before ?
+                config
+                    .net_mut()
+                    .bootstrap_peers_mut()
+                    .extend_from_slice(&authorized_managers[..]);
             }
         }
 

@@ -1,6 +1,5 @@
 //! Provides [`BalthBehavioursWrapper`] to use several
 //! [`NetworkBehaviour`](`libp2p::swarm::NetworkBehaviour`) at the same time.
-use futures::io::{AsyncRead, AsyncWrite};
 use libp2p::{
     // identify::{Identify, IdentifyEvent},
     identity::PublicKey,
@@ -9,7 +8,7 @@ use libp2p::{
     ping::{Ping, PingEvent},
     swarm::{
         protocols_handler::{IntoProtocolsHandler, ProtocolsHandler},
-        NetworkBehaviour, NetworkBehaviourAction, NetworkBehaviourEventProcess,
+        NetworkBehaviour, NetworkBehaviourAction, NetworkBehaviourEventProcess, PollParameters,
     },
     NetworkBehaviour,
 };
@@ -29,23 +28,17 @@ use super::{
 #[derive(NetworkBehaviour)]
 #[behaviour(poll_method = "poll")]
 #[behaviour(out_event = "balthazar::EventOut")]
-pub struct BalthBehavioursWrapper<TSubstream>
-where
-    TSubstream: 'static + Send + Sync + Unpin + AsyncRead + AsyncWrite,
-{
-    balthbehaviour: BalthBehaviour<TSubstream>,
-    mdns: Mdns<TSubstream>,
-    ping: Ping<TSubstream>,
-    kademlia: Kademlia<TSubstream, MemoryStore>,
+pub struct BalthBehavioursWrapper {
+    balthbehaviour: BalthBehaviour,
+    mdns: Mdns,
+    ping: Ping,
+    kademlia: Kademlia<MemoryStore>,
     // identify: Identify<TSubstream>,
     #[behaviour(ignore)]
     events: VecDeque<balthazar::EventOut>,
 }
 
-impl<T> BalthBehavioursWrapper<T>
-where
-    T: 'static + Send + Sync + Unpin + AsyncRead + AsyncWrite,
-{
+impl BalthBehavioursWrapper {
     /// Creates a new [`BalthBehavioursWrapper`] and returns a [`Sender`] channel
     /// to communicate with it from the exterior of the Swarm.
     pub fn new(
@@ -69,7 +62,13 @@ where
         )
     }
 
-fn poll(&mut self, _cx: &mut Context) -> Poll<NetworkBehaviourAction<<<<Self as NetworkBehaviour>::ProtocolsHandler as IntoProtocolsHandler>::Handler as ProtocolsHandler>::InEvent, <Self as NetworkBehaviour>::OutEvent>>{
+    fn poll(
+        &mut self,
+        _cx: &mut Context,
+        _params: &mut impl PollParameters,
+        ) -> Poll<NetworkBehaviourAction<<<<Self as NetworkBehaviour>::ProtocolsHandler as IntoProtocolsHandler>::Handler as ProtocolsHandler>::InEvent, <Self as NetworkBehaviour>::OutEvent>>
+    // ) -> Poll<NetworkBehaviourAction<HandlerIn<QueryId>, <Self as NetworkBehaviour>::OutEvent>>
+    {
         if let Some(e) = self.events.pop_back() {
             Poll::Ready(NetworkBehaviourAction::GenerateEvent(e))
         } else {
@@ -78,19 +77,13 @@ fn poll(&mut self, _cx: &mut Context) -> Poll<NetworkBehaviourAction<<<<Self as 
     }
 }
 
-impl<T> NetworkBehaviourEventProcess<balthazar::EventOut> for BalthBehavioursWrapper<T>
-where
-    T: 'static + Send + Sync + Unpin + AsyncRead + AsyncWrite,
-{
+impl NetworkBehaviourEventProcess<balthazar::EventOut> for BalthBehavioursWrapper {
     fn inject_event(&mut self, event: balthazar::EventOut) {
         self.events.push_front(event);
     }
 }
 
-impl<T> NetworkBehaviourEventProcess<MdnsEvent> for BalthBehavioursWrapper<T>
-where
-    T: 'static + Send + Sync + Unpin + AsyncRead + AsyncWrite,
-{
+impl NetworkBehaviourEventProcess<MdnsEvent> for BalthBehavioursWrapper {
     // Called when `mdns` produces an event.
     fn inject_event(&mut self, event: MdnsEvent) {
         if let MdnsEvent::Discovered(list) = event {
@@ -103,10 +96,7 @@ where
     }
 }
 
-impl<T> NetworkBehaviourEventProcess<KademliaEvent> for BalthBehavioursWrapper<T>
-where
-    T: 'static + Send + Sync + Unpin + AsyncRead + AsyncWrite,
-{
+impl NetworkBehaviourEventProcess<KademliaEvent> for BalthBehavioursWrapper {
     // Called when `kademlia` produces an event.
     fn inject_event(&mut self, message: KademliaEvent) {
         match message {
@@ -136,10 +126,7 @@ where
     }
 }
 
-impl<T> NetworkBehaviourEventProcess<PingEvent> for BalthBehavioursWrapper<T>
-where
-    T: 'static + Send + Sync + Unpin + AsyncRead + AsyncWrite,
-{
+impl NetworkBehaviourEventProcess<PingEvent> for BalthBehavioursWrapper {
     fn inject_event(&mut self, _event: PingEvent) {
         /*
         match event.result {
@@ -151,9 +138,7 @@ where
 }
 
 /*
-impl<T> NetworkBehaviourEventProcess<IdentifyEvent> for BalthBehavioursWrapper<T>
-where
-    T: 'static + Send + Sync + Unpin + AsyncRead + AsyncWrite,
+impl NetworkBehaviourEventProcess<IdentifyEvent> for BalthBehavioursWrapper
 {
     // Called when `mdns` produces an event.
     fn inject_event(&mut self, event: IdentifyEvent) {

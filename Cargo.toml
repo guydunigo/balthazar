@@ -15,3 +15,8 @@ members = [
 ]
 
 default-members = ["balthacli"]
+
+[patch.crates-io]
+clap = { git = "https://github.com/clap-rs/clap/" }
+libp2p = { git = "https://github.com/guydunigo/rust-libp2p" }
+# libp2p = { path = "../my_rust-libp2p" }
