@@ -8,7 +8,7 @@ use futures::{future, join, FutureExt, StreamExt};
 use std::{fmt, future::Future, io, path::Path};
 use tokio::{fs, runtime::Runtime, sync::mpsc::Sender};
 
-use misc::NodeType;
+use misc::{NodeType, WorkerSpecs};
 use net::identity::{error::DecodingError, Keypair};
 use run::Runner;
 use store::{Storage, StoragesWrapper};
@@ -71,9 +71,11 @@ pub fn run(config: BalthazarConfig) -> Result<(), Error> {
 
 impl Balthazar {
     pub async fn run(config: BalthazarConfig) -> Result<(), Error> {
-        println!("Starting as... {}", config.node_type);
+        println!("Starting as {:?}...", config.node_type());
+
+        let specs = WorkerSpecs::default();
         let keypair = balthernet::identity::Keypair::generate_secp256k1();
-        let (swarm_in, swarm_out) = net::get_swarm(keypair.clone(), config.net());
+        let (swarm_in, swarm_out) = net::get_swarm(keypair.clone(), config.net(), Some(&specs));
         /*
         let (events_in, events) = channel(CHANNEL_SIZE);
         let store = StoragesWrapper::new_with_config(config.storage())?;
@@ -106,6 +108,7 @@ impl Balthazar {
         eprintln!("S --- event: {:?}", event);
 
         match (node_type, event) {
+            /*
             (NodeType::Manager, net::EventOut::WorkerNew(peer_id)) => {
                 eprintln!(
                     "M --- Sending task `{}` with parameters `{}` to worker `{}`",
@@ -187,6 +190,7 @@ impl Balthazar {
                 }
             }
             .boxed(),
+            */
             _ => future::ready(()).boxed(),
         }
     }

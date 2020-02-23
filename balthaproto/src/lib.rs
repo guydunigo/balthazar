@@ -20,7 +20,6 @@ pub mod worker {
     pub const PROTOCOL_VERSION: &str = concat!("/balthazar/worker/", env!("CARGO_PKG_VERSION"));
 
     pub fn new_worker_protocol() -> ProtoBufProtocol<WorkerMsgWrapper> {
-        eprintln!("{}", PROTOCOL_VERSION);
         ProtoBufProtocol::new(PROTOCOL_VERSION.as_bytes())
     }
 
