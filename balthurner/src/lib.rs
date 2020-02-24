@@ -1,120 +1,117 @@
 #[macro_use]
 extern crate wasmer_runtime;
 extern crate balthamisc as misc;
-extern crate bytes;
-extern crate either;
+extern crate futures;
 
-use bytes::Bytes;
-use either::Either;
+use futures::future::{BoxFuture, FutureExt};
 use misc::{spawn_thread_async, SpawnThreadError};
-use std::{thread::sleep, time::Duration};
-use wasmer_runtime::{imports, instantiate, Func, Instance};
+use std::fmt;
 
-pub use wasmer_runtime::error;
+pub mod wasm;
+pub use wasm::WasmRunner;
 
-// TODO: versions from host api and wasm api
-
-fn sleep_secs(duration: u64) {
-    sleep(Duration::from_secs(duration));
+#[derive(Debug)]
+pub enum RunnerError<E> {
+    /// Timeout has been reached.
+    TimedOut,
+    /// The command `test` was run but the program doesn't support tests.
+    // TODO: relevant ? should we enforce all programs to include tests ?
+    NoTests,
+    /// Error specific to the executor technology.
+    InternalError(E),
+    SpawnThreadError(SpawnThreadError),
 }
 
-/// Contains the instance of a parsed WASM program.
-///
-/// TODO: performance of recreating Instance each run ? Maybe keep compiled form or something ?
-pub struct Runner {
-    // instance: Instance,
-    wasm: Bytes,
+impl<E: fmt::Debug> fmt::Display for RunnerError<E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
 }
 
-impl Runner {
-    /// Creates a new webassembly runner based on the given wasm program.
-    pub fn new(wasm: Bytes) -> Self {
-        Runner { wasm }
+impl<E: fmt::Debug> std::error::Error for RunnerError<E> {}
+
+impl<E> From<E> for RunnerError<E> {
+    fn from(e: E) -> Self {
+        RunnerError::InternalError(e)
     }
+}
 
-    pub fn get_instance(&self) -> error::Result<Instance> {
-        let import_objects = imports! {
-            "env" => {
-                "double_host" => func!(|v: i32| v*2),
-                "sleep_secs" => func!(sleep_secs),
-            },
-        };
+pub type RunnerResult<T, E> = Result<T, RunnerError<E>>;
 
-        let instance = instantiate(&self.wasm[..], &import_objects)?;
-        Ok(instance)
-    }
+// TODO: ability to cache Runner for performance ?
+pub trait Runner: Send + Sync {
+    /// Error type returned if there was a problem running the task.
+    type Error: std::error::Error + Send + 'static;
 
-    /// Runs the `run` function inside the wasm.
+    /// Run the task with the given arguments.
+    /// `program` can be the actual program or its address.
     ///
-    /// TODO: performance of recreating the function each time ?
-    pub fn run(&self, val: i32) -> error::Result<i32> {
-        let instance = self.get_instance()?;
-        let run = get_run_fn(&instance)?;
+    /// If the program doesn't complete before `timeout` seconds, returns `Err(RunnerError::TimedOut)`.
+    fn run(program: &[u8], arguments: &[u8]) -> RunnerResult<Vec<u8>, Self::Error>;
 
-        Ok(run.call(val)?)
-    }
-
-    /// Runs on another thread asynchronously.
-    pub async fn run_async(&self, val: i32) -> Result<i32, Either<error::Error, SpawnThreadError>> {
-        let instance = self.get_instance().map_err(Either::Left)?;
-
-        let result = spawn_thread_async(move || -> error::Result<i32> {
-            let run = get_run_fn(&instance)?;
-            run.call(val).map_err(|e| e.into())
-        })
-        .await;
-
-        match result {
-            Ok(Ok(val)) => Ok(val),
-            Ok(Err(e)) => Err(Either::Left(e)),
-
-            Err(e) => Err(Either::Right(e)),
-        }
-    }
+    /// Run the tests if they are included in the program.
+    /// Checks if the result seem valid given the arguments.
+    /// If the program doesn't complete before `timeout` seconds, returns `Err(RunnerError::TimedOut)`.
+    /// If the program doesn't support tests, returns `Err(RunnerError::NoTests)`.
+    fn test(program: &[u8], arguments: &[u8], result: &[u8]) -> RunnerResult<bool, Self::Error>;
 
     /*
-    pub fn instance(&self) -> &Instance {
-        &self.instance
-    }
+    /// Abord the execution of a program.
+    fn abord(&self);
     */
-}
 
-fn get_run_fn<'a>(instance: &'a Instance) -> error::Result<Func<'a, i32, i32>> {
-    instance.func("run").map_err(|e| e.into())
+    /// Run on another thread asynchronously.
+    fn run_async<'a>(
+        program: &'a [u8],
+        arguments: &'a [u8],
+    ) -> BoxFuture<'a, RunnerResult<Vec<u8>, Self::Error>> {
+        // TODO: Find a way to not copy the whole data (pass ref or pointer) ?
+        let program = Vec::from(program);
+        let arguments = Vec::from(arguments);
+
+        async move {
+            let result = spawn_thread_async(move || -> RunnerResult<Vec<u8>, Self::Error> {
+                Self::run(&program[..], &arguments[..])
+            })
+            .await;
+
+            match result {
+                Ok(Ok(val)) => Ok(val),
+                Ok(Err(e)) => Err(e),
+
+                Err(e) => Err(RunnerError::SpawnThreadError(e)),
+            }
+        }
+        .boxed()
+    }
+
+    /// Test value on another thread asynchronously.
+    fn test_async<'a>(
+        program: &'a [u8],
+        arguments: &'a [u8],
+        result: &'a [u8],
+    ) -> BoxFuture<'a, RunnerResult<bool, Self::Error>> {
+        // TODO: Find a way to not copy the whole data (pass ref or pointer) ?
+        let program = Vec::from(program);
+        let arguments = Vec::from(arguments);
+        let result = Vec::from(result);
+
+        async move {
+            let result = spawn_thread_async(move || -> RunnerResult<bool, Self::Error> {
+                Self::test(&program[..], &arguments[..], &result[..])
+            })
+            .await;
+
+            match result {
+                Ok(Ok(val)) => Ok(val),
+                Ok(Err(e)) => Err(e),
+
+                Err(e) => Err(RunnerError::SpawnThreadError(e)),
+            }
+        }
+        .boxed()
+    }
 }
 
 #[cfg(test)]
-mod tests {
-    extern crate futures;
-
-    use super::*;
-    use futures::executor::block_on;
-    use std::fs;
-
-    const TEST_FILE: &str = "test_files/test.wasm";
-
-    #[test]
-    fn it_executes_correctly_test_file() -> error::Result<()> {
-        let wasm =
-            fs::read(TEST_FILE).expect(&format!("Could not read test file `{}`", TEST_FILE)[..]);
-        let runner = Runner::new(wasm.into());
-
-        assert_eq!(runner.run(3)?, 6);
-
-        Ok(())
-    }
-
-    #[test]
-    fn it_executes_correctly_test_file_asynchronously(
-    ) -> Result<(), Either<error::Error, SpawnThreadError>> {
-        let wasm =
-            fs::read(TEST_FILE).expect(&format!("Could not read test file `{}`", TEST_FILE)[..]);
-        let runner = Runner::new(wasm.into());
-
-        let res = block_on(runner.run_async(3))?;
-
-        assert_eq!(res, 6);
-
-        Ok(())
-    }
-}
+mod tests {}

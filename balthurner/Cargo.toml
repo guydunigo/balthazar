@@ -1,6 +1,6 @@
 [package]
 name = "balthurner"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["GONI Guillaume <gdn3@live.fr>"]
 edition = "2018"
 
@@ -8,9 +8,5 @@ edition = "2018"
 
 [dependencies]
 wasmer-runtime = "0.14.0"
-balthamisc = { path = "../balthamisc" }
-either = "1.5.3"
-bytes = "0.5.4"
-
-[dev-dependencies]
 futures = "0.3.4"
+balthamisc = { path = "../balthamisc" }

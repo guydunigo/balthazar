@@ -282,11 +282,9 @@ dependencies = [
 
 [[package]]
 name = "balthurner"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "balthamisc",
- "bytes 0.5.4",
- "either",
  "futures 0.3.4",
  "wasmer-runtime",
 ]
