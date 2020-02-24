@@ -282,7 +282,7 @@ dependencies = [
 
 [[package]]
 name = "balthurner"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "balthamisc",
  "futures 0.3.4",

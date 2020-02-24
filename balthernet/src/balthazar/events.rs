@@ -74,7 +74,7 @@ pub enum EventOut {
         task_ids: Vec<Vec<u8>>,
         request_id: RequestId,
     },
-    /// Answer to one of our [`EventIt::TasksPing`].
+    /// Answer to one of our [`EventIn::TasksPing`].
     TasksPong {
         peer_id: PeerId,
         statuses: HashMap<Vec<u8>, TaskStatus>,

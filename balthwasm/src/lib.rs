@@ -1,40 +1,18 @@
-extern "C" {
-    pub fn double_host(val: i32) -> i32;
-    pub fn sleep_secs(val: u64);
-}
+mod abi;
+use abi::LocalResult;
 
-#[no_mangle]
-pub fn get_six() -> i32 {
-    3 + 3
-}
+// ------------------------------------------------------------------
+//                          User's code
+// ------------------------------------------------------------------
 
-#[no_mangle]
-pub fn double(val: i32) -> i32 {
-    val * 2
-}
+fn my_run(arguments: Vec<u8>) -> LocalResult<Vec<u8>> {
+    // decoding arguments
+    let args = String::from_utf8_lossy(&arguments[..]);
+    let number = args.parse().map_err(|_| 1)?;
 
-#[no_mangle]
-pub fn double_from_host(val: i32) -> i32 {
-    unsafe { double_host(val) }
-}
+    let result = abi::double_host(number);
 
-#[no_mangle]
-pub fn run(val: i32) -> i32 {
-    unsafe { sleep_secs(3) };
-    double_from_host(val)
+    // serializing result
+    let res_str = format!("{}", result);
+    Ok(res_str.into_bytes())
 }
-
-/*
-#[no_mangle]
-pub fn play_with_string(val: &str) -> String {
-    format!("test: {}", val)
-}
-
-#[no_mangle]
-pub fn play_with_array(val: &[u8]) -> Vec<u8> {
-    let mut vec = Vec::new();
-    vec.extend_from_slice(val);
-
-    vec
-}
-*/
