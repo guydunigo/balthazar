@@ -1,11 +1,11 @@
 pragma solidity >=0.4.21 <0.7.0;
-// pragma experimental ABIEncoderV2;
+pragma experimental ABIEncoderV2;
 
 contract Jobs {
     enum ProgramKind { Wasm }
     enum BestMethod { Performance, Cost }
 
-    struct Arguments {
+    struct Task {
         bytes arguments;
         bytes[] result;
     }
@@ -14,8 +14,8 @@ contract Jobs {
         ProgramKind program_kind;
         bytes[] addresses;
         bytes program_hash;
-        uint64 next_arguments_id;
-        mapping(uint => Arguments) arguments;
+        uint64 next_task_id;
+        mapping(uint => Task) tasks;
 
         uint64 timeout;
         uint64 max_failures;
@@ -90,10 +90,10 @@ contract Jobs {
         require(jobs[job_id].sender == msg.sender, "Not authorized: not job sender");
 
         uint64 r = jobs[job_id].redundancy;
-        arg_id = jobs[job_id].next_arguments_id;
-        jobs[job_id].next_arguments_id++;
+        arg_id = jobs[job_id].next_task_id;
+        jobs[job_id].next_task_id++;
 
-        jobs[job_id].arguments[arg_id] = Arguments(arguments, new bytes[](r));
+        jobs[job_id].tasks[arg_id] = Task(arguments, new bytes[](r));
     }
 
     function lock(uint64 job_id) public {
@@ -118,7 +118,7 @@ contract Jobs {
         uint64,
         bool includes_tests
     ) {
-        require(job_id < jobs.length, "unknown job id");
+        require(job_id < jobs.length, "Unknown job id");
 
         Job memory job = jobs[job_id];
         return (
@@ -137,6 +137,38 @@ contract Jobs {
         );
     }
 
+    function get_job_addresses(uint64 job_id) public view returns (bytes[] memory) {
+        require(job_id < jobs.length, "Unknown job id");
+        return jobs[job_id].addresses;
+    }
+
+    function get_arguments_length(uint64 job_id) public view returns (uint64) {
+        require(job_id < jobs.length, "Unknown job id");
+        return jobs[job_id].next_task_id;
+    }
+
+    function get_arguments(uint64 job_id, uint64 task_id) public view returns (bytes memory) {
+        require(job_id < jobs.length, "Unknown job id");
+        require(task_id < get_arguments_length(job_id), "Unknown task id for this job");
+        return jobs[job_id].tasks[task_id].arguments;
+    }
+
+    function set_result(uint64 job_id, uint64 task_id, bytes memory result) public {
+        require(job_id < jobs.length, "Unknown job id");
+        require(task_id < get_arguments_length(job_id), "Unknown task id for this job");
+        require(jobs[job_id].tasks[task_id].result.length == 0, "Already has a result");
+
+        jobs[job_id].tasks[task_id].result.push(result);
+        emit TaskNewResult(job_id, task_id, result);
+    }
+
+    function get_result(uint64 job_id, uint64 task_id) public view returns (bytes memory) {
+        require(job_id < jobs.length, "Unknown job id");
+        require(task_id < get_arguments_length(job_id), "Unknown task id for this job");
+        require(jobs[job_id].tasks[task_id].result.length > 0, "No result");
+        return jobs[job_id].tasks[task_id].result[0];
+    }
+
     event JobNew(uint64 job_id);
-    event TaskDone(uint64 job_id, uint64 task_id);
+    event TaskNewResult(uint64 job_id, uint64 task_id, bytes result);
 }
