@@ -6,6 +6,8 @@ pub enum EventIn {
     Ping,
     /// Sending a message to the peer (new request or answer to one from the exterior).
     Handler(PeerId, HandlerIn<QueryId>),
+    /// Asks worker `peer_id` to execute given task with given arguments.
+    TasksExecute(PeerId, HashMap<Vec<u8>, worker::TaskExecute>),
     /// Request statuses of given task ids, expects a [`EventOut::TasksPong`] in return.
     TasksPing(PeerId, Vec<Vec<u8>>),
     /// Answer of a [`EventOut::TasksPing`] request.
@@ -107,7 +109,7 @@ pub struct WorkerData {
 pub type NodeTypeData = NodeTypeContainer<ManagerData, WorkerData>;
 
 /// Peer data as used by [`BalthBehaviour`].
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct Peer {
     pub peer_id: PeerId,
     /// Known addresses
@@ -119,6 +121,8 @@ pub struct Peer {
     pub dialed: bool,
     /// Defines the node type if it is known.
     pub node_type: Option<NodeTypeContainer<(), Option<WorkerSpecs>>>,
+    /// Messages waiting for a completed dial to be sent.
+    pub pending_messages: Vec<HandlerIn<QueryId>>,
 }
 
 impl Peer {
@@ -129,6 +133,7 @@ impl Peer {
             endpoint: None,
             dialed: false,
             node_type: None,
+            pending_messages: Vec::new(),
         }
     }
 

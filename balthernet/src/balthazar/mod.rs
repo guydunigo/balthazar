@@ -52,6 +52,8 @@ enum InternalEvent<TUserData> {
     AskNodeType(PeerId),
     /// Generates an event towards the Swarm.
     NetworkBehaviourAction(NetworkBehaviourAction<HandlerIn<QueryId>, EventOut>),
+    /// Send message to peer.
+    SendMessage(PeerId, HandlerIn<QueryId>),
 }
 
 /// Type to identify our queries within [`Balthandler`] to link answers to queries.
@@ -158,6 +160,22 @@ impl BalthBehaviour {
             .clone()
     }
 
+    fn send_message_or_dial(
+        &mut self,
+        peer_id: PeerId,
+        event: HandlerIn<QueryId>,
+    ) -> Poll<NetworkBehaviourAction<HandlerIn<QueryId>, EventOut>> {
+        let peer = self.get_peer_or_insert(&peer_id);
+        let mut peer = peer.write().unwrap();
+
+        if peer.endpoint.is_some() {
+            Poll::Ready(NetworkBehaviourAction::SendEvent { peer_id, event })
+        } else {
+            peer.pending_messages.push(event);
+            Poll::Ready(NetworkBehaviourAction::DialPeer { peer_id })
+        }
+    }
+
     /*
     pub fn events(&self) -> &VecDeque<InternalEvent> {
         &self.events
@@ -212,6 +230,10 @@ impl NetworkBehaviour for BalthBehaviour {
             }
 
             peer.endpoint = Some(endpoint.clone());
+            peer.pending_messages.drain(..).for_each(|msg| {
+                self.events
+                    .push_front(InternalEvent::SendMessage(peer_id.clone(), msg))
+            });
 
             self.inject_generate_event(EventOut::PeerConnected(peer_id, endpoint));
         }
@@ -270,49 +292,6 @@ impl NetworkBehaviour for BalthBehaviour {
         cx: &mut Context,
         _params: &mut impl PollParameters
 ) -> Poll<NetworkBehaviourAction<<<Self::ProtocolsHandler as IntoProtocolsHandler>::Handler as ProtocolsHandler>::InEvent, Self::OutEvent>>{
-        // Go through the queued events and handle them:
-        while let Some(internal_evt) = self.events.pop_back() {
-            let answer = match internal_evt {
-                InternalEvent::NetworkBehaviourAction(action) => Poll::Ready(action),
-                InternalEvent::Mdns(peer_id, address) => {
-                    let peer = self.get_peer_or_insert(&peer_id);
-                    let mut peer = peer.write().unwrap();
-                    peer.addrs.insert(address);
-
-                    if !peer.dialed {
-                        peer.dialed = true;
-                        Poll::Ready(NetworkBehaviourAction::DialPeer { peer_id })
-                    } else {
-                        Poll::Pending
-                    }
-                }
-                // TODO: separate function for handling Handlers events
-                // TODO: better match `answers` to `requests`?
-                InternalEvent::Handler(peer_id, event) => handler_event(self, peer_id, event),
-                InternalEvent::AskNodeType(peer_id)
-                    if self
-                        .get_peer_or_insert(&peer_id)
-                        .read()
-                        .unwrap()
-                        .node_type
-                        .is_none() =>
-                {
-                    Poll::Ready(NetworkBehaviourAction::SendEvent {
-                        peer_id,
-                        event: HandlerIn::NodeTypeRequest {
-                            node_type: (&self.node_type_data).into(),
-                            user_data: self.next_query_unique_id(),
-                        },
-                    })
-                }
-                InternalEvent::AskNodeType(_) => Poll::Pending,
-            };
-
-            if let Poll::Ready(_) = answer {
-                return answer;
-            }
-        }
-
         // Reads the inbound channel to handle events:
         while let Poll::Ready(event_opt) = self.inbound_rx.poll_recv(cx) {
             let action = match event_opt {
@@ -322,14 +301,19 @@ impl NetworkBehaviour for BalthBehaviour {
                 Some(EventIn::Handler(peer_id, event)) => {
                     Poll::Ready(NetworkBehaviourAction::SendEvent { peer_id, event })
                 }
+                Some(EventIn::TasksExecute(peer_id, tasks)) => {
+                    let event = HandlerIn::TasksExecute {
+                        tasks,
+                        user_data: self.next_query_unique_id(),
+                    };
+                    self.send_message_or_dial(peer_id, event)
+                }
                 Some(EventIn::TasksPing(peer_id, task_ids)) => {
-                    Poll::Ready(NetworkBehaviourAction::SendEvent {
-                        peer_id,
-                        event: HandlerIn::TasksPing {
-                            task_ids,
-                            user_data: self.next_query_unique_id(),
-                        },
-                    })
+                    let event = HandlerIn::TasksPing {
+                        task_ids,
+                        user_data: self.next_query_unique_id(),
+                    };
+                    self.send_message_or_dial(peer_id, event)
                 }
                 Some(EventIn::TasksPong {
                     statuses,
@@ -362,14 +346,13 @@ impl NetworkBehaviour for BalthBehaviour {
                         ..
                     }) = self.node_type_data
                     {
-                        Poll::Ready(NetworkBehaviourAction::SendEvent {
-                            peer_id: manager.clone().read().unwrap().peer_id.clone(),
-                            event: HandlerIn::TaskStatus {
-                                task_id,
-                                status,
-                                user_data: self.next_query_unique_id(),
-                            },
-                        })
+                        let peer_id = manager.clone().read().unwrap().peer_id.clone();
+                        let event = HandlerIn::TaskStatus {
+                            task_id,
+                            status,
+                            user_data: self.next_query_unique_id(),
+                        };
+                        self.send_message_or_dial(peer_id, event)
                     } else {
                         Poll::Ready(NetworkBehaviourAction::GenerateEvent(EventOut::NoManager(
                             EventIn::TaskStatus(task_id, status),
@@ -382,6 +365,52 @@ impl NetworkBehaviour for BalthBehaviour {
 
             if let Poll::Ready(_) = action {
                 return action;
+            }
+        }
+
+        // Go through the queued events and handle them:
+        while let Some(internal_evt) = self.events.pop_back() {
+            let answer = match internal_evt {
+                InternalEvent::NetworkBehaviourAction(action) => Poll::Ready(action),
+                InternalEvent::Mdns(peer_id, address) => {
+                    let peer = self.get_peer_or_insert(&peer_id);
+                    let mut peer = peer.write().unwrap();
+                    peer.addrs.insert(address);
+
+                    if !peer.dialed {
+                        peer.dialed = true;
+                        Poll::Ready(NetworkBehaviourAction::DialPeer { peer_id })
+                    } else {
+                        Poll::Pending
+                    }
+                }
+                InternalEvent::SendMessage(peer_id, event) => {
+                    self.send_message_or_dial(peer_id, event)
+                }
+                // TODO: separate function for handling Handlers events
+                // TODO: better match `answers` to `requests`?
+                InternalEvent::Handler(peer_id, event) => handler_event(self, peer_id, event),
+                InternalEvent::AskNodeType(peer_id)
+                    if self
+                        .get_peer_or_insert(&peer_id)
+                        .read()
+                        .unwrap()
+                        .node_type
+                        .is_none() =>
+                {
+                    Poll::Ready(NetworkBehaviourAction::SendEvent {
+                        peer_id,
+                        event: HandlerIn::NodeTypeRequest {
+                            node_type: (&self.node_type_data).into(),
+                            user_data: self.next_query_unique_id(),
+                        },
+                    })
+                }
+                InternalEvent::AskNodeType(_) => Poll::Pending,
+            };
+
+            if let Poll::Ready(_) = answer {
+                return answer;
             }
         }
 

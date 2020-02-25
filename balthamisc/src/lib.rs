@@ -5,6 +5,8 @@ use futures::future::poll_fn;
 use std::{future::Future, pin::Pin, thread};
 use tokio::sync::oneshot::{self, error::RecvError};
 
+pub use proto::worker::TaskExecute;
+
 mod node_type;
 pub use node_type::{NodeType, NodeTypeContainer};
 mod task_status;
