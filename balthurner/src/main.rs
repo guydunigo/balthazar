@@ -1,38 +1,17 @@
 extern crate balthurner;
 extern crate wasmer_runtime;
 
-use balthurner::{wasm, Runner, RunnerResult, WasmRunner};
-use std::time::Instant;
-use std::{env, fs};
-
-const NB_TIMES: u128 = 10;
+use balthurner::{wasm, RunnerResult};
+use std::env;
 
 fn main() -> RunnerResult<(), wasm::Error> {
-    let wasm = {
-        let file_name = env::args().nth(1).expect("No wasm file provided.");
-
-        fs::read(file_name).expect("Could not read file")
-    };
-    let inst_read = Instant::now();
-
+    let file_name = env::args().nth(1).expect("No wasm file provided.");
     let args = env::args().nth(2).expect("No arguments provided.");
+    let nb_times = env::args()
+        .nth(3)
+        .unwrap_or_else(|| "1".to_string())
+        .parse()
+        .expect("Third argument isn't an integer.");
 
-    let result = WasmRunner::run(&wasm[..], args.as_bytes())?;
-    for _ in 0..NB_TIMES {
-        WasmRunner::run(&wasm[..], args.as_bytes())?;
-    }
-    let inst_res = Instant::now();
-
-    println!(
-        "{:?} gives {:?}",
-        args,
-        String::from_utf8_lossy(&result[..])
-    );
-    println!(
-        "times:\n- running all {}ms\n- running average {}ms",
-        (inst_res - inst_read).as_millis(),
-        (inst_res - inst_read).as_millis() / NB_TIMES,
-    );
-
-    Ok(())
+    balthurner::run(file_name.into(), args.into_bytes(), nb_times)
 }

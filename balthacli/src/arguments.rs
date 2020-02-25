@@ -11,7 +11,7 @@ use lib::{
     store::{Multiaddr, StorageType},
     BalthazarConfig, RunMode,
 };
-use std::str::FromStr;
+use std::{path::PathBuf, str::FromStr};
 
 #[derive(Clap)]
 #[clap(rename_all = "kebab-case")]
@@ -23,16 +23,16 @@ pub enum Subcommand {
         /// If not defined, will accept any manager.
         /// (e.g. `/ip4/10.0.0.1/tcp/5003`, `/p2p/[PEER_ID]`, `/ip4/10.0.0.1/tcp/5003/p2p/[PEER_ID]`,
         /// ...)
-        #[clap(short, long, requires("worker"))]
-        authorized_managers: Option<Vec<Libp2pMultiaddr>>,
+        #[clap(short, long, requires("worker"), number_of_values(1))]
+        authorized_managers: Vec<Libp2pMultiaddr>,
     },
     /// Starts as a manager node.
     Manager {
         /// Provide a wasm program that will be passed to workers.
-        #[clap(long, conflicts_with("worker"), requires("args"))]
-        wasm: Option<String>,
+        #[clap(name = "wasm", short, long, requires("args"))]
+        wasm_file_addr: Option<String>,
         /// Arguments to pass to the program.
-        #[clap(long, conflicts_with("worker"))]
+        #[clap(short, long)]
         args: Option<String>,
     },
     /// Interract with the blockchain.
@@ -40,7 +40,14 @@ pub enum Subcommand {
     /// Interract with the storages directly.
     Storage,
     /// Run programs.
-    Runner,
+    Runner {
+        /// Provide a wasm program that will be passed to workers.
+        #[clap(name = "wasm", requires("args"))]
+        wasm_file_path: PathBuf,
+        /// Arguments to pass to the program.
+        args: String,
+        nb_times: Option<usize>,
+    },
 }
 
 impl Into<RunMode> for &Subcommand {
@@ -49,7 +56,15 @@ impl Into<RunMode> for &Subcommand {
             Subcommand::Worker { .. } | Subcommand::Manager { .. } => RunMode::Node,
             Subcommand::Blockchain => RunMode::Blockchain,
             Subcommand::Storage => RunMode::Storage,
-            Subcommand::Runner => RunMode::Runner,
+            Subcommand::Runner {
+                wasm_file_path,
+                args,
+                nb_times,
+            } => RunMode::Runner(
+                wasm_file_path.clone(),
+                args.clone().into_bytes(),
+                nb_times.unwrap_or(1),
+            ),
         }
     }
 }
@@ -82,8 +97,8 @@ pub struct BalthazarArgs {
     )]
     listen_addr: Option<Libp2pMultiaddr>,
     /// Peer to connect to when started (e.g. `/ip4/0.0.0.0/tcp/5003`).
-    #[clap(name = "peer", short, long)]
-    peers: Option<Vec<Libp2pMultiaddr>>,
+    #[clap(name = "peer", short, long, number_of_values(1))]
+    peers: Vec<Libp2pMultiaddr>,
 
     /// Address to connect to a running IPFS daemon, default: address in file `~/.ipfs/api` or `/ip4/127.0.0.1/5001`.
     #[clap(short, long)]
@@ -111,28 +126,27 @@ impl std::convert::TryInto<(RunMode, BalthazarConfig)> for BalthazarArgs {
             } => {
                 config.set_node_type(NodeType::Worker);
 
-                if let Some(authorized_managers) = authorized_managers {
-                    if let NodeTypeContainer::Worker(ref mut worker_mut) =
-                        config.net_mut().node_type_configuration_mut()
-                    {
-                        worker_mut
-                            .authorized_managers_mut()
-                            .extend_from_slice(&authorized_managers[..]);
-                    } else {
-                        panic!("`authorized_manager` was defined when node type isn't `Worker`.");
-                    }
-
-                    // TODO: check the addresses before ?
-                    config
-                        .net_mut()
-                        .bootstrap_peers_mut()
+                if let NodeTypeContainer::Worker(ref mut worker_mut) =
+                    config.net_mut().node_type_configuration_mut()
+                {
+                    worker_mut
+                        .authorized_managers_mut()
                         .extend_from_slice(&authorized_managers[..]);
                 }
+
+                // TODO: check the addresses before ?
+                config
+                    .net_mut()
+                    .bootstrap_peers_mut()
+                    .extend_from_slice(&authorized_managers[..]);
             }
-            Subcommand::Manager { wasm, args } => {
+            Subcommand::Manager {
+                wasm_file_addr,
+                args,
+            } => {
                 config.set_node_type(NodeType::Manager);
 
-                if let (Some(wasm), Some(args)) = (wasm, args) {
+                if let (Some(wasm), Some(args)) = (wasm_file_addr, args) {
                     *config.wasm_mut() = Some((wasm.into_bytes(), args.into_bytes()));
                 }
             }
@@ -147,9 +161,7 @@ impl std::convert::TryInto<(RunMode, BalthazarConfig)> for BalthazarArgs {
                 net.set_listen_addr(Some(listen_addr));
             }
 
-            if let Some(peers) = self.peers {
-                net.bootstrap_peers_mut().extend_from_slice(&peers[..]);
-            }
+            net.bootstrap_peers_mut().extend_from_slice(&self.peers[..]);
         }
         {
             let store = config.storage_mut();

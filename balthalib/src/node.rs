@@ -1,14 +1,12 @@
-use futures::{future, join, FutureExt, StreamExt};
+use futures::{future, FutureExt, StreamExt};
 use std::{
     collections::HashMap,
     future::Future,
-    path::Path,
     time::{SystemTime, UNIX_EPOCH},
 };
-use tokio::{fs, runtime::Runtime, sync::mpsc::Sender};
+use tokio::{runtime::Runtime, sync::mpsc::Sender};
 
 use misc::{NodeType, TaskErrorKind, TaskExecute, TaskStatus, WorkerSpecs};
-use net::identity::Keypair;
 use run::{Runner, WasmRunner};
 use store::{Storage, StoragesWrapper};
 
@@ -18,6 +16,7 @@ pub fn run(config: BalthazarConfig) -> Result<(), Error> {
     Runtime::new().unwrap().block_on(Balthazar::run(config))
 }
 
+/*
 // TODO: cleaner and in self module
 async fn get_keypair(keyfile_path: &Path) -> Result<Keypair, Error> {
     let mut bytes = fs::read(keyfile_path)
@@ -25,6 +24,7 @@ async fn get_keypair(keyfile_path: &Path) -> Result<Keypair, Error> {
         .map_err(Error::KeyPairReadFileError)?;
     Keypair::rsa_from_pkcs8(&mut bytes).map_err(Error::KeyPairDecodingError)
 }
+*/
 
 struct Balthazar;
 /*
@@ -63,7 +63,7 @@ impl Balthazar {
             // swarm_out.for_each(|e| push_event(balth.events_in.clone(), BalthEvent::SwarmEvent(e)));
             swarm_out.for_each_concurrent(None, |e| Balthazar::handle_event(&config, swarm_in.clone(), e));
 
-        join!(swarm_fut);
+        swarm_fut.await;
 
         Ok(())
     }

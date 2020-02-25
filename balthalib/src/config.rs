@@ -1,5 +1,6 @@
 use misc::NodeType;
 use net::NetConfig;
+use std::path::PathBuf;
 use store::StorageConfig;
 
 const CONFIG_VERSION: &str = "0.1.0";
@@ -15,7 +16,7 @@ pub enum RunMode {
     /// Interract with the storages directly.
     Storage,
     /// Run programs and test them.
-    Runner,
+    Runner(PathBuf, Vec<u8>, usize),
 }
 
 impl Default for RunMode {

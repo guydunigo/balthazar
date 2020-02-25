@@ -5,7 +5,9 @@ extern crate futures;
 
 use futures::future::{BoxFuture, FutureExt};
 use misc::{spawn_thread_async, SpawnThreadError};
-use std::fmt;
+use std::{fmt, fs, path::PathBuf};
+
+use std::time::Instant;
 
 pub mod wasm;
 pub use wasm::WasmRunner;
@@ -111,6 +113,35 @@ pub trait Runner: Send + Sync {
         }
         .boxed()
     }
+}
+
+pub fn run(
+    wasm_file_path: PathBuf,
+    args: Vec<u8>,
+    nb_times: usize,
+) -> RunnerResult<(), wasm::Error> {
+    let wasm = fs::read(wasm_file_path).expect("Could not read file");
+    let inst_read = Instant::now();
+    let nb_times = if nb_times == 0 { 1 } else { nb_times };
+
+    let result = WasmRunner::run(&wasm[..], &args[..])?;
+    for _ in 0..(nb_times - 1) {
+        WasmRunner::run(&wasm[..], &args[..])?;
+    }
+    let inst_res = Instant::now();
+
+    println!(
+        "{:?} gives {:?}",
+        String::from_utf8_lossy(&args[..]),
+        String::from_utf8_lossy(&result[..])
+    );
+    println!(
+        "times:\n- running all {}ms\n- running average {}ms",
+        (inst_res - inst_read).as_millis(),
+        (inst_res - inst_read).as_millis() / (nb_times as u128),
+    );
+
+    Ok(())
 }
 
 #[cfg(test)]

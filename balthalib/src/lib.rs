@@ -17,6 +17,7 @@ pub enum Error {
     KeyPairReadFileError(io::Error),
     KeyPairDecodingError(DecodingError),
     StorageCreationError(store::StoragesWrapperCreationError),
+    RunnerError(run::RunnerError<run::wasm::Error>),
 }
 
 impl fmt::Display for Error {
@@ -31,13 +32,23 @@ impl From<store::StoragesWrapperCreationError> for Error {
     }
 }
 
+impl From<run::RunnerError<run::wasm::Error>> for Error {
+    fn from(src: run::RunnerError<run::wasm::Error>) -> Self {
+        Error::RunnerError(src)
+    }
+}
+
 pub fn run(mode: RunMode, config: BalthazarConfig) -> Result<(), Error> {
     match mode {
-        RunMode::Node => node::run(config),
-        RunMode::Blockchain => Ok(()),
-        RunMode::Storage => Ok(()),
-        RunMode::Runner => Ok(()),
+        RunMode::Node => node::run(config)?,
+        RunMode::Blockchain => {}
+        RunMode::Storage => {}
+        RunMode::Runner(wasm_file_path, args, nb_times) => {
+            run::run(wasm_file_path, args, nb_times)?
+        }
     }
+
+    Ok(())
 }
 
 #[cfg(test)]
