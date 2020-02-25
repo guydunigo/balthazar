@@ -1,6 +1,6 @@
+use chain::ChainConfig;
 use misc::NodeType;
 use net::NetConfig;
-use std::path::PathBuf;
 use store::StorageConfig;
 
 const CONFIG_VERSION: &str = "0.1.0";
@@ -16,7 +16,7 @@ pub enum RunMode {
     /// Interract with the storages directly.
     Storage,
     /// Run programs and test them.
-    Runner(PathBuf, Vec<u8>, usize),
+    Runner(Vec<u8>, Vec<u8>, usize),
 }
 
 impl Default for RunMode {
@@ -34,6 +34,7 @@ pub struct BalthazarConfig {
     node_type: NodeType,
     storage: StorageConfig,
     net: NetConfig,
+    chain: ChainConfig,
     wasm: Option<(Vec<u8>, Vec<u8>)>,
 }
 
@@ -44,6 +45,7 @@ impl Default for BalthazarConfig {
             node_type: NodeType::default(),
             storage: StorageConfig::default(),
             net: NetConfig::default(),
+            chain: ChainConfig::default(),
             wasm: None,
         }
     }
@@ -76,10 +78,17 @@ impl BalthazarConfig {
         &mut self.net
     }
 
+    pub fn chain(&self) -> &ChainConfig {
+        &self.chain
+    }
+    pub fn chain_mut(&mut self) -> &mut ChainConfig {
+        &mut self.chain
+    }
+
     pub fn wasm(&self) -> &Option<(Vec<u8>, Vec<u8>)> {
         &self.wasm
     }
-    pub fn wasm_mut(&mut self) -> &mut Option<(Vec<u8>, Vec<u8>)> {
-        &mut self.wasm
+    pub fn set_wasm(&mut self, new: Option<(Vec<u8>, Vec<u8>)>) {
+        self.wasm = new;
     }
 }

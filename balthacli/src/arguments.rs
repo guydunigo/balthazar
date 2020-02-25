@@ -6,12 +6,27 @@ extern crate multiaddr;
 use clap::{arg_enum, Clap};
 // TODO: use uniform Multiaddr
 use lib::{
+    chain::Address,
     misc::{NodeType, NodeTypeContainer},
     net::Multiaddr as Libp2pMultiaddr,
+    store::ipfs::IpfsStorageCreationError,
     store::{Multiaddr, StorageType},
     BalthazarConfig, RunMode,
 };
-use std::{path::PathBuf, str::FromStr};
+use std::{fs::read, io, path::PathBuf, str::FromStr};
+
+#[derive(Debug)]
+pub enum ParseArgsError {
+    IpfsError(IpfsStorageCreationError),
+    ContractJobsAbiFileReadError(io::Error),
+    WasmProgramFileReadError(io::Error),
+}
+
+impl From<IpfsStorageCreationError> for ParseArgsError {
+    fn from(e: IpfsStorageCreationError) -> Self {
+        ParseArgsError::IpfsError(e)
+    }
+}
 
 #[derive(Clap)]
 #[clap(rename_all = "kebab-case")]
@@ -42,7 +57,6 @@ pub enum Subcommand {
     /// Run programs.
     Runner {
         /// Provide a wasm program that will be passed to workers.
-        #[clap(name = "wasm", requires("args"))]
         wasm_file_path: PathBuf,
         /// Arguments to pass to the program.
         args: String,
@@ -50,9 +64,11 @@ pub enum Subcommand {
     },
 }
 
-impl Into<RunMode> for &Subcommand {
-    fn into(self) -> RunMode {
-        match self {
+impl std::convert::TryInto<RunMode> for &Subcommand {
+    type Error = ParseArgsError;
+
+    fn try_into(self) -> Result<RunMode, ParseArgsError> {
+        let res = match self {
             Subcommand::Worker { .. } | Subcommand::Manager { .. } => RunMode::Node,
             Subcommand::Blockchain => RunMode::Blockchain,
             Subcommand::Storage => RunMode::Storage,
@@ -61,17 +77,13 @@ impl Into<RunMode> for &Subcommand {
                 args,
                 nb_times,
             } => RunMode::Runner(
-                wasm_file_path.clone(),
+                read(wasm_file_path.clone()).map_err(ParseArgsError::WasmProgramFileReadError)?,
                 args.clone().into_bytes(),
                 nb_times.unwrap_or(1),
             ),
-        }
-    }
-}
+        };
 
-impl Into<RunMode> for Subcommand {
-    fn into(self) -> RunMode {
-        (&self).into()
+        Ok(res)
     }
 }
 
@@ -90,8 +102,9 @@ pub struct BalthazarArgs {
     /// Set a address to listen on, default : `/ip4/0.0.0.0/tcp/5003`.
     // TODO: extract value from const
     #[clap(
-        short = "l",
-        long = "listen",
+        name = "listen",
+        short,
+        long,
         conflicts_with("disable_listen"),
         group("Network")
     )]
@@ -110,15 +123,32 @@ pub struct BalthazarArgs {
         parse(try_from_str = try_parse_default_storage),
     )]
     default_storage: Option<StorageType>,
+
+    /// The address to connect the Ethereum json RPC endpoint.
+    /// Default to `http://localhost:8545`.
+    #[clap(short, long)]
+    web3_http: Option<String>,
+    /// Ethereum address to use.
+    #[clap(name = "addr", long)]
+    ethereum_address: Option<Address>,
+    /// Password to the account.
+    #[clap(name = "pass", long, requires("addr"))]
+    ethereum_password: Option<String>,
+    /// Jobs contract address.
+    #[clap(name = "jobs_address", long, requires("jobs_abi"))]
+    contract_jobs_address: Option<Address>,
+    /// Jobs contract path to json ABI file.
+    #[clap(name = "jobs_abi", long)]
+    contract_jobs_abi: Option<PathBuf>,
 }
 
 impl std::convert::TryInto<(RunMode, BalthazarConfig)> for BalthazarArgs {
-    type Error = lib::store::ipfs::IpfsStorageCreationError;
+    type Error = ParseArgsError;
 
     fn try_into(self) -> Result<(RunMode, BalthazarConfig), Self::Error> {
         let mut config = BalthazarConfig::default();
 
-        let run_mode = (&self.subcommand).into();
+        let run_mode = (&self.subcommand).try_into()?;
 
         match self.subcommand {
             Subcommand::Worker {
@@ -147,7 +177,7 @@ impl std::convert::TryInto<(RunMode, BalthazarConfig)> for BalthazarArgs {
                 config.set_node_type(NodeType::Manager);
 
                 if let (Some(wasm), Some(args)) = (wasm_file_addr, args) {
-                    *config.wasm_mut() = Some((wasm.into_bytes(), args.into_bytes()));
+                    config.set_wasm(Some((wasm.into_bytes(), args.into_bytes())));
                 }
             }
             _ => {}
@@ -170,6 +200,24 @@ impl std::convert::TryInto<(RunMode, BalthazarConfig)> for BalthazarArgs {
             }
             if let Some(default_storage) = self.default_storage {
                 store.set_default_storage(default_storage);
+            }
+        }
+        {
+            let chain = config.chain_mut();
+            if let Some(web3_http) = self.web3_http {
+                chain.set_web3_http(web3_http);
+            }
+            if let Some(ethereum_address) = self.ethereum_address {
+                chain.set_ethereum_address(Some(ethereum_address));
+            }
+            if let Some(ethereum_password) = self.ethereum_password {
+                chain.set_ethereum_password(Some(ethereum_password));
+            }
+            if let (Some(address), Some(abi_path)) =
+                (self.contract_jobs_address, self.contract_jobs_abi)
+            {
+                let abi = read(abi_path).map_err(ParseArgsError::ContractJobsAbiFileReadError)?;
+                chain.set_contract_jobs(Some((address, abi)));
             }
         }
 

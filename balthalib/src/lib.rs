@@ -1,3 +1,4 @@
+pub extern crate balthachain as chain;
 pub extern crate balthamisc as misc;
 pub extern crate balthastore as store;
 pub extern crate balthernet as net;
@@ -41,7 +42,7 @@ impl From<run::RunnerError<run::wasm::Error>> for Error {
 pub fn run(mode: RunMode, config: BalthazarConfig) -> Result<(), Error> {
     match mode {
         RunMode::Node => node::run(config)?,
-        RunMode::Blockchain => {}
+        RunMode::Blockchain => chain::run(config.chain()),
         RunMode::Storage => {}
         RunMode::Runner(wasm_file_path, args, nb_times) => {
             run::run(wasm_file_path, args, nb_times)?

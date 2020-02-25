@@ -234,6 +234,7 @@ dependencies = [
 name = "balthalib"
 version = "0.2.0"
 dependencies = [
+ "balthachain",
  "balthamisc",
  "balthastore",
  "balthernet",

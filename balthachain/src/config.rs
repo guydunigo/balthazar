@@ -1,10 +1,9 @@
-use std::path::PathBuf;
-use web3::types::Address;
+pub use web3::types::Address;
 
 /// Configuration for the Ethereum RPC API.
 #[derive(Clone, Debug)]
 pub struct ChainConfig {
-    /// The address to connect the Ethereum API RPC endpoint.
+    /// The address to connect the Ethereum json RPC endpoint.
     /// Default to `http://localhost:8545`.
     web3_http: String,
     /// Ethereum address to use.
@@ -12,7 +11,7 @@ pub struct ChainConfig {
     /// Password to the account.
     ethereum_password: Option<String>,
     /// Jobs contract address and path to json ABI file.
-    contract_jobs: Option<(Address, PathBuf)>,
+    contract_jobs: Option<(Address, Vec<u8>)>,
 }
 
 impl Default for ChainConfig {
@@ -48,10 +47,10 @@ impl ChainConfig {
         self.ethereum_password = new;
     }
 
-    pub fn contract_jobs(&self) -> &Option<(Address, PathBuf)> {
+    pub fn contract_jobs(&self) -> &Option<(Address, Vec<u8>)> {
         &self.contract_jobs
     }
-    pub fn set_contract_jobs(&mut self, new: Option<(Address, PathBuf)>) {
+    pub fn set_contract_jobs(&mut self, new: Option<(Address, Vec<u8>)>) {
         self.contract_jobs = new;
     }
 }

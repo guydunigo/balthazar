@@ -2,7 +2,7 @@ extern crate balthurner;
 extern crate wasmer_runtime;
 
 use balthurner::{wasm, RunnerResult};
-use std::env;
+use std::{env, fs::read};
 
 fn main() -> RunnerResult<(), wasm::Error> {
     let file_name = env::args().nth(1).expect("No wasm file provided.");
@@ -13,5 +13,6 @@ fn main() -> RunnerResult<(), wasm::Error> {
         .parse()
         .expect("Third argument isn't an integer.");
 
-    balthurner::run(file_name.into(), args.into_bytes(), nb_times)
+    let wasm = read(file_name).expect("Could not read file");
+    balthurner::run(wasm, args.into_bytes(), nb_times)
 }
