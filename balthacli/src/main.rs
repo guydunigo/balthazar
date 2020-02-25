@@ -9,6 +9,6 @@ mod arguments;
 use arguments::BalthazarArgs;
 
 fn main() -> Result<(), lib::Error> {
-    let args = BalthazarArgs::parse();
-    balthalib::run(args.try_into().unwrap())
+    let (mode, args) = BalthazarArgs::parse().try_into().unwrap();
+    balthalib::run(mode, args)
 }

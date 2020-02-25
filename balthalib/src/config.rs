@@ -4,6 +4,26 @@ use store::StorageConfig;
 
 const CONFIG_VERSION: &str = "0.1.0";
 
+/// Mode to run.
+#[derive(Clone, Debug)]
+pub enum RunMode {
+    /// Start a full worker or manager node and connect it to the p2p network
+    /// (default).
+    Node,
+    /// Interract with the blockchain.
+    Blockchain,
+    /// Interract with the storages directly.
+    Storage,
+    /// Run programs and test them.
+    Runner,
+}
+
+impl Default for RunMode {
+    fn default() -> Self {
+        RunMode::Node
+    }
+}
+
 /// General configuration for Balthazar.
 // #[derive(Clap, Clone, Default, Debug)]
 // #[clap(version = "v1.0-beta")]
