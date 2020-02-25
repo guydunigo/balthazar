@@ -12,6 +12,7 @@ members = [
     "balthamisc",
     "balthurner",
     "balthwasm",
+    "balthachain",
 ]
 
 default-members = ["balthacli"]
