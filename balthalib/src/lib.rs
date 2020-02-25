@@ -5,18 +5,24 @@ pub extern crate balthurner as run;
 extern crate tokio;
 
 use futures::{future, join, FutureExt, StreamExt};
-use std::{fmt, future::Future, io, path::Path};
+use std::{
+    collections::HashMap,
+    fmt,
+    future::Future,
+    io,
+    path::Path,
+    time::{SystemTime, UNIX_EPOCH},
+};
 use tokio::{fs, runtime::Runtime, sync::mpsc::Sender};
 
-use misc::{NodeType, WorkerSpecs};
+use misc::{NodeType, TaskErrorKind, TaskExecute, TaskStatus, WorkerSpecs};
 use net::identity::{error::DecodingError, Keypair};
-use run::Runner;
+use run::{Runner, WasmRunner};
 use store::{Storage, StoragesWrapper};
 
 mod config;
 pub use config::BalthazarConfig;
 
-const TEST_JOB_ADDR: &[u8] = b"/ipfs/QmSpTZ2RmiwDgxRuG7KsFFRH6xxkSF2vtGYHu7PJoGoD3g";
 // const CHANNEL_SIZE: usize = 1024;
 
 #[derive(Debug)]
@@ -92,7 +98,7 @@ impl Balthazar {
 
         let swarm_fut =
             // swarm_out.for_each(|e| push_event(balth.events_in.clone(), BalthEvent::SwarmEvent(e)));
-            swarm_out.for_each(|e| Balthazar::handle_event(*config.node_type(), swarm_in.clone(), e));
+            swarm_out.for_each_concurrent(None, |e| Balthazar::handle_event(&config, swarm_in.clone(), e));
 
         join!(swarm_fut);
 
@@ -101,97 +107,142 @@ impl Balthazar {
 
     /// Handle events coming out of Swarm:
     fn handle_event(
-        node_type: NodeType,
+        config: &BalthazarConfig,
         swarm_in: Sender<net::EventIn>,
         event: net::EventOut,
     ) -> impl Future<Output = ()> {
-        eprintln!("S --- event: {:?}", event);
-
-        match (node_type, event) {
-            /*
+        match (config.node_type(), event) {
             (NodeType::Manager, net::EventOut::WorkerNew(peer_id)) => {
-                eprintln!(
-                    "M --- Sending task `{}` with parameters `{}` to worker `{}`",
-                    String::from_utf8_lossy(TEST_JOB_ADDR),
-                    6,
-                    peer_id
-                );
-                send_msg_to_behaviour(
-                    swarm_in,
-                    net::EventIn::ExecuteTask {
-                        peer_id,
-                        job_addr: Vec::from(TEST_JOB_ADDR),
-                        argument: 6,
-                    },
-                )
-                .boxed()
-            }
-            (_, net::EventOut::Handler(peer_id, net::HandlerOut::TaskResult { result, .. })) => {
-                eprintln!("S --- Result from peer `{}`: `{}`", peer_id, result);
-                future::ready(()).boxed()
-            }
-            (NodeType::Manager, net::EventOut::Handler(_, net::HandlerOut::ExecuteTask { .. })) => {
-                // Normally caught by NetworkBehaviour.
-                unreachable!();
+                if let Some((wasm, args)) = config.wasm() {
+                    let mut tasks = HashMap::new();
+                    tasks.insert(
+                        wasm.clone(),
+                        TaskExecute {
+                            job_id: wasm.clone(),
+                            task_id: wasm.clone(),
+                            job_addr: vec![wasm.clone()],
+                            arguments: args.clone(),
+                            timeout: 100,
+                        },
+                    );
+                    eprintln!(
+                        "M --- Sending task `{}` with parameters `{}` to worker `{}`",
+                        String::from_utf8_lossy(wasm),
+                        String::from_utf8_lossy(args),
+                        peer_id
+                    );
+                    send_msg_to_behaviour(swarm_in, net::EventIn::TasksExecute(peer_id, tasks))
+                        .boxed()
+                } else {
+                    future::ready(()).boxed()
+                }
             }
             (
-                NodeType::Worker,
-                net::EventOut::Handler(
+                _,
+                net::EventOut::TaskStatus {
                     peer_id,
-                    net::HandlerOut::ExecuteTask {
-                        job_addr,
-                        argument,
-                        request_id,
-                    },
-                ),
-            ) => async move {
-                let storage = StoragesWrapper::default();
-                let string_job_addr = String::from_utf8_lossy(&job_addr[..]);
-                eprintln!("W --- will get program `{}`...", string_job_addr);
-                match storage.get(&job_addr[..]).await {
-                    Ok(wasm) => {
-                        eprintln!("W --- received program `{}`.", string_job_addr);
-                        eprintln!(
-                            "W --- spawning wasm executor for `{}` with argument `{}`...",
-                            string_job_addr, argument
-                        );
-                        match Runner::new(wasm).run_async(argument).await {
-                            Ok(result) => {
-                                eprintln!(
-                                    "W --- result for `{}` with `{}`: `{}`",
-                                    string_job_addr, argument, result
-                                );
-                                send_msg_to_behaviour(
-                                    swarm_in,
-                                    net::EventIn::Handler(
-                                        peer_id,
-                                        net::HandlerIn::TaskResult { result, request_id },
+                    task_id,
+                    status,
+                },
+            ) => {
+                eprintln!(
+                    "M --- Task status from peer `{}` for task `{}`: `{:?}`",
+                    peer_id,
+                    String::from_utf8_lossy(&task_id[..]),
+                    status
+                );
+                future::ready(()).boxed()
+            }
+            (NodeType::Worker, net::EventOut::TasksExecute(tasks)) => async move {
+                for task in tasks.values() {
+                    send_msg_to_behaviour(
+                        swarm_in.clone(),
+                        net::EventIn::TaskStatus(task.task_id.clone(), TaskStatus::Pending),
+                    )
+                    .await;
+                    let storage = StoragesWrapper::default();
+                    let string_job_addr = String::from_utf8_lossy(&task.job_addr[0][..]);
+                    let string_arguments = String::from_utf8_lossy(&task.arguments[..]);
+
+                    eprintln!("W --- will get program `{}`...", string_job_addr);
+                    match storage.get(&task.job_addr[0][..]).await {
+                        Ok(wasm) => {
+                            eprintln!("W --- received program `{}`.", string_job_addr);
+                            eprintln!(
+                                "W --- spawning wasm executor for `{}` with argument `{}`...",
+                                string_job_addr, string_arguments,
+                            );
+
+                            send_msg_to_behaviour(
+                                swarm_in.clone(),
+                                net::EventIn::TaskStatus(
+                                    task.task_id.clone(),
+                                    TaskStatus::Started(
+                                        SystemTime::now()
+                                            .duration_since(UNIX_EPOCH)
+                                            .unwrap()
+                                            .as_secs()
+                                            as i64,
                                     ),
-                                )
-                                .await;
-                            }
-                            Err(error) => {
-                                eprintln!(
-                                    "W --- error for `{}` with `{}`: `{:?}`",
-                                    String::from_utf8_lossy(&job_addr[..]),
-                                    argument,
-                                    error
-                                );
+                                ),
+                            )
+                            .await;
+
+                            match WasmRunner::run_async(&wasm[..], &task.arguments[..]).await {
+                                Ok(result) => {
+                                    eprintln!(
+                                        "W --- task result for `{}` with `{}`: `{}`",
+                                        string_job_addr,
+                                        string_arguments,
+                                        String::from_utf8_lossy(&result[..])
+                                    );
+                                    send_msg_to_behaviour(
+                                        swarm_in.clone(),
+                                        net::EventIn::TaskStatus(
+                                            task.task_id.clone(),
+                                            TaskStatus::Completed(result),
+                                        ),
+                                    )
+                                    .await;
+                                }
+                                Err(error) => {
+                                    send_msg_to_behaviour(
+                                        swarm_in.clone(),
+                                        net::EventIn::TaskStatus(
+                                            task.task_id.clone(),
+                                            TaskStatus::Error(TaskErrorKind::Running),
+                                        ),
+                                    )
+                                    .await;
+                                    eprintln!(
+                                        "W --- task error for `{}` with `{}`: `{:?}`",
+                                        string_job_addr, string_arguments, error
+                                    );
+                                }
                             }
                         }
-                    }
-                    Err(error) => {
-                        eprintln!(
-                            "W --- error while fetching `{}`: `{:?}`",
-                            String::from_utf8_lossy(&job_addr[..]),
-                            error
-                        );
+                        Err(error) => {
+                            send_msg_to_behaviour(
+                                swarm_in.clone(),
+                                net::EventIn::TaskStatus(
+                                    task.task_id.clone(),
+                                    TaskStatus::Error(TaskErrorKind::Download),
+                                ),
+                            )
+                            .await;
+                            eprintln!(
+                                "W --- error while fetching `{}`: `{:?}`",
+                                string_job_addr, error
+                            );
+                        }
                     }
                 }
             }
             .boxed(),
-            */
-            _ => future::ready(()).boxed(),
+            (_, event) => {
+                eprintln!("S --- event: {:?}", event);
+                future::ready(()).boxed()
+            }
         }
     }
 }
@@ -209,7 +260,7 @@ async fn send_msg_to_behaviour(mut swarm_in: Sender<net::EventIn>, msg: net::Eve
     swarm_in
         .send(msg)
         .await
-        .expect("BalthBehaviour inbound channel has a problem (dropped?)")
+        .expect("BalthBehaviour inbound channel has a problem (dropped?)");
 }
 
 #[cfg(test)]

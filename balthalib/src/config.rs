@@ -13,6 +13,7 @@ pub struct BalthazarConfig {
     node_type: NodeType,
     storage: StorageConfig,
     net: NetConfig,
+    wasm: Option<(Vec<u8>, Vec<u8>)>,
 }
 
 impl Default for BalthazarConfig {
@@ -22,6 +23,7 @@ impl Default for BalthazarConfig {
             node_type: NodeType::default(),
             storage: StorageConfig::default(),
             net: NetConfig::default(),
+            wasm: None,
         }
     }
 }
@@ -51,5 +53,12 @@ impl BalthazarConfig {
     }
     pub fn net_mut(&mut self) -> &mut NetConfig {
         &mut self.net
+    }
+
+    pub fn wasm(&self) -> &Option<(Vec<u8>, Vec<u8>)> {
+        &self.wasm
+    }
+    pub fn wasm_mut(&mut self) -> &mut Option<(Vec<u8>, Vec<u8>)> {
+        &mut self.wasm
     }
 }

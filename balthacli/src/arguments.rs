@@ -1,6 +1,6 @@
 //! Look at [the `clap` documentation](https://github.com/clap-rs/clap)
 //! and [the `stroctopt` documentation](https://docs.rs/structopt/0.3.9/structopt/)
-#[allow(clippy::redundant_clone)]
+#![allow(clippy::redundant_clone)]
 extern crate multiaddr;
 
 use clap::{arg_enum, Clap};
@@ -32,6 +32,11 @@ pub struct BalthazarArgs {
     /// Starts as a manager (default).
     #[clap(name = "manager", short, long, conflicts_with("worker"))]
     _is_manager: bool,
+    /// Provide a wasm program that will be passed to workers
+    #[clap(long, conflicts_with("worker"), requires("args"))]
+    wasm: Option<String>,
+    #[clap(long, conflicts_with("worker"))]
+    args: Option<String>,
     /// Starts as a worker.
     #[clap(name = "worker", short, long, conflicts_with("manager"))]
     is_worker: bool,
@@ -95,6 +100,8 @@ impl std::convert::TryInto<BalthazarConfig> for BalthazarArgs {
                     .bootstrap_peers_mut()
                     .extend_from_slice(&authorized_managers[..]);
             }
+        } else if let (Some(wasm), Some(args)) = (self.wasm, self.args) {
+            *config.wasm_mut() = Some((wasm.into_bytes(), args.into_bytes()));
         }
 
         {
