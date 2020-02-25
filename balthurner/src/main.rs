@@ -5,8 +5,9 @@ use balthurner::{wasm, Runner, RunnerResult, WasmRunner};
 use std::time::Instant;
 use std::{env, fs};
 
+const NB_TIMES: u128 = 10;
+
 fn main() -> RunnerResult<(), wasm::Error> {
-    let inst_start = Instant::now();
     let wasm = {
         let file_name = env::args().nth(1).expect("No wasm file provided.");
 
@@ -17,6 +18,9 @@ fn main() -> RunnerResult<(), wasm::Error> {
     let args = env::args().nth(2).expect("No arguments provided.");
 
     let result = WasmRunner::run(&wasm[..], args.as_bytes())?;
+    for _ in 0..NB_TIMES {
+        WasmRunner::run(&wasm[..], args.as_bytes())?;
+    }
     let inst_res = Instant::now();
 
     println!(
@@ -25,9 +29,9 @@ fn main() -> RunnerResult<(), wasm::Error> {
         String::from_utf8_lossy(&result[..])
     );
     println!(
-        "times:\n- read file {}ms\n- running {}ms",
-        (inst_read - inst_start).as_millis(),
+        "times:\n- running all {}ms\n- running average {}ms",
         (inst_res - inst_read).as_millis(),
+        (inst_res - inst_read).as_millis() / NB_TIMES,
     );
 
     Ok(())

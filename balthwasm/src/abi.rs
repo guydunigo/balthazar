@@ -31,6 +31,20 @@ fn get_arguments() -> LocalResult<Vec<u8>> {
     })
 }
 
+fn get_result() -> LocalResult<Vec<u8>> {
+    extern "C" {
+        fn host_get_result(ptr: *const u8, len: u32) -> WasmResult;
+    };
+
+    let mut buffer = Vec::with_capacity(BUFFER_CAPACITY);
+    let written_res = unsafe { host_get_result(buffer.as_ptr(), buffer.capacity() as u32) };
+
+    wasm_to_result(written_res).map(|o| {
+        unsafe { buffer.set_len(o as usize) };
+        buffer
+    })
+}
+
 fn send_result(res: &[u8]) -> LocalResult<()> {
     extern "C" {
         fn host_send_result(ptr: *const u8, len: usize) -> WasmResult;

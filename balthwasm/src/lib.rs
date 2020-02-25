@@ -11,6 +11,7 @@ fn my_run(arguments: Vec<u8>) -> LocalResult<Vec<u8>> {
     let number = args.parse().map_err(|_| 1)?;
 
     let result = abi::double_host(number);
+    // abi::sleep_secs(20);
 
     // serializing result
     let res_str = format!("{}", result);

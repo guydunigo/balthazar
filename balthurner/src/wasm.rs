@@ -101,6 +101,19 @@ mod host_abi {
         RESULT_ERROR
     }
 
+    pub fn get_result(
+        ctx: &mut Ctx,
+        result: Arc<RwLock<Vec<u8>>>,
+        ptr: WasmPtr<u8, Array>,
+        len: u32,
+    ) -> WasmResult {
+        if let Ok(result) = result.read() {
+            get_arguments(ctx, &result[..], ptr, len)
+        } else {
+            RESULT_ERROR
+        }
+    }
+
     // TODO: Set limit ?
     pub fn send_result(
         ctx: &mut Ctx,
@@ -139,6 +152,7 @@ impl WasmRunner {
     ) -> error::Result<Instance> {
         // TODO: avoid cloning arguments...
         let args = Vec::from(args);
+        let result_clone = result.clone();
 
         let import_objects = imports! {
             "env" => {
@@ -147,6 +161,8 @@ impl WasmRunner {
                 "mark" => func!(host_abi::mark),
                 "host_get_arguments" => func!(move |ctx: &mut Ctx, ptr: WasmPtr<u8, Array>, len: u32|
                     host_abi::get_arguments(ctx, &args[..], ptr, len)),
+                "host_get_result" => func!(move |ctx: &mut Ctx, ptr: WasmPtr<u8, Array>, len: u32|
+                    host_abi::get_result(ctx, result_clone.clone(), ptr, len)),
                 "host_send_result" => func!(move |ctx: &mut Ctx, ptr: WasmPtr<u8, Array>, len: u32|
                     host_abi::send_result(ctx, result.clone(), ptr, len)),
             },
