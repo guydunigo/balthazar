@@ -2,6 +2,16 @@ pragma solidity >=0.4.21 <0.7.0;
 pragma experimental ABIEncoderV2;
 
 contract Jobs {
+    uint public counter;
+
+    function set_counter(uint new_val) public {
+        counter = new_val;
+    }
+
+    function inc_counter() public {
+        counter++;
+    }
+
     enum ProgramKind { Wasm }
     enum BestMethod { Performance, Cost }
 
