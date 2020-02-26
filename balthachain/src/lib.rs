@@ -3,11 +3,12 @@ extern crate web3;
 
 mod config;
 pub use config::{Address, ChainConfig};
-use futures::{compat::Compat01As03, executor::block_on};
+use futures::{compat::Compat01As03, executor::block_on, future, StreamExt};
 pub use web3::types::{Block, BlockId, BlockNumber, H256, U256};
 use web3::{
     contract::{Contract, Error as ContractError},
-    transports::{EventLoopHandle, Http},
+    transports::{EventLoopHandle, WebSocket},
+    types::FilterBuilder,
     Web3,
 };
 
@@ -38,6 +39,7 @@ pub enum RunMode {
     JobsCounterGet,
     JobsCounterSet(u128),
     JobsCounterInc,
+    Subscribe,
 }
 
 pub fn run(mode: &RunMode, config: &ChainConfig) -> Result<(), Error> {
@@ -82,6 +84,9 @@ async fn run_async(mode: &RunMode, config: &ChainConfig) -> Result<(), Error> {
             chain.jobs_inc_counter().await?;
             println!("Counter increased.");
         }
+        RunMode::Subscribe => {
+            chain.subscribe().await?;
+        }
     }
 
     Ok(())
@@ -90,13 +95,13 @@ async fn run_async(mode: &RunMode, config: &ChainConfig) -> Result<(), Error> {
 #[derive(Debug)]
 pub struct Chain<'a> {
     eloop: EventLoopHandle,
-    web3: Web3<Http>,
+    web3: Web3<WebSocket>,
     config: &'a ChainConfig,
 }
 
 impl<'a> Chain<'a> {
     pub fn new(config: &'a ChainConfig) -> Self {
-        let (eloop, transport) = Http::new(config.web3_http()).unwrap();
+        let (eloop, transport) = WebSocket::new(config.web3_ws()).unwrap();
         Chain {
             eloop,
             web3: web3::Web3::new(transport),
@@ -136,7 +141,7 @@ impl<'a> Chain<'a> {
 
     /// Access the **Jobs** smart-contract at the provided address.
     /// If [`ChainConfig::contract_jobs`] is `None`, returns `None`.
-    fn jobs(&self) -> Result<Contract<Http>, Error> {
+    fn jobs(&self) -> Result<Contract<WebSocket>, Error> {
         if let Some((job_addr, abi)) = self.config.contract_jobs() {
             let c = Contract::from_json(self.web3.eth(), *job_addr, &abi[..])
                 .map_err(ContractError::Abi)?;
@@ -158,7 +163,7 @@ impl<'a> Chain<'a> {
         let jobs = self.jobs()?;
         let addr = self.local_address()?;
 
-        let fut = jobs.query("set_counter", new, addr, Default::default(), None);
+        let fut = jobs.call("set_counter", new, addr, Default::default());
         Ok(Compat01As03::new(fut).await?)
     }
 
@@ -166,8 +171,26 @@ impl<'a> Chain<'a> {
         let jobs = self.jobs()?;
         let addr = self.local_address()?;
 
-        let fut = jobs.query("inc_counter", (), addr, Default::default(), None);
+        let fut = jobs.call("inc_counter", (), addr, Default::default());
         Ok(Compat01As03::new(fut).await?)
+    }
+
+    pub async fn subscribe(&self) -> Result<(), Error> {
+        let jobs = self.jobs()?;
+        let filter = FilterBuilder::default()
+            .address(vec![jobs.address()])
+            .build();
+
+        let stream = Compat01As03::new(self.web3.eth_subscribe().subscribe_logs(filter)).await?;
+        let stream = Compat01As03::new(stream);
+
+        StreamExt::for_each(stream, |e| {
+            println!("{:?}", e);
+            future::ready(())
+        })
+        .await;
+
+        Ok(())
     }
 }
 

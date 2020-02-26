@@ -1,5 +1,5 @@
-//! Look at [the `clap` documentation](https://github.com/clap-rs/clap)
-//! and [the `stroctopt` documentation](https://docs.rs/structopt/0.3.9/structopt/)
+//! Look at [the `clap` documentation](wss://github.com/clap-rs/clap)
+//! and [the `stroctopt` documentation](wss://docs.rs/structopt/0.3.9/structopt/)
 #![allow(clippy::redundant_clone)]
 extern crate multiaddr;
 
@@ -100,6 +100,7 @@ pub enum ChainSub {
     },
     /// Actions related to Jobs smart-contract.
     Jobs(ChainJobsSub),
+    Subscribe,
 }
 
 #[derive(Clap)]
@@ -121,6 +122,7 @@ impl Into<chain::RunMode> for &ChainSub {
             ChainSub::Jobs(ChainJobsSub::Get) => chain::RunMode::JobsCounterGet,
             ChainSub::Jobs(ChainJobsSub::Set { new }) => chain::RunMode::JobsCounterSet(*new),
             ChainSub::Jobs(ChainJobsSub::Inc) => chain::RunMode::JobsCounterInc,
+            ChainSub::Subscribe => chain::RunMode::Subscribe,
         }
     }
 }
@@ -160,10 +162,10 @@ pub struct BalthazarArgs {
     )]
     default_storage: Option<StorageType>,
 
-    /// The address to connect the Ethereum json RPC endpoint.
-    /// Default to `http://localhost:8545`.
+    /// The websocket address to connect the Ethereum json RPC endpoint.
+    /// Default to `ws://localhost:8546`.
     #[clap(short, long)]
-    web3_http: Option<String>,
+    web3_ws: Option<String>,
     /// Local ethereum address to use.
     #[clap(name = "addr", long)]
     ethereum_address: Option<Address>,
@@ -240,8 +242,8 @@ impl std::convert::TryInto<(RunMode, BalthazarConfig)> for BalthazarArgs {
         }
         {
             let chain = config.chain_mut();
-            if let Some(web3_http) = self.web3_http {
-                chain.set_web3_http(web3_http);
+            if let Some(web3_ws) = self.web3_ws {
+                chain.set_web3_ws(web3_ws);
             }
             if let Some(ethereum_address) = self.ethereum_address {
                 chain.set_ethereum_address(Some(ethereum_address));

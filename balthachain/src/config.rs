@@ -3,9 +3,9 @@ pub use web3::types::Address;
 /// Configuration for the Ethereum RPC API.
 #[derive(Clone, Debug)]
 pub struct ChainConfig {
-    /// The address to connect the Ethereum json RPC endpoint.
-    /// Default to `http://localhost:8545`.
-    web3_http: String,
+    /// The websocket address to connect the Ethereum json RPC endpoint.
+    /// Default to `ws://localhost:8546`.
+    web3_ws: String,
     /// Ethereum address to use.
     ethereum_address: Option<Address>,
     /// Password to the account.
@@ -17,7 +17,7 @@ pub struct ChainConfig {
 impl Default for ChainConfig {
     fn default() -> Self {
         ChainConfig {
-            web3_http: "http://localhost:8545".to_string(),
+            web3_ws: "ws://localhost:8546".to_string(),
             ethereum_address: None,
             ethereum_password: None,
             contract_jobs: None,
@@ -26,11 +26,11 @@ impl Default for ChainConfig {
 }
 
 impl ChainConfig {
-    pub fn web3_http(&self) -> &str {
-        &self.web3_http[..]
+    pub fn web3_ws(&self) -> &str {
+        &self.web3_ws[..]
     }
-    pub fn set_web3_http(&mut self, new: String) {
-        self.web3_http = new;
+    pub fn set_web3_ws(&mut self, new: String) {
+        self.web3_ws = new;
     }
 
     pub fn ethereum_address(&self) -> &Option<Address> {
