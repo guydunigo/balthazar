@@ -19,6 +19,7 @@ pub enum Error {
     KeyPairDecodingError(DecodingError),
     StorageCreationError(store::StoragesWrapperCreationError),
     RunnerError(run::RunnerError<run::wasm::Error>),
+    ChainError(chain::Error),
 }
 
 impl fmt::Display for Error {
@@ -39,10 +40,16 @@ impl From<run::RunnerError<run::wasm::Error>> for Error {
     }
 }
 
+impl From<chain::Error> for Error {
+    fn from(src: chain::Error) -> Self {
+        Error::ChainError(src)
+    }
+}
+
 pub fn run(mode: RunMode, config: BalthazarConfig) -> Result<(), Error> {
     match mode {
         RunMode::Node => node::run(config)?,
-        RunMode::Blockchain => chain::run(config.chain()),
+        RunMode::Blockchain(mode) => chain::run(&mode, config.chain())?,
         RunMode::Storage => {}
         RunMode::Runner(wasm_file_path, args, nb_times) => {
             run::run(wasm_file_path, args, nb_times)?

@@ -2,14 +2,18 @@ pragma solidity >=0.4.21 <0.7.0;
 pragma experimental ABIEncoderV2;
 
 contract Jobs {
-    uint public counter;
+    uint128 public counter;
+    event CounterHasNewValue(uint128 new_counter);
 
-    function set_counter(uint new_val) public {
+    function set_counter(uint128 new_val) public {
+        require(counter != new_val);
         counter = new_val;
+        emit CounterHasNewValue(counter);
     }
 
     function inc_counter() public {
         counter++;
+        emit CounterHasNewValue(counter);
     }
 
     enum ProgramKind { Wasm }

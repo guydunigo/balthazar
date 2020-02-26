@@ -3,3 +3,5 @@
 **/*.rs.bk
 
 /balthachain/contracts/build
+/balthachain/contracts/Jobs.json
+/balthachain/contracts/jobs_address

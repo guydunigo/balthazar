@@ -1,4 +1,4 @@
-use chain::ChainConfig;
+use chain::{ChainConfig, RunMode as ChainMode};
 use misc::NodeType;
 use net::NetConfig;
 use store::StorageConfig;
@@ -12,7 +12,7 @@ pub enum RunMode {
     /// (default).
     Node,
     /// Interract with the blockchain.
-    Blockchain,
+    Blockchain(ChainMode),
     /// Interract with the storages directly.
     Storage,
     /// Run programs and test them.

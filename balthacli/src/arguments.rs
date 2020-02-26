@@ -6,7 +6,7 @@ extern crate multiaddr;
 use clap::{arg_enum, Clap};
 // TODO: use uniform Multiaddr
 use lib::{
-    chain::Address,
+    chain::{self, Address},
     misc::{NodeType, NodeTypeContainer},
     net::Multiaddr as Libp2pMultiaddr,
     store::ipfs::IpfsStorageCreationError,
@@ -51,7 +51,7 @@ pub enum Subcommand {
         args: Option<String>,
     },
     /// Interract with the blockchain.
-    Blockchain,
+    Blockchain(ChainSub),
     /// Interract with the storages directly.
     Storage,
     /// Run programs.
@@ -60,6 +60,7 @@ pub enum Subcommand {
         wasm_file_path: PathBuf,
         /// Arguments to pass to the program.
         args: String,
+        /// Number of times to run the program.
         nb_times: Option<usize>,
     },
 }
@@ -70,7 +71,7 @@ impl std::convert::TryInto<RunMode> for &Subcommand {
     fn try_into(self) -> Result<RunMode, ParseArgsError> {
         let res = match self {
             Subcommand::Worker { .. } | Subcommand::Manager { .. } => RunMode::Node,
-            Subcommand::Blockchain => RunMode::Blockchain,
+            Subcommand::Blockchain(mode) => RunMode::Blockchain(mode.into()),
             Subcommand::Storage => RunMode::Storage,
             Subcommand::Runner {
                 wasm_file_path,
@@ -87,9 +88,44 @@ impl std::convert::TryInto<RunMode> for &Subcommand {
     }
 }
 
-// TODO: validators
+#[derive(Clap)]
+#[clap(rename_all = "kebab-case")]
+pub enum ChainSub {
+    /// Get latest block information.
+    Block,
+    /// Get balance of provided address or local address.
+    Balance {
+        /// Address of account, if none is provided, will use `addr`.
+        address: Option<Address>,
+    },
+    /// Actions related to Jobs smart-contract.
+    Jobs(ChainJobsSub),
+}
 
-// TODO: use crate name directly ?
+#[derive(Clap)]
+#[clap(rename_all = "kebab-case")]
+pub enum ChainJobsSub {
+    Get,
+    Set {
+        /// Value to give to counter.
+        new: u128,
+    },
+    Inc,
+}
+
+impl Into<chain::RunMode> for &ChainSub {
+    fn into(self) -> chain::RunMode {
+        match self {
+            ChainSub::Block => chain::RunMode::Block,
+            ChainSub::Balance { address } => chain::RunMode::Balance(*address),
+            ChainSub::Jobs(ChainJobsSub::Get) => chain::RunMode::JobsCounterGet,
+            ChainSub::Jobs(ChainJobsSub::Set { new }) => chain::RunMode::JobsCounterSet(*new),
+            ChainSub::Jobs(ChainJobsSub::Inc) => chain::RunMode::JobsCounterInc,
+        }
+    }
+}
+
+// TODO: validators
 #[derive(Clap)]
 #[clap(rename_all = "kebab-case")]
 pub struct BalthazarArgs {
@@ -128,17 +164,17 @@ pub struct BalthazarArgs {
     /// Default to `http://localhost:8545`.
     #[clap(short, long)]
     web3_http: Option<String>,
-    /// Ethereum address to use.
+    /// Local ethereum address to use.
     #[clap(name = "addr", long)]
     ethereum_address: Option<Address>,
     /// Password to the account.
     #[clap(name = "pass", long, requires("addr"))]
     ethereum_password: Option<String>,
     /// Jobs contract address.
-    #[clap(name = "jobs_address", long, requires("jobs_abi"))]
+    #[clap(name = "jobs-address", long, requires("jobs-abi"))]
     contract_jobs_address: Option<Address>,
     /// Jobs contract path to json ABI file.
-    #[clap(name = "jobs_abi", long)]
+    #[clap(name = "jobs-abi", long)]
     contract_jobs_abi: Option<PathBuf>,
 }
 
