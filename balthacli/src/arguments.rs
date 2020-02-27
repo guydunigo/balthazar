@@ -54,10 +54,17 @@ pub enum Subcommand {
     Blockchain(ChainSub),
     /// Interract with the storages directly.
     Storage,
-    /// Run programs.
+    /// Run wasm programs.
     Runner {
         /// Provide a wasm program that will be passed to workers.
         wasm_file_path: PathBuf,
+        /// Arguments to pass to the program.
+        args: String,
+        /// Number of times to run the program.
+        nb_times: Option<usize>,
+    },
+    /// Run the balthwasm program natively.
+    Native {
         /// Arguments to pass to the program.
         args: String,
         /// Number of times to run the program.
@@ -82,6 +89,9 @@ impl std::convert::TryInto<RunMode> for &Subcommand {
                 args.clone().into_bytes(),
                 nb_times.unwrap_or(1),
             ),
+            Subcommand::Native { args, nb_times } => {
+                RunMode::Native(args.clone().into_bytes(), nb_times.unwrap_or(1))
+            }
         };
 
         Ok(res)
@@ -100,7 +110,6 @@ pub enum ChainSub {
     },
     /// Actions related to Jobs smart-contract.
     Jobs(ChainJobsSub),
-    Subscribe,
 }
 
 #[derive(Clap)]
@@ -112,6 +121,8 @@ pub enum ChainJobsSub {
         new: u128,
     },
     Inc,
+    Subscribe,
+    Events,
 }
 
 impl Into<chain::RunMode> for &ChainSub {
@@ -122,7 +133,8 @@ impl Into<chain::RunMode> for &ChainSub {
             ChainSub::Jobs(ChainJobsSub::Get) => chain::RunMode::JobsCounterGet,
             ChainSub::Jobs(ChainJobsSub::Set { new }) => chain::RunMode::JobsCounterSet(*new),
             ChainSub::Jobs(ChainJobsSub::Inc) => chain::RunMode::JobsCounterInc,
-            ChainSub::Subscribe => chain::RunMode::Subscribe,
+            ChainSub::Jobs(ChainJobsSub::Subscribe) => chain::RunMode::JobsSubscribe,
+            ChainSub::Jobs(ChainJobsSub::Events) => chain::RunMode::JobsEvents,
         }
     }
 }

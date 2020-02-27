@@ -4,6 +4,7 @@ pub extern crate balthaproto as proto;
 pub extern crate balthastore as store;
 pub extern crate balthernet as net;
 pub extern crate balthurner as run;
+extern crate balthwasm as wasm;
 extern crate tokio;
 
 use std::{fmt, io};
@@ -11,6 +12,7 @@ use std::{fmt, io};
 use net::identity::error::DecodingError;
 
 mod config;
+mod native;
 mod node;
 pub use config::{BalthazarConfig, RunMode};
 
@@ -21,6 +23,7 @@ pub enum Error {
     StorageCreationError(store::StoragesWrapperCreationError),
     RunnerError(run::RunnerError<run::wasm::Error>),
     ChainError(chain::Error),
+    NativeError(i64),
 }
 
 impl fmt::Display for Error {
@@ -54,6 +57,9 @@ pub fn run(mode: RunMode, config: BalthazarConfig) -> Result<(), Error> {
         RunMode::Storage => {}
         RunMode::Runner(wasm_file_path, args, nb_times) => {
             run::run(wasm_file_path, args, nb_times)?
+        }
+        RunMode::Native(args, nb_times) => {
+            native::run(args, nb_times).map_err(Error::NativeError)?
         }
     }
 

@@ -1,8 +1,10 @@
+extern crate ethabi;
 extern crate futures;
 extern crate web3;
 
 mod config;
 pub use config::{Address, ChainConfig};
+use ethabi::Events;
 use futures::{compat::Compat01As03, executor::block_on, future, StreamExt};
 pub use web3::types::{Block, BlockId, BlockNumber, H256, U256};
 use web3::{
@@ -39,7 +41,8 @@ pub enum RunMode {
     JobsCounterGet,
     JobsCounterSet(u128),
     JobsCounterInc,
-    Subscribe,
+    JobsSubscribe,
+    JobsEvents,
 }
 
 pub fn run(mode: &RunMode, config: &ChainConfig) -> Result<(), Error> {
@@ -84,8 +87,15 @@ async fn run_async(mode: &RunMode, config: &ChainConfig) -> Result<(), Error> {
             chain.jobs_inc_counter().await?;
             println!("Counter increased.");
         }
-        RunMode::Subscribe => {
-            chain.subscribe().await?;
+        RunMode::JobsSubscribe => {
+            chain.jobs_subscribe().await?;
+        }
+        RunMode::JobsEvents => {
+            /*
+            for i in chain.jobs_events().await? {
+                println!("{:?}", i);
+            }
+            */
         }
     }
 
@@ -175,7 +185,7 @@ impl<'a> Chain<'a> {
         Ok(Compat01As03::new(fut).await?)
     }
 
-    pub async fn subscribe(&self) -> Result<(), Error> {
+    pub async fn jobs_subscribe(&self) -> Result<(), Error> {
         let jobs = self.jobs()?;
         let filter = FilterBuilder::default()
             .address(vec![jobs.address()])
@@ -192,6 +202,17 @@ impl<'a> Chain<'a> {
 
         Ok(())
     }
+
+    /*
+    pub async fn jobs_events<'b>(&'b self) -> Result<Events<'b>, Error> {
+        if let Some((job_addr, abi)) = self.config.contract_jobs() {
+            let c = ethabi::Contract::load(&abi[..]).map_err(ContractError::Abi)?;
+            Ok(c)
+        } else {
+            Err(Error::MissingJobsContractData)
+        }
+    }
+    */
 }
 
 #[cfg(test)]

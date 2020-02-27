@@ -11,14 +11,16 @@ members = [
     "balthaproto",
     "balthamisc",
     "balthurner",
-    "balthwasm",
     "balthachain",
+    "balthwasm",
 ]
 
 default-members = ["balthacli"]
 
 [patch.crates-io]
 clap = { git = "https://github.com/clap-rs/clap/" }
-libp2p = { git = "https://github.com/guydunigo/rust-libp2p" }
-# libp2p = { git = "https://github.com/libp2p/rust-libp2p" }
+# libp2p = { git = "https://github.com/guydunigo/rust-libp2p" }
+libp2p = { git = "https://github.com/libp2p/rust-libp2p" }
 # libp2p = { path = "../my_rust-libp2p" }
+#web3 = { git = "https://github.com/tomusdrw/rust-web3" }
+#multihash = { git = "https://github.com/multiformats/rust-multihash" }

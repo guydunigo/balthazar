@@ -241,6 +241,7 @@ dependencies = [
  "balthastore",
  "balthernet",
  "balthurner",
+ "balthwasm",
  "futures 0.3.4",
  "tokio 0.2.11",
 ]
@@ -844,19 +845,6 @@ dependencies = [
 
 [[package]]
 name = "curve25519-dalek"
-version = "1.2.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8b7dcd30ba50cdf88b55b033456138b7c0ac4afdc436d82e1b79f370f24cc66d"
-dependencies = [
- "byteorder 1.3.4",
- "clear_on_drop",
- "digest 0.8.1",
- "rand_core 0.3.1",
- "subtle 2.2.2",
-]
-
-[[package]]
-name = "curve25519-dalek"
 version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "26778518a7f6cffa1d25a44b602b62b979bd88adb9e99ffec546998cf3404839"
@@ -948,7 +936,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "978710b352437433c97b2bff193f2fb1dfd58a093f863dd95e225a19baa599a2"
 dependencies = [
  "clear_on_drop",
- "curve25519-dalek 2.0.0",
+ "curve25519-dalek",
  "rand 0.7.3",
  "sha2 0.8.1",
 ]
@@ -1803,7 +1791,7 @@ checksum = "eb147597cdf94ed43ab7a9038716637d2d1bf2bc571da995d0028dec06bd3018"
 [[package]]
 name = "libp2p"
 version = "0.16.1"
-source = "git+https://github.com/guydunigo/rust-libp2p#c7d9405e389e82ee265445a9e245cbed9b35591c"
+source = "git+https://github.com/libp2p/rust-libp2p#62ea7c165bf4066233df3ea264edbca4e266da9d"
 dependencies = [
  "bytes 0.5.4",
  "futures 0.3.4",
@@ -1826,6 +1814,7 @@ dependencies = [
  "libp2p-swarm",
  "libp2p-tcp",
  "libp2p-uds",
+ "libp2p-wasm-ext",
  "libp2p-websocket",
  "libp2p-yamux",
  "parity-multiaddr",
@@ -1839,7 +1828,7 @@ dependencies = [
 [[package]]
 name = "libp2p-core"
 version = "0.16.0"
-source = "git+https://github.com/guydunigo/rust-libp2p#c7d9405e389e82ee265445a9e245cbed9b35591c"
+source = "git+https://github.com/libp2p/rust-libp2p#62ea7c165bf4066233df3ea264edbca4e266da9d"
 dependencies = [
  "asn1_der",
  "bs58",
@@ -1871,7 +1860,7 @@ dependencies = [
 [[package]]
 name = "libp2p-core-derive"
 version = "0.16.0"
-source = "git+https://github.com/guydunigo/rust-libp2p#c7d9405e389e82ee265445a9e245cbed9b35591c"
+source = "git+https://github.com/libp2p/rust-libp2p#62ea7c165bf4066233df3ea264edbca4e266da9d"
 dependencies = [
  "quote",
  "syn",
@@ -1880,7 +1869,7 @@ dependencies = [
 [[package]]
 name = "libp2p-deflate"
 version = "0.16.0"
-source = "git+https://github.com/guydunigo/rust-libp2p#c7d9405e389e82ee265445a9e245cbed9b35591c"
+source = "git+https://github.com/libp2p/rust-libp2p#62ea7c165bf4066233df3ea264edbca4e266da9d"
 dependencies = [
  "flate2",
  "futures 0.3.4",
@@ -1890,7 +1879,7 @@ dependencies = [
 [[package]]
 name = "libp2p-dns"
 version = "0.16.0"
-source = "git+https://github.com/guydunigo/rust-libp2p#c7d9405e389e82ee265445a9e245cbed9b35591c"
+source = "git+https://github.com/libp2p/rust-libp2p#62ea7c165bf4066233df3ea264edbca4e266da9d"
 dependencies = [
  "futures 0.3.4",
  "libp2p-core",
@@ -1900,7 +1889,7 @@ dependencies = [
 [[package]]
 name = "libp2p-floodsub"
 version = "0.16.0"
-source = "git+https://github.com/guydunigo/rust-libp2p#c7d9405e389e82ee265445a9e245cbed9b35591c"
+source = "git+https://github.com/libp2p/rust-libp2p#62ea7c165bf4066233df3ea264edbca4e266da9d"
 dependencies = [
  "cuckoofilter",
  "fnv",
@@ -1916,7 +1905,7 @@ dependencies = [
 [[package]]
 name = "libp2p-gossipsub"
 version = "0.16.0"
-source = "git+https://github.com/guydunigo/rust-libp2p#c7d9405e389e82ee265445a9e245cbed9b35591c"
+source = "git+https://github.com/libp2p/rust-libp2p#62ea7c165bf4066233df3ea264edbca4e266da9d"
 dependencies = [
  "base64 0.11.0",
  "byteorder 1.3.4",
@@ -1940,7 +1929,7 @@ dependencies = [
 [[package]]
 name = "libp2p-identify"
 version = "0.16.0"
-source = "git+https://github.com/guydunigo/rust-libp2p#c7d9405e389e82ee265445a9e245cbed9b35591c"
+source = "git+https://github.com/libp2p/rust-libp2p#62ea7c165bf4066233df3ea264edbca4e266da9d"
 dependencies = [
  "futures 0.3.4",
  "libp2p-core",
@@ -1955,7 +1944,7 @@ dependencies = [
 [[package]]
 name = "libp2p-kad"
 version = "0.16.1"
-source = "git+https://github.com/guydunigo/rust-libp2p#c7d9405e389e82ee265445a9e245cbed9b35591c"
+source = "git+https://github.com/libp2p/rust-libp2p#62ea7c165bf4066233df3ea264edbca4e266da9d"
 dependencies = [
  "arrayvec 0.5.1",
  "bytes 0.5.4",
@@ -1981,7 +1970,7 @@ dependencies = [
 [[package]]
 name = "libp2p-mdns"
 version = "0.16.0"
-source = "git+https://github.com/guydunigo/rust-libp2p#c7d9405e389e82ee265445a9e245cbed9b35591c"
+source = "git+https://github.com/libp2p/rust-libp2p#62ea7c165bf4066233df3ea264edbca4e266da9d"
 dependencies = [
  "async-std",
  "data-encoding",
@@ -2002,7 +1991,7 @@ dependencies = [
 [[package]]
 name = "libp2p-mplex"
 version = "0.16.0"
-source = "git+https://github.com/guydunigo/rust-libp2p#c7d9405e389e82ee265445a9e245cbed9b35591c"
+source = "git+https://github.com/libp2p/rust-libp2p#62ea7c165bf4066233df3ea264edbca4e266da9d"
 dependencies = [
  "bytes 0.5.4",
  "fnv",
@@ -2017,9 +2006,9 @@ dependencies = [
 [[package]]
 name = "libp2p-noise"
 version = "0.16.0"
-source = "git+https://github.com/guydunigo/rust-libp2p#c7d9405e389e82ee265445a9e245cbed9b35591c"
+source = "git+https://github.com/libp2p/rust-libp2p#62ea7c165bf4066233df3ea264edbca4e266da9d"
 dependencies = [
- "curve25519-dalek 1.2.3",
+ "curve25519-dalek",
  "futures 0.3.4",
  "lazy_static",
  "libp2p-core",
@@ -2030,14 +2019,14 @@ dependencies = [
  "sha2 0.8.1",
  "snow",
  "static_assertions",
- "x25519-dalek 0.5.2",
+ "x25519-dalek",
  "zeroize",
 ]
 
 [[package]]
 name = "libp2p-ping"
 version = "0.16.0"
-source = "git+https://github.com/guydunigo/rust-libp2p#c7d9405e389e82ee265445a9e245cbed9b35591c"
+source = "git+https://github.com/libp2p/rust-libp2p#62ea7c165bf4066233df3ea264edbca4e266da9d"
 dependencies = [
  "futures 0.3.4",
  "libp2p-core",
@@ -2051,7 +2040,7 @@ dependencies = [
 [[package]]
 name = "libp2p-plaintext"
 version = "0.16.0"
-source = "git+https://github.com/guydunigo/rust-libp2p#c7d9405e389e82ee265445a9e245cbed9b35591c"
+source = "git+https://github.com/libp2p/rust-libp2p#62ea7c165bf4066233df3ea264edbca4e266da9d"
 dependencies = [
  "bytes 0.5.4",
  "futures 0.3.4",
@@ -2068,7 +2057,7 @@ dependencies = [
 [[package]]
 name = "libp2p-pnet"
 version = "0.16.0"
-source = "git+https://github.com/guydunigo/rust-libp2p#c7d9405e389e82ee265445a9e245cbed9b35591c"
+source = "git+https://github.com/libp2p/rust-libp2p#62ea7c165bf4066233df3ea264edbca4e266da9d"
 dependencies = [
  "futures 0.3.4",
  "log 0.4.8",
@@ -2081,7 +2070,7 @@ dependencies = [
 [[package]]
 name = "libp2p-secio"
 version = "0.16.1"
-source = "git+https://github.com/guydunigo/rust-libp2p#c7d9405e389e82ee265445a9e245cbed9b35591c"
+source = "git+https://github.com/libp2p/rust-libp2p#62ea7c165bf4066233df3ea264edbca4e266da9d"
 dependencies = [
  "aes-ctr",
  "ctr",
@@ -2110,7 +2099,7 @@ dependencies = [
 [[package]]
 name = "libp2p-swarm"
 version = "0.16.1"
-source = "git+https://github.com/guydunigo/rust-libp2p#c7d9405e389e82ee265445a9e245cbed9b35591c"
+source = "git+https://github.com/libp2p/rust-libp2p#62ea7c165bf4066233df3ea264edbca4e266da9d"
 dependencies = [
  "futures 0.3.4",
  "libp2p-core",
@@ -2123,7 +2112,7 @@ dependencies = [
 [[package]]
 name = "libp2p-tcp"
 version = "0.16.0"
-source = "git+https://github.com/guydunigo/rust-libp2p#c7d9405e389e82ee265445a9e245cbed9b35591c"
+source = "git+https://github.com/libp2p/rust-libp2p#62ea7c165bf4066233df3ea264edbca4e266da9d"
 dependencies = [
  "async-std",
  "futures 0.3.4",
@@ -2137,7 +2126,7 @@ dependencies = [
 [[package]]
 name = "libp2p-uds"
 version = "0.16.0"
-source = "git+https://github.com/guydunigo/rust-libp2p#c7d9405e389e82ee265445a9e245cbed9b35591c"
+source = "git+https://github.com/libp2p/rust-libp2p#62ea7c165bf4066233df3ea264edbca4e266da9d"
 dependencies = [
  "async-std",
  "futures 0.3.4",
@@ -2146,9 +2135,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "libp2p-wasm-ext"
+version = "0.16.1"
+source = "git+https://github.com/libp2p/rust-libp2p#62ea7c165bf4066233df3ea264edbca4e266da9d"
+dependencies = [
+ "futures 0.3.4",
+ "js-sys",
+ "libp2p-core",
+ "parity-send-wrapper",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+]
+
+[[package]]
 name = "libp2p-websocket"
 version = "0.16.0"
-source = "git+https://github.com/guydunigo/rust-libp2p#c7d9405e389e82ee265445a9e245cbed9b35591c"
+source = "git+https://github.com/libp2p/rust-libp2p#62ea7c165bf4066233df3ea264edbca4e266da9d"
 dependencies = [
  "async-tls",
  "bytes 0.5.4",
@@ -2168,7 +2170,7 @@ dependencies = [
 [[package]]
 name = "libp2p-yamux"
 version = "0.16.0"
-source = "git+https://github.com/guydunigo/rust-libp2p#c7d9405e389e82ee265445a9e245cbed9b35591c"
+source = "git+https://github.com/libp2p/rust-libp2p#62ea7c165bf4066233df3ea264edbca4e266da9d"
 dependencies = [
  "futures 0.3.4",
  "libp2p-core",
@@ -2421,7 +2423,7 @@ checksum = "a97fbd5d00e0e37bfb10f433af8f5aaf631e739368dc9fc28286ca81ca4948dc"
 [[package]]
 name = "multistream-select"
 version = "0.7.0"
-source = "git+https://github.com/guydunigo/rust-libp2p#c7d9405e389e82ee265445a9e245cbed9b35591c"
+source = "git+https://github.com/libp2p/rust-libp2p#62ea7c165bf4066233df3ea264edbca4e266da9d"
 dependencies = [
  "bytes 0.5.4",
  "futures 0.1.29",
@@ -2563,7 +2565,7 @@ dependencies = [
 [[package]]
 name = "parity-multiaddr"
 version = "0.7.2"
-source = "git+https://github.com/guydunigo/rust-libp2p#c7d9405e389e82ee265445a9e245cbed9b35591c"
+source = "git+https://github.com/libp2p/rust-libp2p#62ea7c165bf4066233df3ea264edbca4e266da9d"
 dependencies = [
  "arrayref",
  "bs58",
@@ -2580,7 +2582,7 @@ dependencies = [
 [[package]]
 name = "parity-multihash"
 version = "0.2.3"
-source = "git+https://github.com/guydunigo/rust-libp2p#c7d9405e389e82ee265445a9e245cbed9b35591c"
+source = "git+https://github.com/libp2p/rust-libp2p#62ea7c165bf4066233df3ea264edbca4e266da9d"
 dependencies = [
  "blake2",
  "bytes 0.5.4",
@@ -3411,7 +3413,7 @@ dependencies = [
  "rustc_version",
  "sha2 0.8.1",
  "subtle 2.2.2",
- "x25519-dalek 0.6.0",
+ "x25519-dalek",
 ]
 
 [[package]]
@@ -4491,22 +4493,11 @@ dependencies = [
 
 [[package]]
 name = "x25519-dalek"
-version = "0.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7ee1585dc1484373cbc1cee7aafda26634665cf449436fd6e24bfd1fad230538"
-dependencies = [
- "clear_on_drop",
- "curve25519-dalek 1.2.3",
- "rand_core 0.3.1",
-]
-
-[[package]]
-name = "x25519-dalek"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "637ff90c9540fa3073bb577e65033069e4bae7c79d49d74aa3ffdf5342a53217"
 dependencies = [
- "curve25519-dalek 2.0.0",
+ "curve25519-dalek",
  "rand_core 0.5.1",
  "zeroize",
 ]
