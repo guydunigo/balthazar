@@ -18,7 +18,6 @@ use libp2p::{
         ProtocolsHandlerUpgrErr, SubstreamProtocol,
     },
 };
-use proto::worker::{WorkerMsg, WorkerMsgWrapper};
 use std::{
     collections::HashMap,
     fmt, io,
@@ -27,8 +26,12 @@ use std::{
     time::{Duration, Instant},
 };
 
-use misc::{NodeType, TaskStatus, WorkerSpecs};
-use proto::{protobuf::ProtoBufProtocol, worker};
+use misc::WorkerSpecs;
+use proto::{
+    protobuf::ProtoBufProtocol,
+    worker::{self, NodeType, WorkerMsg, WorkerMsgWrapper},
+    TaskStatus,
+};
 
 mod handler_misc;
 pub use handler_misc::RequestId;

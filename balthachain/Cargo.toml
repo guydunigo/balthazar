@@ -9,3 +9,4 @@ edition = "2018"
 [dependencies]
 web3 = "0.10.0"
 futures = { version = "0.3.4", features = ["compat"] }
+ethabi = "11.0.0"

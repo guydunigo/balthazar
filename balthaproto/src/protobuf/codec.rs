@@ -122,7 +122,7 @@ mod tests {
 
     #[test]
     fn it_encodes_decodes_with_protobuf_codec() {
-        let original_msg: worker::WorkerMsgWrapper = worker::NodeTypeRequest {}.into();
+        let original_msg: worker::WorkerMsgWrapper = worker::NotMine {}.into();
         let mut codec = ProtoBufCodec::default();
 
         let mut bytes = BytesMut::new();
@@ -135,7 +135,7 @@ mod tests {
 
     #[test]
     fn it_encodes_decodes_with_protobuf_length_codec() {
-        let original_msg: worker::WorkerMsgWrapper = worker::NodeTypeRequest {}.into();
+        let original_msg: worker::WorkerMsgWrapper = worker::NotMine {}.into();
         let mut codec = ProtoBufLengthCodec::default();
 
         let mut bytes = BytesMut::new();

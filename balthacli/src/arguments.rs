@@ -7,8 +7,8 @@ use clap::{arg_enum, Clap};
 // TODO: use uniform Multiaddr
 use lib::{
     chain::{self, Address},
-    misc::{NodeType, NodeTypeContainer},
     net::Multiaddr as Libp2pMultiaddr,
+    proto::{NodeType, NodeTypeContainer},
     store::ipfs::IpfsStorageCreationError,
     store::{Multiaddr, StorageType},
     BalthazarConfig, RunMode,

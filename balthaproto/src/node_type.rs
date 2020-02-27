@@ -1,4 +1,4 @@
-pub use proto::worker::NodeType;
+use super::worker::NodeType;
 use std::fmt;
 use std::fmt::Debug;
 

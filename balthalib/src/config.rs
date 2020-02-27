@@ -1,6 +1,6 @@
 use chain::{ChainConfig, RunMode as ChainMode};
-use misc::NodeType;
 use net::NetConfig;
+use proto::NodeType;
 use store::StorageConfig;
 
 const CONFIG_VERSION: &str = "0.1.0";

@@ -35,7 +35,8 @@ pub use events::{EventIn, EventOut};
 pub mod handler;
 use super::{ManagerConfig, WorkerConfig};
 use handler::{Balthandler, EventIn as HandlerIn, EventOut as HandlerOut, RequestId};
-use misc::{NodeType, NodeTypeContainer, TaskStatus, WorkerSpecs};
+use misc::WorkerSpecs;
+use proto::{NodeType, NodeTypeContainer, TaskStatus};
 
 const CHANNEL_SIZE: usize = 1024;
 

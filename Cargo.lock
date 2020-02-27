@@ -217,6 +217,7 @@ dependencies = [
 name = "balthachain"
 version = "0.1.0"
 dependencies = [
+ "ethabi 11.0.0",
  "futures 0.3.4",
  "web3",
 ]
@@ -236,6 +237,7 @@ version = "0.2.0"
 dependencies = [
  "balthachain",
  "balthamisc",
+ "balthaproto",
  "balthastore",
  "balthernet",
  "balthurner",
@@ -247,7 +249,6 @@ dependencies = [
 name = "balthamisc"
 version = "0.1.0"
 dependencies = [
- "balthaproto",
  "futures 0.3.4",
  "tokio 0.2.11",
 ]
@@ -301,6 +302,9 @@ dependencies = [
 [[package]]
 name = "balthwasm"
 version = "0.2.0"
+dependencies = [
+ "multihash 0.10.0",
+]
 
 [[package]]
 name = "base-x"
@@ -388,6 +392,17 @@ name = "blake2b_simd"
 version = "0.5.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d8fb2d74254a3a0b5cac33ac9f8ed0e44aa50378d9dbb2e5d83bd21ed1dc2c8a"
+dependencies = [
+ "arrayref",
+ "arrayvec 0.5.1",
+ "constant_time_eq",
+]
+
+[[package]]
+name = "blake2s_simd"
+version = "0.5.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ab9e07352b829279624ceb7c64adb4f585dacdb81d35cafae81139ccd617cf44"
 dependencies = [
  "arrayref",
  "arrayvec 0.5.1",
@@ -552,7 +567,7 @@ checksum = "6908948032561f2550467a477f659cdc358320a805237b9b5035c0350c441def"
 dependencies = [
  "integer-encoding",
  "multibase",
- "multihash",
+ "multihash 0.8.0",
 ]
 
 [[package]]
@@ -987,6 +1002,20 @@ dependencies = [
  "serde_derive",
  "serde_json",
  "tiny-keccak",
+]
+
+[[package]]
+name = "ethabi"
+version = "11.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "97652a7d1f2504d6c885c87e242a06ccef5bd3054093d3fb742d8fb64806231a"
+dependencies = [
+ "ethereum-types",
+ "rustc-hex",
+ "serde",
+ "serde_json",
+ "tiny-keccak",
+ "uint",
 ]
 
 [[package]]
@@ -2366,6 +2395,21 @@ dependencies = [
  "sha1 0.5.0",
  "sha2 0.7.1",
  "tiny-keccak",
+]
+
+[[package]]
+name = "multihash"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f4b34e6ba21b71c8df0aade813b358165790eb3cc8fe4c7b3f6a9e86d82b7923"
+dependencies = [
+ "blake2b_simd",
+ "blake2s_simd",
+ "digest 0.8.1",
+ "sha-1",
+ "sha2 0.8.1",
+ "sha3",
+ "unsigned-varint",
 ]
 
 [[package]]
@@ -4304,7 +4348,7 @@ dependencies = [
  "arrayvec 0.5.1",
  "base64 0.11.0",
  "derive_more",
- "ethabi",
+ "ethabi 9.0.1",
  "ethereum-types",
  "futures 0.1.29",
  "hyper 0.12.35",

@@ -6,7 +6,11 @@ use std::{
 };
 use tokio::{runtime::Runtime, sync::mpsc::Sender};
 
-use misc::{NodeType, TaskErrorKind, TaskExecute, TaskStatus, WorkerSpecs};
+use misc::WorkerSpecs;
+use proto::{
+    worker::{TaskErrorKind, TaskExecute},
+    NodeType, TaskStatus,
+};
 use run::{Runner, WasmRunner};
 use store::{Storage, StoragesWrapper};
 

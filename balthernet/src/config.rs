@@ -1,5 +1,5 @@
 use libp2p::{core::multiaddr::Protocol, Multiaddr, PeerId};
-use misc::{NodeType, NodeTypeContainer};
+use proto::{NodeType, NodeTypeContainer};
 
 pub const DEFAULT_LISTENING_ADDRESS: &str = "/ip4/0.0.0.0/tcp/5003";
 

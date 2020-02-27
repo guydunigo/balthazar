@@ -12,7 +12,8 @@ use libp2p::{
     },
     NetworkBehaviour,
 };
-use misc::{NodeTypeContainer, WorkerSpecs};
+use misc::WorkerSpecs;
+use proto::NodeTypeContainer;
 use std::{
     collections::VecDeque,
     task::{Context, Poll},

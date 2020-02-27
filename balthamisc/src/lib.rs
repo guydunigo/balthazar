@@ -1,16 +1,9 @@
-extern crate balthaproto as proto;
 extern crate tokio;
 
 use futures::future::poll_fn;
 use std::{future::Future, pin::Pin, thread};
 use tokio::sync::oneshot::{self, error::RecvError};
 
-pub use proto::worker::TaskExecute;
-
-mod node_type;
-pub use node_type::{NodeType, NodeTypeContainer};
-mod task_status;
-pub use task_status::{TaskErrorKind, TaskStatus};
 mod worker_specs;
 pub use worker_specs::WorkerSpecs;
 

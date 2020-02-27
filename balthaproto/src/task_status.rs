@@ -1,5 +1,4 @@
-pub use proto::worker::TaskErrorKind;
-use proto::worker::{task_status::StatusData as ProtoTaskStatus, Null};
+use super::worker::{task_status::StatusData as ProtoTaskStatus, Null, TaskErrorKind};
 use std::fmt;
 
 /// Defines the status of a given task

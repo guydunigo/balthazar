@@ -1,5 +1,6 @@
 pub extern crate balthachain as chain;
 pub extern crate balthamisc as misc;
+pub extern crate balthaproto as proto;
 pub extern crate balthastore as store;
 pub extern crate balthernet as net;
 pub extern crate balthurner as run;

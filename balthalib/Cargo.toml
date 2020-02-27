@@ -11,6 +11,7 @@ balthernet = { path = "../balthernet" }
 balthastore = { path = "../balthastore" }
 balthurner = { path = "../balthurner" }
 balthachain = { path = "../balthachain" }
+balthaproto = { path = "../balthaproto" }
 balthamisc = { path = "../balthamisc" }
 # TODO: restrict features to bare essentials.
 tokio = { version = "0.2.11", features = ["full"] }
