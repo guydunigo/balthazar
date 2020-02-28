@@ -1,16 +1,17 @@
+extern crate balthamisc as misc;
 extern crate ethabi;
 extern crate futures;
 extern crate web3;
 
 mod config;
 pub use config::{Address, ChainConfig};
-use ethabi::Events;
-use futures::{compat::Compat01As03, executor::block_on, future, StreamExt};
+use futures::{compat::Compat01As03, executor::block_on, future, Stream, StreamExt};
+use misc::job::{BestMethod, JobId, ProgramKind};
 pub use web3::types::{Block, BlockId, BlockNumber, H256, U256};
 use web3::{
     contract::{Contract, Error as ContractError},
     transports::{EventLoopHandle, WebSocket},
-    types::FilterBuilder,
+    types::{FilterBuilder, Log},
     Web3,
 };
 
@@ -20,6 +21,8 @@ pub enum Error {
     MissingJobsContractData,
     Web3(web3::Error),
     Contract(ContractError),
+    EthAbi(ethabi::Error),
+    UnsupportedProgramKind(ProgramKind),
 }
 
 impl From<web3::Error> for Error {
@@ -34,6 +37,12 @@ impl From<ContractError> for Error {
     }
 }
 
+impl From<ethabi::Error> for Error {
+    fn from(e: ethabi::Error) -> Self {
+        Error::EthAbi(e)
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum RunMode {
     Block,
@@ -43,6 +52,21 @@ pub enum RunMode {
     JobsCounterInc,
     JobsSubscribe,
     JobsEvents,
+    JobsSendJob {
+        program_kind: ProgramKind,
+        addresses: Vec<Vec<u8>>,
+        arguments: Vec<Vec<u8>>,
+        timeout: u64,
+        max_failures: u64,
+        best_method: BestMethod,
+        max_worker_price: u64,
+        min_cpu_count: u64,
+        min_memory: u64,
+        min_network_speed: u64,
+        max_network_usage: u64,
+        redundancy: u64,
+        includes_tests: bool,
+    },
 }
 
 pub fn run(mode: &RunMode, config: &ChainConfig) -> Result<(), Error> {
@@ -88,14 +112,54 @@ async fn run_async(mode: &RunMode, config: &ChainConfig) -> Result<(), Error> {
             println!("Counter increased.");
         }
         RunMode::JobsSubscribe => {
-            chain.jobs_subscribe().await?;
+            let stream = chain.jobs_subscribe().await?;
+
+            stream
+                .for_each(|e| {
+                    println!("{:?}", e);
+                    future::ready(())
+                })
+                .await;
         }
         RunMode::JobsEvents => {
-            /*
-            for i in chain.jobs_events().await? {
-                println!("{:?}", i);
+            for evt in chain.jobs_events()? {
+                println!("{:?}, {}", evt, evt.signature());
             }
-            */
+        }
+        RunMode::JobsSendJob {
+            program_kind,
+            addresses,
+            arguments,
+            timeout,
+            max_failures,
+            best_method,
+            max_worker_price,
+            min_cpu_count,
+            min_memory,
+            min_network_speed,
+            max_network_usage,
+            redundancy,
+            includes_tests,
+        } => {
+            let job_id = chain
+                .jobs_send_job(
+                    program_kind,
+                    &addresses.iter().map(|a| &a[..]).collect::<Vec<&[u8]>>()[..],
+                    &arguments.iter().map(|a| &a[..]).collect::<Vec<&[u8]>>()[..],
+                    *timeout,
+                    *max_failures,
+                    *best_method,
+                    *max_worker_price,
+                    *min_cpu_count,
+                    *min_memory,
+                    *min_network_speed,
+                    *max_network_usage,
+                    *redundancy,
+                    *includes_tests,
+                )
+                .await?;
+
+            println!("Job stored ! Job id : {}", job_id);
         }
     }
 
@@ -161,6 +225,18 @@ impl<'a> Chain<'a> {
         }
     }
 
+    /// Check the [`ethabi::Contract`] object of the **Jobs** smart-contract for advanced
+    /// manipulation.
+    /// If [`ChainConfig::contract_jobs`] is `None`, returns `None`.
+    pub fn jobs_ethabi(&self) -> Result<ethabi::Contract, Error> {
+        if let Some((_, abi)) = self.config.contract_jobs() {
+            let c = ethabi::Contract::load(&abi[..])?;
+            Ok(c)
+        } else {
+            Err(Error::MissingJobsContractData)
+        }
+    }
+
     pub async fn jobs_counter(&self) -> Result<u128, Error> {
         let jobs = self.jobs()?;
         let addr = self.local_address()?;
@@ -185,34 +261,90 @@ impl<'a> Chain<'a> {
         Ok(Compat01As03::new(fut).await?)
     }
 
-    pub async fn jobs_subscribe(&self) -> Result<(), Error> {
+    /// Substribe to events.
+    // TODO: convert events and parameters to local enum.
+    pub async fn jobs_subscribe(&self) -> Result<impl Stream<Item = Result<Log, Error>>, Error> {
         let jobs = self.jobs()?;
         let filter = FilterBuilder::default()
             .address(vec![jobs.address()])
             .build();
 
-        let stream = Compat01As03::new(self.web3.eth_subscribe().subscribe_logs(filter)).await?;
-        let stream = Compat01As03::new(stream);
-
-        StreamExt::for_each(stream, |e| {
-            println!("{:?}", e);
-            future::ready(())
-        })
-        .await;
-
-        Ok(())
+        let stream_fut = Compat01As03::new(self.web3.eth_subscribe().subscribe_logs(filter));
+        Ok(Compat01As03::new(stream_fut.await?).map(|e| e.map_err(Error::Web3)))
     }
 
-    /*
-    pub async fn jobs_events<'b>(&'b self) -> Result<Events<'b>, Error> {
-        if let Some((job_addr, abi)) = self.config.contract_jobs() {
-            let c = ethabi::Contract::load(&abi[..]).map_err(ContractError::Abi)?;
-            Ok(c)
-        } else {
-            Err(Error::MissingJobsContractData)
+    pub fn jobs_events(&self) -> Result<Vec<ethabi::Event>, Error> {
+        let c = self.jobs_ethabi()?;
+        Ok(c.events().cloned().collect())
+    }
+
+    pub async fn jobs_send_job(
+        &self,
+        program_kind: &ProgramKind,
+        addresses: &[&[u8]],
+        arguments: &[&[u8]],
+        timeout: u64,
+        max_failures: u64,
+        best_method: BestMethod,
+        max_worker_price: u64,
+        min_cpu_count: u64,
+        min_memory: u64,
+        min_network_speed: u64,
+        max_network_usage: u64,
+        redundancy: u64,
+        _includes_tests: bool,
+    ) -> Result<JobId, Error> {
+        let jobs = self.jobs()?;
+        let addr = self.local_address()?;
+        let best_method: u64 = best_method.into();
+
+        match program_kind {
+            ProgramKind::Wasm(hash) => {
+                let args = (
+                    hash.clone().into_bytes(),
+                    timeout,
+                    max_failures,
+                    best_method,
+                    max_worker_price,
+                    min_cpu_count,
+                    min_memory,
+                    min_network_speed,
+                    max_network_usage,
+                    redundancy,
+                );
+                let fut = jobs.query("send_wasm_job", args, addr, Default::default(), None);
+
+                let job_id = Compat01As03::new(fut).await?;
+
+                for address in addresses.iter() {
+                    let fut = jobs.call(
+                        "push_program_address",
+                        Vec::from(*address),
+                        addr,
+                        Default::default(),
+                    );
+                    Compat01As03::new(fut).await?;
+                }
+
+                for args in arguments.iter() {
+                    let fut = jobs.call(
+                        "push_program_arguments",
+                        Vec::from(*args),
+                        addr,
+                        Default::default(),
+                    );
+                    Compat01As03::new(fut).await?;
+                }
+
+                let fut = jobs.call("lock", (), addr, Default::default());
+                Compat01As03::new(fut).await?;
+
+                Ok(job_id)
+            } /*
+              _ => Err(Error::UnsupportedProgramKind(program_kind)),
+              */
         }
     }
-    */
 }
 
 #[cfg(test)]

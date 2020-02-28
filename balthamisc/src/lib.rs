@@ -1,8 +1,15 @@
+pub extern crate multiaddr;
+extern crate multibase;
+pub extern crate multihash;
+
 extern crate tokio;
 
 use futures::future::poll_fn;
 use std::{future::Future, pin::Pin, thread};
 use tokio::sync::oneshot::{self, error::RecvError};
+
+pub mod job;
+pub mod multiformats;
 
 mod worker_specs;
 pub use worker_specs::WorkerSpecs;

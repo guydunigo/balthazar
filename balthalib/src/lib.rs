@@ -15,6 +15,7 @@ mod config;
 mod native;
 mod node;
 pub use config::{BalthazarConfig, RunMode};
+use misc::multiformats as formats;
 
 #[derive(Debug)]
 pub enum Error {
@@ -24,6 +25,7 @@ pub enum Error {
     RunnerError(run::RunnerError<run::wasm::Error>),
     ChainError(chain::Error),
     NativeError(i64),
+    MiscError(formats::Error),
 }
 
 impl fmt::Display for Error {
@@ -50,6 +52,12 @@ impl From<chain::Error> for Error {
     }
 }
 
+impl From<formats::Error> for Error {
+    fn from(src: formats::Error) -> Self {
+        Error::MiscError(src)
+    }
+}
+
 pub fn run(mode: RunMode, config: BalthazarConfig) -> Result<(), Error> {
     match mode {
         RunMode::Node => node::run(config)?,
@@ -61,6 +69,7 @@ pub fn run(mode: RunMode, config: BalthazarConfig) -> Result<(), Error> {
         RunMode::Native(args, nb_times) => {
             native::run(args, nb_times).map_err(Error::NativeError)?
         }
+        RunMode::Misc(mode) => misc::multiformats::run(&mode)?,
     }
 
     Ok(())

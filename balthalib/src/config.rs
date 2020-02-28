@@ -19,6 +19,8 @@ pub enum RunMode {
     Runner(Vec<u8>, Vec<u8>, usize),
     /// Run balthwasm program natively.
     Native(Vec<u8>, usize),
+    /// Misc tools.
+    Misc(misc::multiformats::RunMode),
 }
 
 impl Default for RunMode {

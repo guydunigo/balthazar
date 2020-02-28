@@ -1,5 +1,5 @@
-//! Look at [the `clap` documentation](wss://github.com/clap-rs/clap)
-//! and [the `stroctopt` documentation](wss://docs.rs/structopt/0.3.9/structopt/)
+//! Look at [the `clap` documentation](`clap`)
+//! and [the `structopt` documentation](https://docs.rs/structopt/0.3.9/structopt/)
 #![allow(clippy::redundant_clone)]
 extern crate multiaddr;
 
@@ -7,19 +7,32 @@ use clap::{arg_enum, Clap};
 // TODO: use uniform Multiaddr
 use lib::{
     chain::{self, Address},
+    misc::{
+        job::ProgramKind,
+        multiformats::{self as formats, try_decode_multibase_multihash_string},
+        multihash::Multihash,
+    },
     net::Multiaddr as Libp2pMultiaddr,
     proto::{NodeType, NodeTypeContainer},
     store::ipfs::IpfsStorageCreationError,
     store::{Multiaddr, StorageType},
     BalthazarConfig, RunMode,
 };
-use std::{fs::read, io, path::PathBuf, str::FromStr};
+use std::{
+    convert::TryInto,
+    fs::read,
+    io,
+    io::{stdin, Read},
+    path::PathBuf,
+    str::FromStr,
+};
 
 #[derive(Debug)]
 pub enum ParseArgsError {
     IpfsError(IpfsStorageCreationError),
     ContractJobsAbiFileReadError(io::Error),
     WasmProgramFileReadError(io::Error),
+    MiscError(io::Error),
 }
 
 impl From<IpfsStorageCreationError> for ParseArgsError {
@@ -28,7 +41,7 @@ impl From<IpfsStorageCreationError> for ParseArgsError {
     }
 }
 
-#[derive(Clap)]
+#[derive(Clap, Clone)]
 #[clap(rename_all = "kebab-case")]
 pub enum Subcommand {
     /// Starts as a worker node.
@@ -51,7 +64,7 @@ pub enum Subcommand {
         args: Option<String>,
     },
     /// Interract with the blockchain.
-    Blockchain(ChainSub),
+    Chain(ChainSub),
     /// Interract with the storages directly.
     Storage,
     /// Run wasm programs.
@@ -70,27 +83,33 @@ pub enum Subcommand {
         /// Number of times to run the program.
         nb_times: Option<usize>,
     },
+    /// Miscelanous tools
+    Misc(MiscSub),
 }
 
-impl std::convert::TryInto<RunMode> for &Subcommand {
+impl std::convert::TryInto<RunMode> for Subcommand {
     type Error = ParseArgsError;
 
     fn try_into(self) -> Result<RunMode, ParseArgsError> {
         let res = match self {
             Subcommand::Worker { .. } | Subcommand::Manager { .. } => RunMode::Node,
-            Subcommand::Blockchain(mode) => RunMode::Blockchain(mode.into()),
+            Subcommand::Chain(mode) => RunMode::Blockchain(mode.into()),
             Subcommand::Storage => RunMode::Storage,
             Subcommand::Runner {
                 wasm_file_path,
                 args,
                 nb_times,
             } => RunMode::Runner(
-                read(wasm_file_path.clone()).map_err(ParseArgsError::WasmProgramFileReadError)?,
+                read(wasm_file_path).map_err(ParseArgsError::WasmProgramFileReadError)?,
                 args.clone().into_bytes(),
                 nb_times.unwrap_or(1),
             ),
             Subcommand::Native { args, nb_times } => {
                 RunMode::Native(args.clone().into_bytes(), nb_times.unwrap_or(1))
+            }
+            // TODO: not clone, use references
+            Subcommand::Misc(mode) => {
+                RunMode::Misc(mode.try_into().map_err(ParseArgsError::MiscError)?)
             }
         };
 
@@ -98,7 +117,62 @@ impl std::convert::TryInto<RunMode> for &Subcommand {
     }
 }
 
-#[derive(Clap)]
+#[derive(Clap, Clone)]
+#[clap(rename_all = "kebab-case")]
+pub enum MiscSub {
+    /// Hash given data of file.
+    /// If no flag is provided, reads from stdin.
+    Hash {
+        /// Hash given string.
+        #[clap(short, long, conflicts_with("file"))]
+        data: Option<String>,
+        /// Hash file.
+        #[clap(short, long)]
+        file: Option<String>,
+    },
+    /// Check given hash and data or file.
+    Check {
+        /// Multibase encoded multihash of the data.
+        #[clap(parse(try_from_str = try_decode_multibase_multihash_string))]
+        hash: Multihash,
+        /// Check given string.
+        #[clap(short, long, conflicts_with("file"))]
+        data: Option<String>,
+        /// Check given file.
+        #[clap(short, long)]
+        file: Option<String>,
+    },
+}
+
+impl std::convert::TryInto<formats::RunMode> for MiscSub {
+    type Error = io::Error;
+
+    fn try_into(self) -> Result<formats::RunMode, Self::Error> {
+        fn get_data(data: Option<String>, file: Option<String>) -> Result<Vec<u8>, io::Error> {
+            let data = match (file, data) {
+                (Some(file), _) => read(file)?,
+                (None, Some(data)) => data.into_bytes(),
+                (None, None) => {
+                    let mut vec = Vec::new();
+                    stdin().read_to_end(&mut vec)?;
+                    vec
+                }
+            };
+            Ok(data)
+        }
+
+        let res = match self {
+            MiscSub::Hash { data, file } => formats::RunMode::Hash(get_data(data, file)?),
+            MiscSub::Check { hash, data, file } => {
+                formats::RunMode::Check(hash, get_data(data, file)?)
+            }
+        };
+
+        Ok(res)
+    }
+}
+
+#[derive(Clap, Clone)]
 #[clap(rename_all = "kebab-case")]
 pub enum ChainSub {
     /// Get latest block information.
@@ -112,35 +186,88 @@ pub enum ChainSub {
     Jobs(ChainJobsSub),
 }
 
-#[derive(Clap)]
+#[derive(Clap, Clone)]
 #[clap(rename_all = "kebab-case")]
 pub enum ChainJobsSub {
+    /// Get value of `counter`.
     Get,
+    /// Set value of `counter`.
     Set {
         /// Value to give to counter.
         new: u128,
     },
+    /// Increase value of `counter`.
     Inc,
+    /// Subscribe to contract's events.
     Subscribe,
+    /// List events and their parameters.
     Events,
+    /// Send a new Job.
+    Create {
+        #[clap(parse(try_from_str = try_decode_multibase_multihash_string))]
+        program_hash: Multihash,
+        addresses: String,
+        arguments: String,
+        timeout: u64,
+        max_failures: u64,
+        best_method: u64,
+        max_worker_price: u64,
+        min_cpu_count: u64,
+        min_memory: u64,
+        min_network_speed: u64,
+        max_network_usage: u64,
+        redundancy: u64,
+        /// Includes tests.
+        #[clap(name = "tests", short, long)]
+        includes_tests: bool,
+    },
 }
 
-impl Into<chain::RunMode> for &ChainSub {
+impl Into<chain::RunMode> for ChainSub {
     fn into(self) -> chain::RunMode {
         match self {
             ChainSub::Block => chain::RunMode::Block,
-            ChainSub::Balance { address } => chain::RunMode::Balance(*address),
+            ChainSub::Balance { address } => chain::RunMode::Balance(address),
             ChainSub::Jobs(ChainJobsSub::Get) => chain::RunMode::JobsCounterGet,
-            ChainSub::Jobs(ChainJobsSub::Set { new }) => chain::RunMode::JobsCounterSet(*new),
+            ChainSub::Jobs(ChainJobsSub::Set { new }) => chain::RunMode::JobsCounterSet(new),
             ChainSub::Jobs(ChainJobsSub::Inc) => chain::RunMode::JobsCounterInc,
             ChainSub::Jobs(ChainJobsSub::Subscribe) => chain::RunMode::JobsSubscribe,
             ChainSub::Jobs(ChainJobsSub::Events) => chain::RunMode::JobsEvents,
+            ChainSub::Jobs(ChainJobsSub::Create {
+                program_hash,
+                addresses,
+                arguments,
+                timeout,
+                max_failures,
+                best_method,
+                max_worker_price,
+                min_cpu_count,
+                min_memory,
+                min_network_speed,
+                max_network_usage,
+                redundancy,
+                includes_tests,
+            }) => chain::RunMode::JobsSendJob {
+                program_kind: ProgramKind::Wasm(program_hash),
+                addresses: vec![addresses.into_bytes()],
+                arguments: vec![arguments.into_bytes()],
+                timeout,
+                max_failures,
+                best_method: best_method.try_into().unwrap(),
+                max_worker_price,
+                min_cpu_count,
+                min_memory,
+                min_network_speed,
+                max_network_usage,
+                redundancy,
+                includes_tests,
+            },
         }
     }
 }
 
 // TODO: validators
-#[derive(Clap)]
+#[derive(Clap, Clone)]
 #[clap(rename_all = "kebab-case")]
 pub struct BalthazarArgs {
     #[clap(subcommand)]
@@ -198,7 +325,7 @@ impl std::convert::TryInto<(RunMode, BalthazarConfig)> for BalthazarArgs {
     fn try_into(self) -> Result<(RunMode, BalthazarConfig), Self::Error> {
         let mut config = BalthazarConfig::default();
 
-        let run_mode = (&self.subcommand).try_into()?;
+        let run_mode = self.subcommand.clone().try_into()?;
 
         match self.subcommand {
             Subcommand::Worker {
