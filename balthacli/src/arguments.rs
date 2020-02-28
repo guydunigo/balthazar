@@ -221,6 +221,8 @@ pub enum ChainJobsSub {
         #[clap(name = "tests", short, long)]
         includes_tests: bool,
     },
+    /// Get number of jobs stored.
+    Length,
 }
 
 impl Into<chain::RunMode> for ChainSub {
@@ -262,6 +264,7 @@ impl Into<chain::RunMode> for ChainSub {
                 redundancy,
                 includes_tests,
             },
+            ChainSub::Jobs(ChainJobsSub::Length) => chain::RunMode::JobsLength,
         }
     }
 }

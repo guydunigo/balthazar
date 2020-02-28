@@ -3,7 +3,6 @@ pragma experimental ABIEncoderV2;
 
 contract Jobs {
     uint128 public counter;
-    event CounterHasNewValue(uint128 new_counter);
 
     function set_counter(uint128 new_val) public {
         require(counter != new_val);
@@ -66,7 +65,7 @@ contract Jobs {
         uint64 min_network_speed,
         uint64 max_network_usage,
         uint64 redundancy
-    ) public returns (uint64 job_id) {
+    ) public {
         jobs.push(Job(ProgramKind.Wasm,
                       new bytes[](1),
                       program_hash,
@@ -87,7 +86,7 @@ contract Jobs {
                       false
                      ));
 
-        return uint64(jobs.length - 1);
+        emit JobNew(msg.sender, uint64(jobs.length - 1));
     }
 
     function push_program_address(uint64 job_id, bytes memory program_address) public {
@@ -112,10 +111,15 @@ contract Jobs {
 
     function lock(uint64 job_id) public {
         require(job_id < jobs.length, "Unknown job id");
+        require(jobs[job_id].is_locked == false, "Job is already marked as locked.");
         require(jobs[job_id].sender == msg.sender, "Not authorized: not job sender");
 
         jobs[job_id].is_locked = true;
-        emit JobNew(job_id);
+        emit JobLocked(job_id);
+    }
+
+    function get_jobs_length() public view returns (uint128) {
+        return uint128(jobs.length);
     }
 
     function get_job(uint64 job_id) public view returns (
@@ -183,6 +187,8 @@ contract Jobs {
         return jobs[job_id].tasks[task_id].result[0];
     }
 
-    event JobNew(uint64 job_id);
+    event JobNew(address sender, uint64 job_id);
+    event JobLocked(uint64 job_id);
     event TaskNewResult(uint64 job_id, uint64 task_id, bytes result);
+    event CounterHasNewValue(uint128 new_counter);
 }

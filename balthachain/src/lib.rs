@@ -5,13 +5,17 @@ extern crate web3;
 
 mod config;
 pub use config::{Address, ChainConfig};
+use ethabi::Event;
 use futures::{compat::Compat01As03, executor::block_on, future, Stream, StreamExt};
-use misc::job::{BestMethod, JobId, ProgramKind};
-pub use web3::types::{Block, BlockId, BlockNumber, H256, U256};
+use misc::job::{BestMethod, JobId, ProgramKind, TaskId};
+use std::{
+    convert::{TryFrom, TryInto},
+    fmt,
+};
 use web3::{
     contract::{Contract, Error as ContractError},
     transports::{EventLoopHandle, WebSocket},
-    types::{FilterBuilder, Log},
+    types::{self, Block, BlockId, BlockNumber, FilterBuilder, Log},
     Web3,
 };
 
@@ -23,6 +27,13 @@ pub enum Error {
     Contract(ContractError),
     EthAbi(ethabi::Error),
     UnsupportedProgramKind(ProgramKind),
+    CouldntParseJobsEvent(String),
+    CouldntParseJobsEventFromLog(Box<Log>),
+    JobsEventDataWrongSize {
+        expected: usize,
+        got: usize,
+        data: Vec<u8>,
+    },
 }
 
 impl From<web3::Error> for Error {
@@ -40,6 +51,12 @@ impl From<ContractError> for Error {
 impl From<ethabi::Error> for Error {
     fn from(e: ethabi::Error) -> Self {
         Error::EthAbi(e)
+    }
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self)
     }
 }
 
@@ -67,6 +84,7 @@ pub enum RunMode {
         redundancy: u64,
         includes_tests: bool,
     },
+    JobsLength,
 }
 
 pub fn run(mode: &RunMode, config: &ChainConfig) -> Result<(), Error> {
@@ -161,9 +179,140 @@ async fn run_async(mode: &RunMode, config: &ChainConfig) -> Result<(), Error> {
 
             println!("Job stored ! Job id : {}", job_id);
         }
+        RunMode::JobsLength => {
+            let len = chain.jobs_length().await?;
+            println!("Number of stored jobs: {}.", len);
+        }
     }
 
     Ok(())
+}
+
+#[derive(Debug, Clone)]
+pub enum JobsEvent {
+    JobNew {
+        sender: Address,
+        job_id: u64,
+    },
+    JobLocked {
+        job_id: u64,
+    },
+    TaskNewResult {
+        job_id: JobId,
+        task_id: TaskId,
+        result: Vec<u8>,
+    },
+    CounterHasNewValue(u128),
+}
+
+impl TryFrom<(&ethabi::Contract, Log)> for JobsEvent {
+    type Error = Error;
+
+    // TODO: ugly ?
+    /// We assume that [`Log::data`]] is just all the arguments of the events as `[u8; 256]`
+    /// concatenated together.
+    fn try_from((contract, log): (&ethabi::Contract, Log)) -> Result<Self, Self::Error> {
+        for t in log.topics.iter() {
+            if let Some(evt) = contract.events().find(|e| e.signature() == *t) {
+                match JobsEventKind::try_from(&evt.name[..])? {
+                    JobsEventKind::JobNew => {
+                        let len = log.data.0.len();
+                        if len == 64 {
+                            let sender = types::Address::from_slice(&log.data.0[(32 - 20)..32]);
+                            let job_id =
+                                types::U64::from_big_endian(&log.data.0[(64 - 8)..64]).as_u64();
+                            return Ok(JobsEvent::JobNew { sender, job_id });
+                        } else {
+                            return Err(Error::JobsEventDataWrongSize {
+                                expected: 64,
+                                got: len,
+                                data: log.data.0,
+                            });
+                        }
+                    }
+                    JobsEventKind::JobLocked => {
+                        let len = log.data.0.len();
+                        if len == 32 {
+                            let job_id =
+                                types::U64::from_big_endian(&log.data.0[(32 - 8)..32]).as_u64();
+                            return Ok(JobsEvent::JobLocked { job_id });
+                        } else {
+                            return Err(Error::JobsEventDataWrongSize {
+                                expected: 32,
+                                got: len,
+                                data: log.data.0,
+                            });
+                        }
+                    }
+                    JobsEventKind::TaskNewResult => {
+                        let len = log.data.0.len();
+                        if len == 96 {
+                            let job_id =
+                                types::U64::from_big_endian(&log.data.0[(32 - 8)..32]).as_u64();
+                            let task_id =
+                                types::U64::from_big_endian(&log.data.0[(64 - 8)..64]).as_u64();
+                            return Ok(JobsEvent::TaskNewResult {
+                                job_id,
+                                task_id,
+                                result: Vec::from(&log.data.0[64..]),
+                            });
+                        } else {
+                            return Err(Error::JobsEventDataWrongSize {
+                                expected: 96,
+                                got: len,
+                                data: log.data.0,
+                            });
+                        }
+                    }
+                    JobsEventKind::CounterHasNewValue => {
+                        let len = log.data.0.len();
+                        if len == 32 {
+                            let counter =
+                                types::U128::from_big_endian(&log.data.0[(len - 16)..len])
+                                    .as_u128();
+                            return Ok(JobsEvent::CounterHasNewValue(counter));
+                        } else {
+                            return Err(Error::JobsEventDataWrongSize {
+                                expected: 32,
+                                got: len,
+                                data: log.data.0,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        Err(Error::CouldntParseJobsEventFromLog(Box::new(log)))
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum JobsEventKind {
+    JobNew,
+    JobLocked,
+    TaskNewResult,
+    CounterHasNewValue,
+}
+
+impl std::convert::TryFrom<&str> for JobsEventKind {
+    type Error = Error;
+
+    fn try_from(src: &str) -> Result<Self, Self::Error> {
+        match src {
+            "JobNew" => Ok(JobsEventKind::JobNew),
+            "JobLocked" => Ok(JobsEventKind::JobLocked),
+            "TaskNewResult" => Ok(JobsEventKind::TaskNewResult),
+            "CounterHasNewValue" => Ok(JobsEventKind::CounterHasNewValue),
+            _ => Err(Error::CouldntParseJobsEvent(String::from(src))),
+        }
+    }
+}
+
+impl fmt::Display for JobsEventKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
 }
 
 #[derive(Debug)]
@@ -191,21 +340,21 @@ impl<'a> Chain<'a> {
         }
     }
 
-    pub async fn block(&self, block_id: BlockId) -> Result<Option<Block<H256>>, Error> {
+    pub async fn block(&self, block_id: BlockId) -> Result<Option<Block<types::H256>>, Error> {
         Compat01As03::new(self.web3.eth().block(block_id))
             .await
             .map_err(Error::Web3)
     }
 
     /// Get balance of given account.
-    pub async fn balance(&self, addr: Address) -> Result<U256, Error> {
+    pub async fn balance(&self, addr: Address) -> Result<types::U256, Error> {
         Compat01As03::new(self.web3.eth().balance(addr, None))
             .await
             .map_err(Error::Web3)
     }
 
     /// Get balance if provided account if [`ChainConfig::ethereum_address`] is `Some(_)`.
-    pub async fn local_balance(&self) -> Result<U256, Error> {
+    pub async fn local_balance(&self) -> Result<types::U256, Error> {
         if let Some(addr) = self.config.ethereum_address() {
             self.balance(*addr).await
         } else {
@@ -237,6 +386,14 @@ impl<'a> Chain<'a> {
         }
     }
 
+    pub async fn jobs_length(&self) -> Result<u128, Error> {
+        let jobs = self.jobs()?;
+        let addr = self.local_address()?;
+
+        let fut = jobs.query("get_jobs_length", (), addr, Default::default(), None);
+        Ok(Compat01As03::new(fut).await?)
+    }
+
     pub async fn jobs_counter(&self) -> Result<u128, Error> {
         let jobs = self.jobs()?;
         let addr = self.local_address()?;
@@ -245,7 +402,7 @@ impl<'a> Chain<'a> {
         Ok(Compat01As03::new(fut).await?)
     }
 
-    pub async fn jobs_set_counter(&self, new: u128) -> Result<H256, Error> {
+    pub async fn jobs_set_counter(&self, new: u128) -> Result<types::H256, Error> {
         let jobs = self.jobs()?;
         let addr = self.local_address()?;
 
@@ -253,7 +410,7 @@ impl<'a> Chain<'a> {
         Ok(Compat01As03::new(fut).await?)
     }
 
-    pub async fn jobs_inc_counter(&self) -> Result<H256, Error> {
+    pub async fn jobs_inc_counter(&self) -> Result<types::H256, Error> {
         let jobs = self.jobs()?;
         let addr = self.local_address()?;
 
@@ -263,20 +420,42 @@ impl<'a> Chain<'a> {
 
     /// Substribe to events.
     // TODO: convert events and parameters to local enum.
-    pub async fn jobs_subscribe(&self) -> Result<impl Stream<Item = Result<Log, Error>>, Error> {
+    pub async fn jobs_subscribe(
+        &self,
+    ) -> Result<impl Stream<Item = Result<JobsEvent, Error>>, Error> {
         let jobs = self.jobs()?;
         let filter = FilterBuilder::default()
             .address(vec![jobs.address()])
             .build();
 
         let stream_fut = Compat01As03::new(self.web3.eth_subscribe().subscribe_logs(filter));
-        Ok(Compat01As03::new(stream_fut.await?).map(|e| e.map_err(Error::Web3)))
+        let stream = Compat01As03::new(stream_fut.await?);
+
+        let jobs_ethabi = self.jobs_ethabi()?;
+        Ok(stream.map(move |e| match e {
+            Ok(log) => (&jobs_ethabi, log).try_into(),
+            Err(e) => Err(Error::Web3(e)),
+        }))
     }
 
     pub fn jobs_events(&self) -> Result<Vec<ethabi::Event>, Error> {
         let c = self.jobs_ethabi()?;
         Ok(c.events().cloned().collect())
     }
+
+    fn jobs_get_event(&self, event: JobsEventKind) -> Result<Event, Error> {
+        Ok(self
+            .jobs_ethabi()?
+            .event(&format!("{}", event)[..])?
+            .clone())
+    }
+
+    /*
+    fn jobs_event_once(&self, event: JobsEventKind) -> Result<JobsEventKind, Error> {
+        let evt = self.jobs_get_event(event)?;
+        self.web3.eth_subscribe().subscribe_logs
+    }
+    */
 
     pub async fn jobs_send_job(
         &self,
@@ -312,31 +491,41 @@ impl<'a> Chain<'a> {
                     max_network_usage,
                     redundancy,
                 );
-                let fut = jobs.query("send_wasm_job", args, addr, Default::default(), None);
+                let fut = jobs.call_with_confirmations(
+                    "send_wasm_job",
+                    args,
+                    addr,
+                    Default::default(),
+                    0,
+                );
 
-                let job_id = Compat01As03::new(fut).await?;
+                Compat01As03::new(fut).await?;
+                let job_id = 0;
+                println!("2, {}", job_id);
 
                 for address in addresses.iter() {
-                    let fut = jobs.call(
+                    let fut = jobs.call_with_confirmations(
                         "push_program_address",
-                        Vec::from(*address),
+                        (job_id, Vec::from(*address)),
                         addr,
                         Default::default(),
+                        0,
                     );
                     Compat01As03::new(fut).await?;
                 }
 
                 for args in arguments.iter() {
-                    let fut = jobs.call(
+                    let fut = jobs.call_with_confirmations(
                         "push_program_arguments",
-                        Vec::from(*args),
+                        (job_id, Vec::from(*args)),
                         addr,
                         Default::default(),
+                        0,
                     );
                     Compat01As03::new(fut).await?;
                 }
 
-                let fut = jobs.call("lock", (), addr, Default::default());
+                let fut = jobs.call_with_confirmations("lock", job_id, addr, Default::default(), 0);
                 Compat01As03::new(fut).await?;
 
                 Ok(job_id)
