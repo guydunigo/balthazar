@@ -33,7 +33,6 @@ contract Jobs {
         uint64 timeout;
         uint64 max_failures;
 
-        BestMethod best_method;
         WorkerParameters worker_parameters;
 
         uint64 redundancy;
@@ -45,6 +44,7 @@ contract Jobs {
     }
 
     struct WorkerParameters {
+        BestMethod best_method;
         uint64 max_worker_price;
         uint64 min_cpu_count;
         uint64 min_memory;
@@ -67,13 +67,13 @@ contract Jobs {
         uint64 redundancy
     ) public {
         jobs.push(Job(ProgramKind.Wasm,
-                      new bytes[](1),
+                      new bytes[](0),
                       program_hash,
                       0,
                       timeout,
                       max_failures,
-                      best_method,
                       WorkerParameters (
+                          best_method,
                           max_worker_price,
                           min_cpu_count,
                           min_memory,
@@ -87,6 +87,15 @@ contract Jobs {
                      ));
 
         emit JobNew(msg.sender, uint64(jobs.length - 1));
+    }
+
+    function set_includes_tests(uint64 job_id, bool val) public {
+        require(job_id < jobs.length, "Unknown job id");
+        require(jobs[job_id].is_locked == false, "Job is marked as locked.");
+        require(jobs[job_id].sender == msg.sender, "Not authorized: not job sender.");
+        require(jobs[job_id].includes_tests != val, "Already at that value.");
+
+        jobs[job_id].includes_tests = val;
     }
 
     function push_program_address(uint64 job_id, bytes memory program_address) public {
@@ -127,14 +136,9 @@ contract Jobs {
         bytes memory,
         uint64,
         uint64,
-        BestMethod,
         uint64,
-        uint64,
-        uint64,
-        uint64,
-        uint64,
-        uint64,
-        bool includes_tests
+        bool,
+        address
     ) {
         require(job_id < jobs.length, "Unknown job id");
 
@@ -144,18 +148,34 @@ contract Jobs {
             job.program_hash,
             job.timeout,
             job.max_failures,
-            job.best_method,
+            job.redundancy,
+            job.includes_tests,
+            job.sender
+        );
+    }
+
+    function get_worker_parameters(uint64 job_id) public view returns (
+        BestMethod,
+        uint64,
+        uint64,
+        uint64,
+        uint64,
+        uint64
+    ) {
+        require(job_id < jobs.length, "Unknown job id");
+
+        Job memory job = jobs[job_id];
+        return (
+            job.worker_parameters.best_method,
             job.worker_parameters.max_worker_price,
             job.worker_parameters.min_cpu_count,
             job.worker_parameters.min_memory,
             job.worker_parameters.min_network_speed,
-            job.worker_parameters.max_network_usage,
-            job.redundancy,
-            job.includes_tests
+            job.worker_parameters.max_network_usage
         );
     }
 
-    function get_job_addresses(uint64 job_id) public view returns (bytes[] memory) {
+    function get_addresses(uint64 job_id) public view returns (bytes[] memory) {
         require(job_id < jobs.length, "Unknown job id");
         return jobs[job_id].addresses;
     }

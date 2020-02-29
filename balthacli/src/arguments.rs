@@ -6,9 +6,9 @@ extern crate multiaddr;
 use clap::{arg_enum, Clap};
 // TODO: use uniform Multiaddr
 use lib::{
-    chain::{self, Address},
+    chain::{self, Address, JobsEventKind},
     misc::{
-        job::ProgramKind,
+        job::{JobId, ProgramKind, TaskId},
         multiformats::{self as formats, try_decode_multibase_multihash_string},
         multihash::Multihash,
     },
@@ -189,25 +189,29 @@ pub enum ChainSub {
 #[derive(Clap, Clone)]
 #[clap(rename_all = "kebab-case")]
 pub enum ChainJobsSub {
-    /// Get value of `counter`.
-    Get,
-    /// Set value of `counter`.
-    Set {
-        /// Value to give to counter.
-        new: u128,
+    /// Get value of `counter` or modify it.
+    Counter {
+        /// Increment counter value.
+        #[clap(short, long)]
+        inc: bool,
+        /// Set the counter to given value.
+        #[clap(short, long, conflicts_with("inc"))]
+        set: Option<u128>,
     },
-    /// Increase value of `counter`.
-    Inc,
     /// Subscribe to contract's events.
-    Subscribe,
+    Subscribe { events_names: Vec<JobsEventKind> },
     /// List events and their parameters.
     Events,
+    /// Get number of jobs stored.
+    Length,
     /// Send a new Job.
     Create {
         #[clap(parse(try_from_str = try_decode_multibase_multihash_string))]
         program_hash: Multihash,
-        addresses: String,
-        arguments: String,
+        #[clap(short, long, number_of_values(1))]
+        addresses: Vec<Multiaddr>,
+        #[clap(name = "parameters", short, long, number_of_values(1))]
+        arguments: Vec<String>,
         timeout: u64,
         max_failures: u64,
         best_method: u64,
@@ -221,8 +225,16 @@ pub enum ChainJobsSub {
         #[clap(name = "tests", short, long)]
         includes_tests: bool,
     },
-    /// Get number of jobs stored.
-    Length,
+    /// Display a job and all its information.
+    Get { job_id: JobId },
+    /// Get result for given task or set it if `--set` is provided.
+    Result {
+        job_id: JobId,
+        task_id: TaskId,
+        /// Set result instead of getting it.
+        #[clap(short, long)]
+        set: Option<String>,
+    },
 }
 
 impl Into<chain::RunMode> for ChainSub {
@@ -230,11 +242,22 @@ impl Into<chain::RunMode> for ChainSub {
         match self {
             ChainSub::Block => chain::RunMode::Block,
             ChainSub::Balance { address } => chain::RunMode::Balance(address),
-            ChainSub::Jobs(ChainJobsSub::Get) => chain::RunMode::JobsCounterGet,
-            ChainSub::Jobs(ChainJobsSub::Set { new }) => chain::RunMode::JobsCounterSet(new),
-            ChainSub::Jobs(ChainJobsSub::Inc) => chain::RunMode::JobsCounterInc,
-            ChainSub::Jobs(ChainJobsSub::Subscribe) => chain::RunMode::JobsSubscribe,
+            ChainSub::Jobs(ChainJobsSub::Counter {
+                set: None,
+                inc: false,
+            }) => chain::RunMode::JobsCounterGet,
+            ChainSub::Jobs(ChainJobsSub::Counter { set: Some(new), .. }) => {
+                chain::RunMode::JobsCounterSet(new)
+            }
+            ChainSub::Jobs(ChainJobsSub::Counter {
+                set: None,
+                inc: true,
+            }) => chain::RunMode::JobsCounterInc,
+            ChainSub::Jobs(ChainJobsSub::Subscribe { events_names }) => {
+                chain::RunMode::JobsSubscribe(events_names)
+            }
             ChainSub::Jobs(ChainJobsSub::Events) => chain::RunMode::JobsEvents,
+            ChainSub::Jobs(ChainJobsSub::Length) => chain::RunMode::JobsLength,
             ChainSub::Jobs(ChainJobsSub::Create {
                 program_hash,
                 addresses,
@@ -251,8 +274,8 @@ impl Into<chain::RunMode> for ChainSub {
                 includes_tests,
             }) => chain::RunMode::JobsSendJob {
                 program_kind: ProgramKind::Wasm(program_hash),
-                addresses: vec![addresses.into_bytes()],
-                arguments: vec![arguments.into_bytes()],
+                addresses,
+                arguments: arguments.iter().map(|s| s.clone().into_bytes()).collect(),
                 timeout,
                 max_failures,
                 best_method: best_method.try_into().unwrap(),
@@ -264,7 +287,21 @@ impl Into<chain::RunMode> for ChainSub {
                 redundancy,
                 includes_tests,
             },
-            ChainSub::Jobs(ChainJobsSub::Length) => chain::RunMode::JobsLength,
+            ChainSub::Jobs(ChainJobsSub::Get { job_id }) => chain::RunMode::JobsGetJob { job_id },
+            ChainSub::Jobs(ChainJobsSub::Result {
+                job_id,
+                task_id,
+                set: None,
+            }) => chain::RunMode::JobsGetResult { job_id, task_id },
+            ChainSub::Jobs(ChainJobsSub::Result {
+                job_id,
+                task_id,
+                set: Some(result),
+            }) => chain::RunMode::JobsSetResult {
+                job_id,
+                task_id,
+                result: result.clone().into_bytes(),
+            },
         }
     }
 }

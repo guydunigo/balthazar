@@ -7,7 +7,11 @@ mod config;
 pub use config::{Address, ChainConfig};
 use ethabi::Event;
 use futures::{compat::Compat01As03, executor::block_on, future, Stream, StreamExt};
-use misc::job::{BestMethod, JobId, ProgramKind, TaskId};
+use misc::{
+    job::{BestMethod, Job, JobId, ProgramKind, TaskId, UnknownValue, WorkerParameters},
+    multiaddr::{self, Multiaddr},
+    multihash::{self, Multihash},
+};
 use std::{
     convert::{TryFrom, TryInto},
     fmt,
@@ -34,6 +38,13 @@ pub enum Error {
         got: usize,
         data: Vec<u8>,
     },
+    /// When storing a job, an JobNew event is sent with the new job id.
+    /// This error is sent when the event couldn't be found.
+    CouldntFindJobIdEvent,
+    MultiaddrParse(multiaddr::Error),
+    Multihash(multihash::DecodeOwnedError),
+    ProgramKindParse(UnknownValue<(u64, Option<Multihash>)>),
+    BestMethodParse(UnknownValue<u64>),
 }
 
 impl From<web3::Error> for Error {
@@ -54,6 +65,18 @@ impl From<ethabi::Error> for Error {
     }
 }
 
+impl From<multiaddr::Error> for Error {
+    fn from(e: multiaddr::Error) -> Self {
+        Error::MultiaddrParse(e)
+    }
+}
+
+impl From<multihash::DecodeOwnedError> for Error {
+    fn from(e: multihash::DecodeOwnedError) -> Self {
+        Error::Multihash(e)
+    }
+}
+
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:?}", self)
@@ -67,11 +90,14 @@ pub enum RunMode {
     JobsCounterGet,
     JobsCounterSet(u128),
     JobsCounterInc,
-    JobsSubscribe,
+    /// Subscribe to Jobs smart contract given events or if none are provided, all of them.
+    JobsSubscribe(Vec<JobsEventKind>),
+    /// List all Jobs smart contract events.
     JobsEvents,
+    JobsLength,
     JobsSendJob {
         program_kind: ProgramKind,
-        addresses: Vec<Vec<u8>>,
+        addresses: Vec<Multiaddr>,
         arguments: Vec<Vec<u8>>,
         timeout: u64,
         max_failures: u64,
@@ -84,7 +110,18 @@ pub enum RunMode {
         redundancy: u64,
         includes_tests: bool,
     },
-    JobsLength,
+    JobsGetJob {
+        job_id: JobId,
+    },
+    JobsSetResult {
+        job_id: JobId,
+        task_id: TaskId,
+        result: Vec<u8>,
+    },
+    JobsGetResult {
+        job_id: JobId,
+        task_id: TaskId,
+    },
 }
 
 pub fn run(mode: &RunMode, config: &ChainConfig) -> Result<(), Error> {
@@ -129,20 +166,33 @@ async fn run_async(mode: &RunMode, config: &ChainConfig) -> Result<(), Error> {
             chain.jobs_inc_counter().await?;
             println!("Counter increased.");
         }
-        RunMode::JobsSubscribe => {
-            let stream = chain.jobs_subscribe().await?;
-
-            stream
-                .for_each(|e| {
-                    println!("{:?}", e);
-                    future::ready(())
-                })
-                .await;
+        RunMode::JobsSubscribe(events) => {
+            if events.is_empty() {
+                let stream = Box::new(chain.jobs_subscribe().await?);
+                stream
+                    .for_each(|e| {
+                        println!("{:?}", e);
+                        future::ready(())
+                    })
+                    .await;
+            } else {
+                let stream = chain.jobs_subscribe_to_event_kinds(&events[..]).await?;
+                stream
+                    .for_each(|e| {
+                        println!("{:?}", e);
+                        future::ready(())
+                    })
+                    .await;
+            }
         }
         RunMode::JobsEvents => {
             for evt in chain.jobs_events()? {
                 println!("{:?}, {}", evt, evt.signature());
             }
+        }
+        RunMode::JobsLength => {
+            let len = chain.jobs_length().await?;
+            println!("Number of stored jobs: {}.", len);
         }
         RunMode::JobsSendJob {
             program_kind,
@@ -159,29 +209,50 @@ async fn run_async(mode: &RunMode, config: &ChainConfig) -> Result<(), Error> {
             redundancy,
             includes_tests,
         } => {
-            let job_id = chain
-                .jobs_send_job(
-                    program_kind,
-                    &addresses.iter().map(|a| &a[..]).collect::<Vec<&[u8]>>()[..],
-                    &arguments.iter().map(|a| &a[..]).collect::<Vec<&[u8]>>()[..],
-                    *timeout,
-                    *max_failures,
-                    *best_method,
-                    *max_worker_price,
-                    *min_cpu_count,
-                    *min_memory,
-                    *min_network_speed,
-                    *max_network_usage,
-                    *redundancy,
-                    *includes_tests,
-                )
-                .await?;
+            let job = Job {
+                job_id: None,
+                program_kind: program_kind.clone(),
+                addresses: addresses.clone(),
+                arguments: arguments.clone(),
+                timeout: *timeout,
+                max_failures: *max_failures,
+                worker_parameters: WorkerParameters {
+                    best_method: *best_method,
+                    max_worker_price: *max_worker_price,
+                    min_cpu_count: *min_cpu_count,
+                    min_memory: *min_memory,
+                    min_network_speed: *min_network_speed,
+                    max_network_usage: *max_network_usage,
+                },
+                redundancy: *redundancy,
+                includes_tests: *includes_tests,
+                sender: chain.local_address()?,
+            };
+
+            let job_id = chain.jobs_send_job(&job).await?;
 
             println!("Job stored ! Job id : {}", job_id);
         }
-        RunMode::JobsLength => {
-            let len = chain.jobs_length().await?;
-            println!("Number of stored jobs: {}.", len);
+        RunMode::JobsGetJob { job_id } => {
+            let job = chain.jobs_get_job(*job_id).await?;
+            println!("{}", job);
+        }
+        RunMode::JobsGetResult { job_id, task_id } => {
+            let result = chain.jobs_get_result(*job_id, *task_id).await?;
+            println!(
+                "Result of task `{}` of job `{}`:\n{}",
+                task_id,
+                job_id,
+                String::from_utf8_lossy(&result[..])
+            );
+        }
+        RunMode::JobsSetResult {
+            job_id,
+            task_id,
+            result,
+        } => {
+            chain.jobs_set_result(*job_id, *task_id, result).await?;
+            println!("Result of task `{}` of job `{}` stored.", task_id, job_id);
         }
     }
 
@@ -309,6 +380,14 @@ impl std::convert::TryFrom<&str> for JobsEventKind {
     }
 }
 
+impl std::str::FromStr for JobsEventKind {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::try_from(s)
+    }
+}
+
 impl fmt::Display for JobsEventKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:?}", self)
@@ -402,24 +481,23 @@ impl<'a> Chain<'a> {
         Ok(Compat01As03::new(fut).await?)
     }
 
-    pub async fn jobs_set_counter(&self, new: u128) -> Result<types::H256, Error> {
+    pub async fn jobs_set_counter(&self, new: u128) -> Result<types::TransactionReceipt, Error> {
         let jobs = self.jobs()?;
         let addr = self.local_address()?;
 
-        let fut = jobs.call("set_counter", new, addr, Default::default());
+        let fut = jobs.call_with_confirmations("set_counter", new, addr, Default::default(), 0);
         Ok(Compat01As03::new(fut).await?)
     }
 
-    pub async fn jobs_inc_counter(&self) -> Result<types::H256, Error> {
+    pub async fn jobs_inc_counter(&self) -> Result<types::TransactionReceipt, Error> {
         let jobs = self.jobs()?;
         let addr = self.local_address()?;
 
-        let fut = jobs.call("inc_counter", (), addr, Default::default());
+        let fut = jobs.call_with_confirmations("inc_counter", (), addr, Default::default(), 0);
         Ok(Compat01As03::new(fut).await?)
     }
 
-    /// Substribe to events.
-    // TODO: convert events and parameters to local enum.
+    /// Subscribe to all events on given contract.
     pub async fn jobs_subscribe(
         &self,
     ) -> Result<impl Stream<Item = Result<JobsEvent, Error>>, Error> {
@@ -438,58 +516,96 @@ impl<'a> Chain<'a> {
         }))
     }
 
+    /// Subscribe to given Events objects.
+    async fn jobs_subscribe_to_events(
+        &self,
+        events: &[Event],
+    ) -> Result<impl Stream<Item = Result<JobsEvent, Error>>, Error> {
+        let jobs = self.jobs()?;
+        let filter = FilterBuilder::default().address(vec![jobs.address()]);
+
+        /*
+        for evt in events.iter() {
+            filter = filter.topics(Some(vec![evt.signature()]), None, None, None);
+        }
+        */
+
+        let filter = filter.topics(
+            Some(events.iter().map(|e| e.signature()).collect()),
+            None,
+            None,
+            None,
+        );
+
+        let stream_fut =
+            Compat01As03::new(self.web3.eth_subscribe().subscribe_logs(filter.build()));
+        let stream = Compat01As03::new(stream_fut.await?);
+
+        let jobs_ethabi = self.jobs_ethabi()?;
+        Ok(stream.map(move |e| match e {
+            Ok(log) => (&jobs_ethabi, log).try_into(),
+            Err(e) => Err(Error::Web3(e)),
+        }))
+    }
+
+    /// Subscribe to given list of events kinds.
+    pub async fn jobs_subscribe_to_event_kinds(
+        &self,
+        events: &[JobsEventKind],
+    ) -> Result<impl Stream<Item = Result<JobsEvent, Error>>, Error> {
+        let mut list = Vec::with_capacity(events.len());
+        for evt in events {
+            list.push(self.jobs_event(*evt)?);
+        }
+
+        self.jobs_subscribe_to_events(&list[..]).await
+    }
+
+    /// Subscribe to given event kind.
+    pub async fn jobs_subscribe_to_event_kind(
+        &self,
+        event: JobsEventKind,
+    ) -> Result<impl Stream<Item = Result<JobsEvent, Error>>, Error> {
+        let evt = self.jobs_event(event)?;
+        let array: [Event; 1] = [evt];
+
+        self.jobs_subscribe_to_events(&array[..]).await
+    }
+
     pub fn jobs_events(&self) -> Result<Vec<ethabi::Event>, Error> {
         let c = self.jobs_ethabi()?;
         Ok(c.events().cloned().collect())
     }
 
-    fn jobs_get_event(&self, event: JobsEventKind) -> Result<Event, Error> {
+    fn jobs_event(&self, event: JobsEventKind) -> Result<Event, Error> {
         Ok(self
             .jobs_ethabi()?
             .event(&format!("{}", event)[..])?
             .clone())
     }
 
-    /*
-    fn jobs_event_once(&self, event: JobsEventKind) -> Result<JobsEventKind, Error> {
-        let evt = self.jobs_get_event(event)?;
-        self.web3.eth_subscribe().subscribe_logs
-    }
-    */
-
-    pub async fn jobs_send_job(
-        &self,
-        program_kind: &ProgramKind,
-        addresses: &[&[u8]],
-        arguments: &[&[u8]],
-        timeout: u64,
-        max_failures: u64,
-        best_method: BestMethod,
-        max_worker_price: u64,
-        min_cpu_count: u64,
-        min_memory: u64,
-        min_network_speed: u64,
-        max_network_usage: u64,
-        redundancy: u64,
-        _includes_tests: bool,
-    ) -> Result<JobId, Error> {
+    pub async fn jobs_send_job(&self, job: &Job<Address>) -> Result<JobId, Error> {
         let jobs = self.jobs()?;
         let addr = self.local_address()?;
-        let best_method: u64 = best_method.into();
+        let best_method: u64 = job.worker_parameters.best_method.into();
 
-        match program_kind {
-            ProgramKind::Wasm(hash) => {
+        match job.program_kind {
+            ProgramKind::Wasm(ref hash) => {
+                let stream = self
+                    .jobs_subscribe_to_event_kind(JobsEventKind::JobNew)
+                    .await?;
+
                 let args = (
                     hash.clone().into_bytes(),
-                    timeout,
-                    max_failures,
+                    job.timeout,
+                    job.max_failures,
                     best_method,
-                    max_worker_price,
-                    min_cpu_count,
-                    min_memory,
-                    min_network_speed,
-                    max_network_usage,
-                    redundancy,
+                    job.worker_parameters.max_worker_price,
+                    job.worker_parameters.min_cpu_count,
+                    job.worker_parameters.min_memory,
+                    job.worker_parameters.min_network_speed,
+                    job.worker_parameters.max_network_usage,
+                    job.redundancy,
                 );
                 let fut = jobs.call_with_confirmations(
                     "send_wasm_job",
@@ -500,13 +616,35 @@ impl<'a> Chain<'a> {
                 );
 
                 Compat01As03::new(fut).await?;
-                let job_id = 0;
-                println!("2, {}", job_id);
+                // TODO: concurrency issues ?
+                // TODO: We have to suppose the user hasn't created another job at the same time.
+                // TODO: check jobs value ?
+                let job_id = stream
+                    .filter_map(|e| {
+                        future::ready(match e {
+                            Ok(JobsEvent::JobNew { sender, job_id }) if sender == addr => {
+                                Some(job_id)
+                            }
+                            _ => None,
+                        })
+                    })
+                    .next()
+                    .await
+                    .ok_or(Error::CouldntFindJobIdEvent)?;
 
-                for address in addresses.iter() {
+                let fut = jobs.call_with_confirmations(
+                    "set_includes_tests",
+                    (job_id, job.includes_tests),
+                    addr,
+                    Default::default(),
+                    0,
+                );
+                Compat01As03::new(fut).await?;
+
+                for address in job.addresses.iter() {
                     let fut = jobs.call_with_confirmations(
                         "push_program_address",
-                        (job_id, Vec::from(*address)),
+                        (job_id, address.clone().into_bytes()),
                         addr,
                         Default::default(),
                         0,
@@ -514,10 +652,10 @@ impl<'a> Chain<'a> {
                     Compat01As03::new(fut).await?;
                 }
 
-                for args in arguments.iter() {
+                for args in job.arguments.iter() {
                     let fut = jobs.call_with_confirmations(
                         "push_program_arguments",
-                        (job_id, Vec::from(*args)),
+                        (job_id, args.clone()),
                         addr,
                         Default::default(),
                         0,
@@ -533,6 +671,145 @@ impl<'a> Chain<'a> {
               _ => Err(Error::UnsupportedProgramKind(program_kind)),
               */
         }
+    }
+
+    pub async fn jobs_get_job(&self, job_id: JobId) -> Result<Job<Address>, Error> {
+        let jobs = self.jobs()?;
+        let addr = self.local_address()?;
+
+        let fut = jobs.query("get_job", job_id, addr, Default::default(), None);
+        let (program_kind, program_hash, timeout, max_failures, redundancy, includes_tests, sender): (u64, Vec<u8>, u64, u64, u64, bool, Address) =
+            Compat01As03::new(fut).await?;
+        let program_hash = Multihash::from_bytes(program_hash)?;
+
+        let fut = jobs.query(
+            "get_worker_parameters",
+            job_id,
+            addr,
+            Default::default(),
+            None,
+        );
+        let (
+            best_method,
+            max_worker_price,
+            min_cpu_count,
+            min_memory,
+            min_network_speed,
+            max_network_usage,
+        ): (u64, u64, u64, u64, u64, u64) = Compat01As03::new(fut).await?;
+
+        let addresses = self.jobs_get_addresses(job_id).await?;
+        let arguments = self.jobs_get_all_arguments(job_id).await?;
+
+        let job = Job {
+            job_id: Some(job_id),
+            program_kind: (program_kind, Some(program_hash))
+                .try_into()
+                .map_err(Error::ProgramKindParse)?,
+            addresses,
+            arguments,
+            timeout,
+            max_failures,
+            worker_parameters: WorkerParameters {
+                best_method: best_method.try_into().map_err(Error::BestMethodParse)?,
+                max_worker_price,
+                min_cpu_count,
+                min_memory,
+                min_network_speed,
+                max_network_usage,
+            },
+            redundancy,
+            includes_tests,
+            sender,
+        };
+
+        Ok(job)
+    }
+
+    pub async fn jobs_get_addresses(&self, job_id: JobId) -> Result<Vec<Multiaddr>, Error> {
+        let jobs = self.jobs()?;
+        let addr = self.local_address()?;
+
+        let fut = jobs.query("get_addresses", job_id, addr, Default::default(), None);
+        let addresses_raw: Vec<Vec<u8>> = Compat01As03::new(fut).await?;
+        let mut addresses: Vec<Multiaddr> = Vec::with_capacity(addresses_raw.len());
+        for addr in addresses_raw.iter() {
+            addresses.push(Multiaddr::from_bytes(addr.clone())?);
+        }
+
+        Ok(addresses)
+    }
+
+    pub async fn jobs_get_all_arguments(&self, job_id: JobId) -> Result<Vec<Vec<u8>>, Error> {
+        let jobs = self.jobs()?;
+        let addr = self.local_address()?;
+
+        let fut = jobs.query(
+            "get_arguments_length",
+            job_id,
+            addr,
+            Default::default(),
+            None,
+        );
+        let nb_tasks: u64 = Compat01As03::new(fut).await?;
+
+        let mut arguments = Vec::with_capacity(nb_tasks as usize);
+        for i in 0..nb_tasks {
+            arguments.push(self.jobs_get_arguments(job_id, i).await?);
+        }
+
+        Ok(arguments)
+    }
+
+    pub async fn jobs_get_arguments(
+        &self,
+        job_id: JobId,
+        task_id: TaskId,
+    ) -> Result<Vec<u8>, Error> {
+        let jobs = self.jobs()?;
+        let addr = self.local_address()?;
+
+        let fut = jobs.query(
+            "get_arguments",
+            (job_id, task_id),
+            addr,
+            Default::default(),
+            None,
+        );
+        Ok(Compat01As03::new(fut).await?)
+    }
+
+    pub async fn jobs_get_result(&self, job_id: JobId, task_id: TaskId) -> Result<Vec<u8>, Error> {
+        let jobs = self.jobs()?;
+        let addr = self.local_address()?;
+
+        let fut = jobs.query(
+            "get_result",
+            (job_id, task_id),
+            addr,
+            Default::default(),
+            None,
+        );
+        Ok(Compat01As03::new(fut).await?)
+    }
+
+    pub async fn jobs_set_result(
+        &self,
+        job_id: JobId,
+        task_id: TaskId,
+        result: &[u8],
+    ) -> Result<types::TransactionReceipt, Error> {
+        let jobs = self.jobs()?;
+        let addr = self.local_address()?;
+
+        let fut = jobs.call_with_confirmations(
+            "set_result",
+            (job_id, task_id, Vec::from(result)),
+            addr,
+            Default::default(),
+            0,
+        );
+        Ok(Compat01As03::new(fut).await?)
     }
 }
 

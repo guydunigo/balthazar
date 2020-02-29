@@ -1,4 +1,5 @@
 //! Classes for reperenting a job and its subtasks.
+use super::multiformats::encode_multibase_multihash_string;
 use multiaddr::Multiaddr;
 use multihash::Multihash;
 use std::fmt;
@@ -53,6 +54,12 @@ impl std::convert::TryFrom<u64> for BestMethod {
     }
 }
 
+impl fmt::Display for BestMethod {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
 const PROGRAM_KIND_WASM: u64 = 0;
 /// Kind of program to execute.
 #[derive(Debug, Clone)]
@@ -80,6 +87,15 @@ impl std::convert::TryFrom<(u64, Option<Multihash>)> for ProgramKind {
     }
 }
 
+impl fmt::Display for ProgramKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let string = match self {
+            ProgramKind::Wasm(_) => "Wasm",
+        };
+        write!(f, "{}", string)
+    }
+}
+
 /// Parameters required for the worker to execute the task.
 #[derive(Debug, Clone)]
 pub struct WorkerParameters {
@@ -91,10 +107,26 @@ pub struct WorkerParameters {
     pub max_network_usage: u64,
 }
 
+impl fmt::Display for WorkerParameters {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Best method: {}", self.best_method)?;
+        writeln!(f, "Max worker price: {} money/s", self.max_worker_price)?;
+        writeln!(f, "Min CPU count: {}", self.min_cpu_count)?;
+        writeln!(f, "Min memory: {} kilobytes", self.min_memory)?;
+        writeln!(
+            f,
+            "Min network speed: {} kilobits/s",
+            self.min_network_speed
+        )?;
+        writeln!(f, "Max network usage: {} kilobits", self.max_network_usage)
+    }
+}
+
 /// Description of a Job.
 #[derive(Debug, Clone)]
-pub struct Job<PeerId> {
-    pub job_id: JobId,
+pub struct Job<PeerAddress> {
+    /// `None` if the job hasn't been sent yet or isn't known.
+    pub job_id: Option<JobId>,
 
     pub program_kind: ProgramKind,
     pub addresses: Vec<Multiaddr>,
@@ -107,10 +139,50 @@ pub struct Job<PeerId> {
     pub redundancy: u64,
     pub includes_tests: bool,
 
-    pub sender: PeerId,
+    pub sender: PeerAddress,
 }
 
+impl<PeerAddress: fmt::Display> fmt::Display for Job<PeerAddress> {
+    #[allow(irrefutable_let_patterns)]
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "---------")?;
+        write!(f, "Job id: ")?;
+        if let Some(job_id) = self.job_id {
+            writeln!(f, "{}", job_id)?;
+        } else {
+            writeln!(f, "Unknown")?;
+        }
+        writeln!(f, "Program kind: {}", self.program_kind)?;
+        write!(f, "Program hash: ")?;
+        if let ProgramKind::Wasm(ref hash) = self.program_kind {
+            writeln!(f, "{}", encode_multibase_multihash_string(&hash))?;
+        } else {
+            unreachable!();
+            // writeln!(f, "Unknown")?;
+        }
+        writeln!(f, "Addresses: {:?}", self.addresses)?;
+        let arguments: Vec<String> = self
+            .arguments
+            .iter()
+            .map(|e| String::from_utf8_lossy(&e[..]).to_string())
+            .collect();
+        writeln!(f, "Arguments: {:?}", arguments)?;
+        writeln!(f)?;
+        writeln!(f, "Timeout: {}s", self.timeout)?;
+        writeln!(f, "Max failures: {}", self.max_failures)?;
+        writeln!(f)?;
+        writeln!(f, "{}", self.worker_parameters)?;
+        writeln!(f, "Redundancy: {}", self.redundancy)?;
+        writeln!(f, "Includes tests: {}", self.includes_tests)?;
+        writeln!(f)?;
+        writeln!(f, "Sender: {}", self.sender)?;
+        writeln!(f, "---------")
+    }
+}
+
+/*
 pub struct Task {
     pub task_id: TaskId,
     pub arguments: Vec<u8>,
 }
+*/
