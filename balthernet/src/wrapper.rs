@@ -1,5 +1,6 @@
 //! Provides [`BalthBehavioursWrapper`] to use several
 //! [`NetworkBehaviour`](`libp2p::swarm::NetworkBehaviour`) at the same time.
+use futures::channel::mpsc::Sender;
 use libp2p::{
     // identify::{Identify, IdentifyEvent},
     identity::PublicKey,
@@ -18,7 +19,6 @@ use std::{
     collections::VecDeque,
     task::{Context, Poll},
 };
-use tokio::sync::mpsc::Sender;
 
 use super::{
     balthazar::{self, BalthBehaviour},

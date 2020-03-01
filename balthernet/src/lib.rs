@@ -16,14 +16,13 @@ extern crate libp2p;
 extern crate tokio;
 extern crate void;
 
-use futures::{stream, Stream, StreamExt};
+use futures::{channel::mpsc::Sender, stream, Stream, StreamExt};
 use libp2p::build_tcp_ws_secio_mplex_yamux;
 /// To avoid importing the whole libp2p crate in another one...
 pub use libp2p::{identity, Multiaddr};
 use libp2p::{identity::Keypair, swarm::Swarm};
 use misc::WorkerSpecs;
 use std::task::{Context, Poll};
-use tokio::sync::mpsc::Sender;
 
 pub mod balthazar;
 mod config;

@@ -1,11 +1,16 @@
-use futures::{future, FutureExt, StreamExt};
+//! Grouping module for all balthazar sub-modules.
+use futures::{
+    channel::mpsc::{channel, Receiver, Sender},
+    future, FutureExt, SinkExt, StreamExt,
+};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     future::Future,
     time::{SystemTime, UNIX_EPOCH},
 };
-use tokio::{runtime::Runtime, sync::mpsc::Sender};
+use tokio::runtime::Runtime;
 
+use chain::{Chain, JobsEvent};
 use misc::WorkerSpecs;
 use proto::{
     worker::{TaskErrorKind, TaskExecute},
@@ -15,6 +20,8 @@ use run::{Runner, WasmRunner};
 use store::{Storage, StoragesWrapper};
 
 use super::{BalthazarConfig, Error};
+
+const CHANNEL_SIZE: usize = 1024;
 
 pub fn run(config: BalthazarConfig) -> Result<(), Error> {
     Runtime::new().unwrap().block_on(Balthazar::run(config))
@@ -46,26 +53,24 @@ impl Balthazar {
     pub async fn run(config: BalthazarConfig) -> Result<(), Error> {
         println!("Starting as {:?}...", config.node_type());
 
+        // let (tx, rx) = channel(CHANNEL_SIZE);
+
         let specs = WorkerSpecs::default();
         let keypair = balthernet::identity::Keypair::generate_secp256k1();
         let (swarm_in, swarm_out) = net::get_swarm(keypair.clone(), config.net(), Some(&specs));
-        /*
-        let (events_in, events) = channel(CHANNEL_SIZE);
-        let store = StoragesWrapper::new_with_config(config.storage())?;
 
-        let balth = Balthazar {
-            keypair,
-            swarm_in,
-            config,
-            events_in,
-            events,
-            store,
-        };
+        /*
+        let pending_tasks = VecDeque::new();
+        let chain = Chain::new(config.chain());
+        let event_fut = chain.jobs_events().map(|e|
+            match e {
+                Ok(JobsEvent::JobNew { sender, job_id }) =
+            }
         */
 
-        let swarm_fut =
-            // swarm_out.for_each(|e| push_event(balth.events_in.clone(), BalthEvent::SwarmEvent(e)));
-            swarm_out.for_each_concurrent(None, |e| Balthazar::handle_event(&config, swarm_in.clone(), e));
+        let swarm_fut = swarm_out.for_each_concurrent(None, |e| {
+            Balthazar::handle_event(&config, swarm_in.clone(), e)
+        });
 
         swarm_fut.await;
 

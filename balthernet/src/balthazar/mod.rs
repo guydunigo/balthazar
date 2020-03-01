@@ -11,6 +11,10 @@
 //! Have a look at the [`handler`] module description to make the necessary updates.
 //!
 //! When extending [`HandlerOut`], update the `handler_event` function.
+use futures::{
+    channel::mpsc::{channel, Receiver, Sender},
+    Stream,
+};
 use libp2p::{
     core::{nodes::ListenerId, ConnectedPoint},
     swarm::{
@@ -24,10 +28,10 @@ use std::{
     collections::{HashMap, HashSet, VecDeque},
     error,
     fmt::Debug,
+    pin::Pin,
     sync::{Arc, RwLock},
     task::{Context, Poll},
 };
-use tokio::sync::mpsc::{channel, Receiver, Sender};
 
 mod events;
 use events::*;
@@ -294,7 +298,7 @@ impl NetworkBehaviour for BalthBehaviour {
         _params: &mut impl PollParameters
 ) -> Poll<NetworkBehaviourAction<<<Self::ProtocolsHandler as IntoProtocolsHandler>::Handler as ProtocolsHandler>::InEvent, Self::OutEvent>>{
         // Reads the inbound channel to handle events:
-        while let Poll::Ready(event_opt) = self.inbound_rx.poll_recv(cx) {
+        while let Poll::Ready(event_opt) = Stream::poll_next(Pin::new(&mut self.inbound_rx), cx) {
             let action = match event_opt {
                 Some(EventIn::Ping) => {
                     Poll::Ready(NetworkBehaviourAction::GenerateEvent(EventOut::Pong))
@@ -360,7 +364,7 @@ impl NetworkBehaviour for BalthBehaviour {
                         )))
                     }
                 }
-                // TODO: close the swarm if channel has been closed ?
+                // TODO: close the swarm + unsubscribe relations if channel has been dropped ?
                 None => unimplemented!("Channel was closed"),
             };
 
