@@ -115,7 +115,7 @@ contract Jobs {
         arg_id = jobs[job_id].next_task_id;
         jobs[job_id].next_task_id++;
 
-        jobs[job_id].tasks[arg_id] = Task(arguments, new bytes[](r));
+        jobs[job_id].tasks[arg_id] = Task(arguments, new bytes[](0));
     }
 
     function lock(uint64 job_id) public {

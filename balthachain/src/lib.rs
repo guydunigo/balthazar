@@ -317,7 +317,7 @@ impl TryFrom<(&ethabi::Contract, Log)> for JobsEvent {
                     }
                     JobsEventKind::TaskNewResult => {
                         let len = log.data.0.len();
-                        if len == 96 {
+                        if len > 64 {
                             let job_id =
                                 types::U64::from_big_endian(&log.data.0[(32 - 8)..32]).as_u64();
                             let task_id =
@@ -329,7 +329,7 @@ impl TryFrom<(&ethabi::Contract, Log)> for JobsEvent {
                             });
                         } else {
                             return Err(Error::JobsEventDataWrongSize {
-                                expected: 96,
+                                expected: 64,
                                 got: len,
                                 data: log.data.0,
                             });

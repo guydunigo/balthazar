@@ -96,14 +96,14 @@ impl fmt::Display for BalthandlerQueryErr {
 }
 
 impl From<ProtocolsHandlerUpgrErr<io::Error>> for BalthandlerQueryErr {
-    #[inline]
+    // #[inline]
     fn from(err: ProtocolsHandlerUpgrErr<io::Error>) -> Self {
         BalthandlerQueryErr::Upgrade(err)
     }
 }
 
 impl From<io::Error> for BalthandlerQueryErr {
-    #[inline]
+    // #[inline]
     fn from(err: io::Error) -> Self {
         BalthandlerQueryErr::Io(err)
     }
