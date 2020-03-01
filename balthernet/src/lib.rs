@@ -30,7 +30,7 @@ pub mod tcp_transport;
 mod wrapper;
 pub use balthazar::{
     handler::{EventIn as HandlerIn, EventOut as HandlerOut},
-    EventIn, EventOut,
+    EventIn, EventOut, PeerRc,
 };
 pub use config::*;
 pub use wrapper::BalthBehavioursWrapper;

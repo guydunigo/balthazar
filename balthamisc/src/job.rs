@@ -6,10 +6,10 @@ use std::fmt;
 
 // TODO: those are temporary aliases.
 /// Identifies a unique job on the network.
-pub type JobId = u64;
+pub type JobId = Multihash;
 /// Identifies a unique task for a given job.
 // TODO: should it also contain the job id ?
-pub type TaskId = u64;
+pub type TaskId = Multihash;
 
 #[derive(Debug, Clone)]
 pub struct UnknownValue<T>(T);
@@ -147,8 +147,8 @@ impl<PeerAddress: fmt::Display> fmt::Display for Job<PeerAddress> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "---------")?;
         write!(f, "Job id: ")?;
-        if let Some(job_id) = self.job_id {
-            writeln!(f, "{}", job_id)?;
+        if let Some(job_id) = &self.job_id {
+            writeln!(f, "{}", encode_multibase_multihash_string(job_id))?;
         } else {
             writeln!(f, "Unknown")?;
         }

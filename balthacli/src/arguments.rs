@@ -60,8 +60,8 @@ pub enum Subcommand {
         #[clap(name = "wasm", short, long, requires("args"))]
         wasm_file_addr: Option<String>,
         /// Arguments to pass to the program.
-        #[clap(short, long)]
-        args: Option<String>,
+        #[clap(short, long, number_of_values(1))]
+        args: Option<Vec<String>>,
     },
     /// Interract with the blockchain.
     Chain(ChainSub),
@@ -394,7 +394,10 @@ impl std::convert::TryInto<(RunMode, BalthazarConfig)> for BalthazarArgs {
                 config.set_node_type(NodeType::Manager);
 
                 if let (Some(wasm), Some(args)) = (wasm_file_addr, args) {
-                    config.set_wasm(Some((wasm.into_bytes(), args.into_bytes())));
+                    config.set_wasm(Some((
+                        wasm.into_bytes(),
+                        args.iter().map(|a| a.into_bytes()).collect(),
+                    )));
                 }
             }
             _ => {}

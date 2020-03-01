@@ -12,7 +12,10 @@
 //!
 //! When extending [`HandlerOut`], update the `handler_event` function.
 use futures::{
-    channel::mpsc::{channel, Receiver, Sender},
+    channel::{
+        mpsc::{channel, Receiver, Sender},
+        oneshot,
+    },
     Stream,
 };
 use libp2p::{
@@ -23,6 +26,7 @@ use libp2p::{
     },
     Multiaddr, PeerId,
 };
+use misc::job::TaskId;
 use proto::worker;
 use std::{
     collections::{HashMap, HashSet, VecDeque},
@@ -41,6 +45,8 @@ use super::{ManagerConfig, WorkerConfig};
 use handler::{Balthandler, EventIn as HandlerIn, EventOut as HandlerOut, RequestId};
 use misc::WorkerSpecs;
 use proto::{NodeType, NodeTypeContainer, TaskStatus};
+
+pub type PeerRc = Arc<RwLock<Peer>>;
 
 const CHANNEL_SIZE: usize = 1024;
 
@@ -69,7 +75,7 @@ pub struct BalthBehaviour {
     inbound_rx: Receiver<EventIn>,
     // TODO: should the node_type be kept here, what happens if it changes elsewhere?
     node_type_data: NodeTypeData,
-    peers: HashMap<PeerId, Arc<RwLock<Peer>>>,
+    peers: HashMap<PeerId, PeerRc>,
     events: VecDeque<InternalEvent<QueryId>>,
     next_query_unique_id: QueryId,
 }
@@ -108,7 +114,7 @@ impl BalthBehaviour {
 
     /// If we are a worker: checks if given peer is our manager,
     /// if we are a manager: checks if given peer is one of our workers.
-    fn is_in_relationship_with(&self, peer_rc: Arc<RwLock<Peer>>) -> bool {
+    fn is_in_relationship_with(&self, peer_rc: PeerRc) -> bool {
         match &self.node_type_data {
             NodeTypeData::Manager(data) => {
                 data.workers.get(&peer_rc.read().unwrap().peer_id).is_some()
@@ -158,7 +164,7 @@ impl BalthBehaviour {
             .push_front(InternalEvent::NetworkBehaviourAction(event));
     }
 
-    fn get_peer_or_insert(&mut self, peer_id: &PeerId) -> Arc<RwLock<Peer>> {
+    fn get_peer_or_insert(&mut self, peer_id: &PeerId) -> PeerRc {
         self.peers
             .entry(peer_id.clone())
             .or_insert_with(|| Arc::new(RwLock::new(Peer::new(peer_id.clone()))))
@@ -364,6 +370,19 @@ impl NetworkBehaviour for BalthBehaviour {
                         )))
                     }
                 }
+                Some(EventIn::GetWorkers(oneshot)) => {
+                    let w = if let NodeTypeData::Manager(data) = &self.node_type_data {
+                        Some(data.workers.values().cloned().collect())
+                    } else {
+                        None
+                    };
+                    // TODO: expect
+                    oneshot
+                        .send(w)
+                        .expect("problem with sending answer through the oneshot.");
+
+                    Poll::Pending
+                }
                 // TODO: close the swarm + unsubscribe relations if channel has been dropped ?
                 None => unimplemented!("Channel was closed"),
             };
@@ -486,7 +505,7 @@ fn handler_event(
                 |b, r| wrap_answer(peer_id, tasks_execute(b, tasks, r)),
                 || HandlerOut::TasksExecute {
                     // TODO: actually copy tasks ?
-                    tasks: HashMap::new(),
+                    tasks: Vec::new(),
                     request_id: id_clone,
                 },
             )

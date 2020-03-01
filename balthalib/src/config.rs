@@ -39,7 +39,7 @@ pub struct BalthazarConfig {
     storage: StorageConfig,
     net: NetConfig,
     chain: ChainConfig,
-    wasm: Option<(Vec<u8>, Vec<u8>)>,
+    wasm: Option<(Vec<u8>, Vec<Vec<u8>>)>,
 }
 
 impl Default for BalthazarConfig {
@@ -89,7 +89,7 @@ impl BalthazarConfig {
         &mut self.chain
     }
 
-    pub fn wasm(&self) -> &Option<(Vec<u8>, Vec<u8>)> {
+    pub fn wasm(&self) -> &Option<(Vec<u8>, Vec<Vec<u8>>)> {
         &self.wasm
     }
     pub fn set_wasm(&mut self, new: Option<(Vec<u8>, Vec<u8>)>) {

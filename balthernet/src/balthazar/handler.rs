@@ -19,14 +19,12 @@ use libp2p::{
     },
 };
 use std::{
-    collections::HashMap,
     fmt, io,
-    iter::FromIterator,
     task::{Context, Poll},
     time::{Duration, Instant},
 };
 
-use misc::WorkerSpecs;
+use misc::{job::TaskId, multihash::Multihash, WorkerSpecs};
 use proto::{
     protobuf::ProtoBufProtocol,
     worker::{self, NodeType, WorkerMsg, WorkerMsgWrapper},
@@ -222,17 +220,17 @@ where
                 mut tasks,
                 user_data,
             } => {
-                let msg = worker::TasksExecute {
-                    tasks: tasks.drain().map(|(_, t)| t).collect(),
-                }
-                .into();
+                let msg = worker::TasksExecute { tasks }.into();
                 inject_new_request_event(&mut self.substreams, user_data, msg)
             }
             EventIn::TasksPing {
                 task_ids,
                 user_data,
             } => {
-                let msg = worker::TasksPing { task_ids }.into();
+                let msg = worker::TasksPing {
+                    task_ids: task_ids.drain(..).map(|i| i.into_bytes()).collect(),
+                }
+                .into();
                 inject_new_request_event(&mut self.substreams, user_data, msg)
             }
             EventIn::TasksPong {
@@ -241,9 +239,9 @@ where
             } => {
                 let msg = worker::TasksPong {
                     statuses: statuses
-                        .drain()
+                        .drain(..)
                         .map(|(i, s)| worker::TaskStatus {
-                            task_id: i,
+                            task_id: i.into_bytes(),
                             status_data: s.into(),
                         })
                         .collect(),
@@ -255,7 +253,10 @@ where
                 task_ids,
                 user_data,
             } => {
-                let msg = worker::TasksAbord { task_ids }.into();
+                let msg = worker::TasksAbord {
+                    task_ids: task_ids.drain(..).map(|i| i.into_bytes()).collect(),
+                }
+                .into();
                 inject_new_request_event(&mut self.substreams, user_data, msg)
             }
             EventIn::TaskStatus {
@@ -264,7 +265,7 @@ where
                 user_data,
             } => {
                 let msg = worker::TaskStatus {
-                    task_id,
+                    task_id: task_id.into_bytes(),
                     status_data: status.into(),
                 }
                 .into();
@@ -390,23 +391,23 @@ pub enum EventIn<TUserData> {
         request_id: RequestId,
     },
     TasksExecute {
-        tasks: HashMap<Vec<u8>, worker::TaskExecute>,
+        tasks: Vec<worker::TaskExecute>,
         user_data: TUserData,
     },
     TasksPing {
-        task_ids: Vec<Vec<u8>>,
+        task_ids: Vec<TaskId>,
         user_data: TUserData,
     },
     TasksPong {
-        statuses: HashMap<Vec<u8>, TaskStatus>,
+        statuses: Vec<(TaskId, TaskStatus)>,
         request_id: RequestId,
     },
     TasksAbord {
-        task_ids: Vec<Vec<u8>>,
+        task_ids: Vec<TaskId>,
         user_data: TUserData,
     },
     TaskStatus {
-        task_id: Vec<u8>,
+        task_id: TaskId,
         status: TaskStatus,
         user_data: TUserData,
     },
@@ -446,23 +447,23 @@ pub enum EventOut<TUserData> {
         request_id: RequestId,
     },
     TasksExecute {
-        tasks: HashMap<Vec<u8>, worker::TaskExecute>,
+        tasks: Vec<worker::TaskExecute>,
         request_id: RequestId,
     },
     TasksPing {
-        task_ids: Vec<Vec<u8>>,
+        task_ids: Vec<TaskId>,
         request_id: RequestId,
     },
     TasksPong {
-        statuses: HashMap<Vec<u8>, TaskStatus>,
+        statuses: Vec<(TaskId, TaskStatus)>,
         user_data: TUserData,
     },
     TasksAbord {
-        task_ids: Vec<Vec<u8>>,
+        task_ids: Vec<TaskId>,
         request_id: RequestId,
     },
     TaskStatus {
-        task_id: Vec<u8>,
+        task_id: TaskId,
         status: TaskStatus,
         request_id: RequestId,
     },
@@ -518,17 +519,32 @@ fn process_request<TUserData>(
             WorkerMsg::ManagerPing(worker::ManagerPing {}) => Some(Ok(EventOut::ManagerPing {
                 request_id: RequestId::new(connec_unique_id),
             })),
+            // TODO: check unique
             WorkerMsg::TasksExecute(worker::TasksExecute { mut tasks }) => {
                 Some(Ok(EventOut::TasksExecute {
-                    tasks: HashMap::from_iter(tasks.drain(..).map(|t| (t.job_id.clone(), t))),
+                    tasks,
                     request_id: RequestId::new(connec_unique_id),
                 }))
             }
-            WorkerMsg::TasksPing(worker::TasksPing { task_ids }) => Some(Ok(EventOut::TasksPing {
-                task_ids,
-                request_id: RequestId::new(connec_unique_id),
-            })),
+            WorkerMsg::TasksPing(worker::TasksPing { task_ids }) => {
+                // TODO: what should be done with the errors ?
+                let task_ids = task_ids
+                    .drain(..)
+                    .map(Multihash::from_bytes)
+                    .filter_map(Result::ok)
+                    .collect();
+                Some(Ok(EventOut::TasksPing {
+                    task_ids,
+                    request_id: RequestId::new(connec_unique_id),
+                }))
+            }
             WorkerMsg::TasksAbord(worker::TasksAbord { task_ids }) => {
+                // TODO: what should be done with the errors ?
+                let task_ids = task_ids
+                    .drain(..)
+                    .map(Multihash::from_bytes)
+                    .filter_map(Result::ok)
+                    .collect();
                 Some(Ok(EventOut::TasksAbord {
                     task_ids,
                     request_id: RequestId::new(connec_unique_id),
@@ -537,11 +553,18 @@ fn process_request<TUserData>(
             WorkerMsg::TaskStatus(worker::TaskStatus {
                 task_id,
                 status_data,
-            }) => Some(Ok(EventOut::TaskStatus {
-                task_id,
-                status: status_data.into(),
-                request_id: RequestId::new(connec_unique_id),
-            })),
+            }) => {
+                // TODO: what should be done with the errors ?
+                if let Ok(task_id) = Multihash::from_bytes(task_id) {
+                    Some(Ok(EventOut::TaskStatus {
+                        task_id,
+                        status: status_data.into(),
+                        request_id: RequestId::new(connec_unique_id),
+                    }))
+                } else {
+                    None
+                }
+            }
             _ => None,
         }
     } else {
@@ -584,8 +607,10 @@ fn process_answer<TUserData>(
             }
             WorkerMsg::ManagerPong(worker::ManagerPong { }) => None,
             WorkerMsg::TasksPong(worker::TasksPong { mut statuses }) => {
+                let statuses: Vec<_> = statuses.drain(..)
+                    .filter_map(|s| if let Ok(task_id) = Multihash::from_bytes(s.task_id) { Some((task_id,s.status_data.into())) } else { None }).collect();
                 Some(EventOut::TasksPong {
-                    statuses: HashMap::from_iter(statuses.drain(..).map(|s| (s.task_id,s.status_data.into()))),
+                    statuses,
                     user_data,
                 })
             }

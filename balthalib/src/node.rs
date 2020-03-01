@@ -1,10 +1,14 @@
 //! Grouping module for all balthazar sub-modules.
 use futures::{
-    channel::mpsc::{channel, Sender},
+    channel::{
+        mpsc::{channel, Sender},
+        oneshot,
+    },
     future, join, FutureExt, SinkExt, StreamExt,
 };
 use std::{
-    collections::{HashMap, VecDeque},
+    borrow::Cow,
+    collections::{HashMap, HashSet, VecDeque},
     fmt,
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
@@ -16,6 +20,7 @@ use misc::{
     job::{JobId, TaskId},
     WorkerSpecs,
 };
+use net::PeerRc;
 use proto::{
     worker::{TaskErrorKind, TaskExecute},
     NodeType, TaskStatus,
@@ -85,7 +90,7 @@ struct Balthazar {
     config: Arc<BalthazarConfig>,
     tx: Sender<Event>,
     swarm_in: Sender<net::EventIn>,
-    pending_tasks: Arc<RwLock<VecDeque<(JobId, TaskId)>>>,
+    pending_tasks: Arc<RwLock<VecDeque<(JobId, TaskId, Option<PeerRc>)>>>,
 }
 /*
 {
@@ -117,13 +122,13 @@ impl Balthazar {
 
     async fn pending_tasks<'a>(
         &'a self,
-    ) -> impl 'a + std::ops::Deref<Target = VecDeque<(JobId, TaskId)>> {
+    ) -> impl 'a + std::ops::Deref<Target = VecDeque<(JobId, TaskId, Option<PeerRc>)>> {
         self.pending_tasks.read().await
     }
 
     async fn pending_tasks_mut<'a>(
         &'a self,
-    ) -> impl 'a + std::ops::DerefMut<Target = VecDeque<(JobId, TaskId)>> {
+    ) -> impl 'a + std::ops::DerefMut<Target = VecDeque<(JobId, TaskId, Option<PeerRc>)>> {
         self.pending_tasks.write().await
     }
 
@@ -131,8 +136,61 @@ impl Balthazar {
         Chain::new(self.config.chain())
     }
 
-    async fn send_msg_to_behaviour(&mut self, event: net::EventIn) {
-        if let Err(e) = self.swarm_in.send(event).await {
+    /// Get the next task that doesn't have any worker.
+    async fn next_pending_task(&self) -> Option<(JobId, TaskId)> {
+        let mut pending_tasks = self.pending_tasks_mut().await;
+        let next_index =
+            pending_tasks
+                .iter()
+                .enumerate()
+                .find_map(|(i, (_, _, o))| if o.is_none() { Some(i) } else { None });
+        if let Some(i) = next_index {
+            let (j, t, _) = pending_tasks
+                .remove(i)
+                .expect("We just found the value, it should exists.");
+            Some((j, t))
+        } else {
+            None
+        }
+    }
+
+    /*
+    /// Returns a worker who isn't computing anything.
+    /// Returns `None` if we are not a manager.
+    // TODO: race condition between returning PeerRc and next lock: peer gets busy again
+    async fn find_available_workers<'a>(&'a self) -> (impl 'a + std::ops::DerefMut<Target = VecDeque<(JobId, TaskId, Option<PeerRc>)>>,impl Iterator<Item=PeerRc>) {
+        let pending_tasks = self.pending_tasks().await;
+        let busy_peers_rc: Vec<_> = pending_tasks
+            .iter()
+            .filter_map(|(_, _, o)| if let Some(p) = o {
+                Some(p)
+            } else { None })
+            .collect();
+        let mut busy_peers = Vec::new();
+        for p in busy_peers_rc.iter() {
+            busy_peers.push(p.read().expect("couldn't lock on peer").peer_id.clone());
+        }
+
+        let (tx, rx) = oneshot::channel();
+        self.send_msg_to_behaviour(net::EventIn::GetWorkers(tx))
+            .await;
+        // TODO: expect
+        let workers = rx.await
+            .expect("Other end dropped without answer.")?;
+
+        let mut iter= Vec::new();
+        for w in workers.iter() {
+            if busy_peers.contains(&w.read().expect("couldn't lock on peer").peer_id) {
+                iter.push(w.clone());
+            }
+        }
+
+        iter.drain(..)
+    }
+    */
+
+    async fn send_msg_to_behaviour(&self, event: net::EventIn) {
+        if let Err(e) = self.swarm_in.clone().send(event).await {
             panic!("{:?}", Error::SwarmChannelError(e));
         }
     }
@@ -189,6 +247,7 @@ impl Balthazar {
         self.spawn_log(LogKind::Blockchain, format!("{}", event))
             .await;
         match event {
+            // let mut free_workers_iter = self.find_available_worker().await;
             chain::JobsEvent::JobLocked { job_id } => {
                 let mut p = self.pending_tasks_mut().await;
                 self.chain()
@@ -196,14 +255,28 @@ impl Balthazar {
                     .await
                     .iter()
                     .enumerate()
-                    .for_each(|(task_id, _)| p.push_front((job_id, task_id as u64)));
+                    .for_each(|(task_id, _)| {
+                        /*
+                        let w = if let Some(worker) = free_workers_iter {
+                            self.send_msg_to_behaviour(net::EventIn::TasksExecute (
+                                worker.read().expect("couldn't lock on peer").peer_id.clone(),
+                                vec![])).await;
+
+                                Some(worker)
+                        } else {
+                            None
+                        };
+                        */
+                        // TODO: stop calling it after it has returned None once.
+                        (*p).push_back((job_id, task_id as u64, None))
+                    });
             }
             _ => (),
         }
     }
 
     /// Handle events coming out of Swarm.
-    async fn handle_swarm_event(mut self, event: net::EventOut) {
+    async fn handle_swarm_event(self, event: net::EventOut) {
         match (self.config.node_type(), event) {
             (NodeType::Manager, net::EventOut::WorkerNew(peer_id)) => {
                 if let Some((wasm, args)) = self.config.wasm() {
@@ -212,19 +285,23 @@ impl Balthazar {
                         wasm.clone(),
                         TaskExecute {
                             job_id: wasm.clone(),
-                            task_id: wasm.clone(),
+                            // task_id: wasm.clone(),
                             job_addr: vec![wasm.clone()],
                             arguments: args.clone(),
                             timeout: 100,
                         },
                     );
+                    let args_str: Vec<Cow<str>> = args
+                        .iter()
+                        .map(|a| String::from_utf8_lossy(&a[..]))
+                        .collect();
                     spawn_log(
                         self.tx.clone(),
                         LogKind::Manager,
                         format!(
-                            "Sending task `{}` with parameters `{}` to worker `{}`",
+                            "Sending task `{}` with parameters {:?} to worker `{}`",
                             String::from_utf8_lossy(wasm),
-                            String::from_utf8_lossy(args),
+                            args_str,
                             peer_id
                         ),
                     )
@@ -254,7 +331,7 @@ impl Balthazar {
                 .await;
             }
             (NodeType::Worker, net::EventOut::TasksExecute(tasks)) => {
-                for task in tasks.values() {
+                for task in tasks.iter() {
                     self.send_msg_to_behaviour(net::EventIn::TaskStatus(
                         task.task_id.clone(),
                         TaskStatus::Pending,

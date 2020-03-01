@@ -7,16 +7,18 @@ pub enum EventIn {
     /// Sending a message to the peer (new request or answer to one from the exterior).
     Handler(PeerId, HandlerIn<QueryId>),
     /// Asks worker `peer_id` to execute given task with given arguments.
-    TasksExecute(PeerId, HashMap<Vec<u8>, worker::TaskExecute>),
+    TasksExecute(PeerId, Vec<worker::TaskExecute>),
     /// Request statuses of given task ids, expects a [`EventOut::TasksPong`] in return.
-    TasksPing(PeerId, Vec<Vec<u8>>),
+    TasksPing(PeerId, Vec<TaskId>),
     /// Answer of a [`EventOut::TasksPing`] request.
     TasksPong {
-        statuses: HashMap<Vec<u8>, TaskStatus>,
+        statuses: Vec<(TaskId, TaskStatus)>,
         request_id: RequestId,
     },
     /// We advertise a new status task for a given task_id.
-    TaskStatus(Vec<u8>, TaskStatus),
+    TaskStatus(TaskId, TaskStatus),
+    /// Get current list of workers.
+    GetWorkers(oneshot::Sender<Option<Vec<PeerRc>>>),
 }
 
 /// Event returned by [`BalthBehaviour`] towards the Swarm when polled.
@@ -68,25 +70,25 @@ pub enum EventOut {
         new: NodeType,
     },
     /// This worker node has been requested by its manager to execute this list of tasks.
-    TasksExecute(HashMap<Vec<u8>, worker::TaskExecute>),
+    TasksExecute(Vec<worker::TaskExecute>),
     /// Our manager asks about the status of given tasks, the `request_id` must be passed back to
     /// match the answer with the request.
     /// Expects a [`EventIn::TasksPong`] in return.
     TasksPing {
-        task_ids: Vec<Vec<u8>>,
+        task_ids: Vec<TaskId>,
         request_id: RequestId,
     },
     /// Answer to one of our [`EventIn::TasksPing`].
     TasksPong {
         peer_id: PeerId,
-        statuses: HashMap<Vec<u8>, TaskStatus>,
+        statuses: Vec<(TaskId, TaskStatus)>,
     },
     /// Our manager asked us to stop working on these task ids.
-    TasksAbord(Vec<Vec<u8>>),
+    TasksAbord(Vec<TaskId>),
     /// One of our workers advertises a new status for task `task_id`.
     TaskStatus {
         peer_id: PeerId,
-        task_id: Vec<u8>,
+        task_id: TaskId,
         status: TaskStatus,
     },
     /// Cannot send message because we don't have any manager.
@@ -96,14 +98,14 @@ pub enum EventOut {
 #[derive(Debug)]
 pub struct ManagerData {
     pub config: ManagerConfig,
-    pub workers: HashMap<PeerId, Arc<RwLock<Peer>>>,
+    pub workers: HashMap<PeerId, PeerRc>,
 }
 
 #[derive(Debug)]
 pub struct WorkerData {
     pub config: WorkerConfig,
     pub specs: WorkerSpecs,
-    pub manager: Option<Arc<RwLock<Peer>>>,
+    pub manager: Option<PeerRc>,
 }
 
 pub type NodeTypeData = NodeTypeContainer<ManagerData, WorkerData>;
@@ -168,7 +170,7 @@ pub fn wrap_answer(
 /// otherwise sends [`worker::NotMine`] to the peer.
 pub fn needs_relationship_with<F, G>(
     behaviour: &mut BalthBehaviour,
-    peer_rc: Arc<RwLock<Peer>>,
+    peer_rc: PeerRc,
     peer_id: PeerId,
     request_id: RequestId,
     action_if_in_relashionship: F,
@@ -193,7 +195,7 @@ where
 /// If the two nodes are in a relationship, breaks it, otherwise does nothing.
 pub fn break_worker_manager_relationship(
     node_type_data: &mut NodeTypeData,
-    peer_rc: Arc<RwLock<Peer>>,
+    peer_rc: PeerRc,
     peer_id: PeerId,
 ) -> Poll<NetworkBehaviourAction<HandlerIn<QueryId>, EventOut>> {
     match node_type_data {
@@ -226,7 +228,7 @@ pub fn break_worker_manager_relationship(
 /// A node has advertised its node type via [`worker::NodeTypeRequest`].
 pub fn node_type_request(
     behaviour: &mut BalthBehaviour,
-    peer_rc: Arc<RwLock<Peer>>,
+    peer_rc: PeerRc,
     peer_id: PeerId,
     node_type: NodeType,
     request_id: RequestId,
@@ -247,7 +249,7 @@ pub fn node_type_request(
 /// [`worker::NodeTypeAnswer`]).
 pub fn node_type_answer(
     behaviour: &mut BalthBehaviour,
-    peer_rc: Arc<RwLock<Peer>>,
+    peer_rc: PeerRc,
     peer_id: PeerId,
     node_type: NodeType,
 ) -> Poll<NetworkBehaviourAction<HandlerIn<QueryId>, EventOut>> {
@@ -304,7 +306,7 @@ pub fn node_type_answer(
 /// We received a [`worker::NotMine`].
 pub fn not_mine(
     node_type_data: &mut NodeTypeData,
-    peer_rc: Arc<RwLock<Peer>>,
+    peer_rc: PeerRc,
     peer_id: PeerId,
 ) -> Poll<NetworkBehaviourAction<HandlerIn<QueryId>, EventOut>> {
     break_worker_manager_relationship(node_type_data, peer_rc, peer_id)
@@ -313,7 +315,7 @@ pub fn not_mine(
 /// We received a [`worker::ManagerRequest`].
 pub fn manager_request(
     behaviour: &mut BalthBehaviour,
-    peer_rc: Arc<RwLock<Peer>>,
+    peer_rc: PeerRc,
     peer_id: PeerId,
     worker_specs: WorkerSpecs,
     request_id: RequestId,
@@ -367,7 +369,7 @@ pub fn manager_request(
 /// We received a [`worker::ManagerAnswer`].
 pub fn manager_answer(
     behaviour: &mut BalthBehaviour,
-    peer_rc: Arc<RwLock<Peer>>,
+    peer_rc: PeerRc,
     peer_id: PeerId,
     accepted: bool,
     user_data: QueryId,
@@ -451,7 +453,7 @@ pub fn manager_answer(
 /// We received a [`worker::ManagerBye`].
 pub fn manager_bye(
     behaviour: &mut BalthBehaviour,
-    peer_rc: Arc<RwLock<Peer>>,
+    peer_rc: PeerRc,
     peer_id: PeerId,
     request_id: RequestId,
 ) -> HandlerIn<QueryId> {
@@ -471,17 +473,16 @@ pub fn manager_ping(request_id: RequestId) -> HandlerIn<QueryId> {
 /// We received a [`worker::TasksExecute`].
 pub fn tasks_execute(
     behaviour: &mut BalthBehaviour,
-    tasks: HashMap<Vec<u8>, worker::TaskExecute>,
+    tasks: Vec<worker::TaskExecute>,
     request_id: RequestId,
 ) -> HandlerIn<QueryId> {
     behaviour.inject_generate_event(EventOut::TasksExecute(tasks));
-
     HandlerIn::Ack { request_id }
 }
 
 /// We received a [`worker::TasksPing`].
 pub fn tasks_ping(
-    task_ids: Vec<Vec<u8>>,
+    task_ids: Vec<TaskId>,
     request_id: RequestId,
 ) -> Poll<NetworkBehaviourAction<HandlerIn<QueryId>, EventOut>> {
     Poll::Ready(NetworkBehaviourAction::GenerateEvent(EventOut::TasksPing {
@@ -493,9 +494,9 @@ pub fn tasks_ping(
 /// We received a [`worker::TasksPong`].
 pub fn tasks_pong(
     behaviour: &mut BalthBehaviour,
-    peer_rc: Arc<RwLock<Peer>>,
+    peer_rc: PeerRc,
     peer_id: PeerId,
-    statuses: HashMap<Vec<u8>, TaskStatus>,
+    statuses: Vec<(TaskId, TaskStatus)>,
     user_data: QueryId,
 ) -> Poll<NetworkBehaviourAction<HandlerIn<QueryId>, EventOut>> {
     let evt = if behaviour.is_in_relationship_with(peer_rc) {
@@ -516,7 +517,7 @@ pub fn tasks_pong(
 /// We received a [`worker::TasksAbord`].
 pub fn tasks_abord(
     behaviour: &mut BalthBehaviour,
-    task_ids: Vec<Vec<u8>>,
+    task_ids: Vec<TaskId>,
     request_id: RequestId,
 ) -> HandlerIn<QueryId> {
     behaviour.inject_generate_event(EventOut::TasksAbord(task_ids));
@@ -528,7 +529,7 @@ pub fn tasks_abord(
 pub fn task_status(
     behaviour: &mut BalthBehaviour,
     peer_id: PeerId,
-    task_id: Vec<u8>,
+    task_id: TaskId,
     status: TaskStatus,
     request_id: RequestId,
 ) -> HandlerIn<QueryId> {

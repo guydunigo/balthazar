@@ -42,9 +42,9 @@ message ManagerPong {}
 message TasksExecute {
  message TaskExecute {
   bytes job_id = 1;
-  bytes task_id = 2;
+  // bytes task_id = 2;
   repeated bytes job_addr = 3;
-  bytes arguments = 4;
+  repeated bytes arguments = 4;
   uint64 timeout = 5;
  }
 
