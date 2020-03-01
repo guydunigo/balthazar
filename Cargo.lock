@@ -244,7 +244,7 @@ dependencies = [
  "balthurner",
  "balthwasm",
  "futures 0.3.4",
- "tokio 0.2.12",
+ "tokio 0.2.13",
 ]
 
 [[package]]
@@ -255,7 +255,7 @@ dependencies = [
  "multiaddr",
  "multibase 0.8.0",
  "multihash 0.10.0",
- "tokio 0.2.12",
+ "tokio 0.2.13",
 ]
 
 [[package]]
@@ -280,7 +280,7 @@ dependencies = [
  "http 0.2.0",
  "ipfs-api",
  "multiaddr",
- "tokio 0.2.12",
+ "tokio 0.2.13",
 ]
 
 [[package]]
@@ -291,7 +291,7 @@ dependencies = [
  "balthaproto",
  "futures 0.3.4",
  "libp2p",
- "tokio 0.2.12",
+ "tokio 0.2.13",
  "void",
 ]
 
@@ -578,7 +578,7 @@ dependencies = [
 [[package]]
 name = "clap"
 version = "3.0.0-beta.1"
-source = "git+https://github.com/clap-rs/clap/#4aaddf837555945f0c9f83e0efa9115fbcc0ac3c"
+source = "git+https://github.com/clap-rs/clap/#c192f5effbb9655964630952e530255462174f44"
 dependencies = [
  "ansi_term",
  "atty",
@@ -595,7 +595,7 @@ dependencies = [
 [[package]]
 name = "clap_derive"
 version = "3.0.0-beta.1"
-source = "git+https://github.com/clap-rs/clap/#4aaddf837555945f0c9f83e0efa9115fbcc0ac3c"
+source = "git+https://github.com/clap-rs/clap/#c192f5effbb9655964630952e530255462174f44"
 dependencies = [
  "heck",
  "proc-macro-error",
@@ -1397,7 +1397,7 @@ dependencies = [
  "indexmap",
  "log 0.4.8",
  "slab 0.4.2",
- "tokio 0.2.12",
+ "tokio 0.2.13",
  "tokio-util",
 ]
 
@@ -1574,7 +1574,7 @@ dependencies = [
  "net2",
  "pin-project",
  "time",
- "tokio 0.2.12",
+ "tokio 0.2.13",
  "tower-service",
  "want 0.3.0",
 ]
@@ -1614,7 +1614,7 @@ dependencies = [
  "bytes 0.5.4",
  "hyper 0.13.2",
  "native-tls",
- "tokio 0.2.12",
+ "tokio 0.2.13",
  "tokio-tls 0.3.0",
 ]
 
@@ -1723,7 +1723,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_urlencoded",
- "tokio 0.2.12",
+ "tokio 0.2.13",
  "tokio-util",
  "walkdir",
 ]
@@ -2779,28 +2779,28 @@ dependencies = [
 
 [[package]]
 name = "proc-macro-error"
-version = "0.4.9"
+version = "0.4.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "052b3c9af39c7e5e94245f820530487d19eb285faedcb40e0c3275132293f242"
+checksum = "8a857f7c61b149c868eb7e40311b48502fcc924744fb73191962748643336568"
 dependencies = [
  "proc-macro-error-attr",
  "proc-macro2",
  "quote",
- "rustversion",
  "syn",
+ "version_check 0.9.1",
 ]
 
 [[package]]
 name = "proc-macro-error-attr"
-version = "0.4.9"
+version = "0.4.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d175bef481c7902e63e3165627123fff3502f06ac043d3ef42d08c1246da9253"
+checksum = "075d00534b62f176b55a48b68319be2f3fc05616d68ecd2bcb66bac0a49170e1"
 dependencies = [
  "proc-macro2",
  "quote",
- "rustversion",
  "syn",
  "syn-mid",
+ "version_check 0.9.1",
 ]
 
 [[package]]
@@ -3136,17 +3136,6 @@ dependencies = [
  "ring",
  "sct",
  "webpki",
-]
-
-[[package]]
-name = "rustversion"
-version = "1.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b3bba175698996010c4f6dce5e7f173b6eb781fce25d2cfc45e27091ce0b79f6"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
 ]
 
 [[package]]
@@ -3668,9 +3657,9 @@ dependencies = [
 
 [[package]]
 name = "tokio"
-version = "0.2.12"
+version = "0.2.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b34bee1facdc352fba10c9c58b654e6ecb6a2250167772bf86071f7c5f2f5061"
+checksum = "0fa5e81d6bc4e67fe889d5783bd2a128ab2e0cfa487e0be16b6a8d177b101616"
 dependencies = [
  "bytes 0.5.4",
  "fnv",
@@ -3884,7 +3873,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7bde02a3a5291395f59b06ec6945a3077602fac2b07eeeaf0dee2122f3619828"
 dependencies = [
  "native-tls",
- "tokio 0.2.12",
+ "tokio 0.2.13",
 ]
 
 [[package]]
@@ -3948,7 +3937,7 @@ dependencies = [
  "futures-sink",
  "log 0.4.8",
  "pin-project-lite",
- "tokio 0.2.12",
+ "tokio 0.2.13",
 ]
 
 [[package]]

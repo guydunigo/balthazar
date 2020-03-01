@@ -5,8 +5,10 @@ pub extern crate balthastore as store;
 pub extern crate balthernet as net;
 pub extern crate balthurner as run;
 extern crate balthwasm as wasm;
+extern crate futures;
 extern crate tokio;
 
+use futures::channel::mpsc::SendError;
 use std::{fmt, io};
 
 use net::identity::error::DecodingError;
@@ -26,6 +28,8 @@ pub enum Error {
     ChainError(chain::Error),
     NativeError(i64),
     MiscError(formats::Error),
+    EventChannelError(SendError),
+    SwarmChannelError(SendError),
 }
 
 impl fmt::Display for Error {
@@ -33,6 +37,8 @@ impl fmt::Display for Error {
         write!(fmt, "{:?}", self)
     }
 }
+
+impl std::error::Error for Error {}
 
 impl From<store::StoragesWrapperCreationError> for Error {
     fn from(src: store::StoragesWrapperCreationError) -> Self {
@@ -55,6 +61,12 @@ impl From<chain::Error> for Error {
 impl From<formats::Error> for Error {
     fn from(src: formats::Error) -> Self {
         Error::MiscError(src)
+    }
+}
+
+impl From<SendError> for Error {
+    fn from(src: SendError) -> Self {
+        Error::EventChannelError(src)
     }
 }
 

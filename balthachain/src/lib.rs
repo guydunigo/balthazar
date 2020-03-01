@@ -276,6 +276,25 @@ pub enum JobsEvent {
     CounterHasNewValue(u128),
 }
 
+impl fmt::Display for JobsEvent {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            JobsEvent::TaskNewResult {
+                job_id,
+                task_id,
+                result,
+            } => write!(
+                fmt,
+                "TaskNewResult {{ job_id: {}, task_id: {}, result: {} }}",
+                job_id,
+                task_id,
+                String::from_utf8_lossy(&result[..])
+            ),
+            _ => write!(fmt, "{:?}", self),
+        }
+    }
+}
+
 impl TryFrom<(&ethabi::Contract, Log)> for JobsEvent {
     type Error = Error;
 
