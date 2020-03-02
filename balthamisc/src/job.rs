@@ -22,22 +22,22 @@ impl<T: fmt::Display> fmt::Display for UnknownValue<T> {
 
 impl<T: fmt::Debug + fmt::Display> std::error::Error for UnknownValue<T> {}
 
-const BEST_METHOD_PERFORMANCE: u64 = 0;
-const BEST_METHOD_COST: u64 = 1;
+const BEST_METHOD_COST: u64 = 0;
+const BEST_METHOD_PERFORMANCE: u64 = 1;
 /// Method to choose which offer is the best to execute a task.
 #[derive(Debug, Clone, Copy)]
 pub enum BestMethod {
-    /// Choose the offer with the most performant worker.
-    Performance,
     /// Choose the cheapest peer's offer.
     Cost,
+    /// Choose the offer with the most performant worker.
+    Performance,
 }
 
 impl Into<u64> for BestMethod {
     fn into(self) -> u64 {
         match self {
-            BestMethod::Performance => BEST_METHOD_PERFORMANCE,
             BestMethod::Cost => BEST_METHOD_COST,
+            BestMethod::Performance => BEST_METHOD_PERFORMANCE,
         }
     }
 }
@@ -47,8 +47,8 @@ impl std::convert::TryFrom<u64> for BestMethod {
 
     fn try_from(v: u64) -> Result<BestMethod, Self::Error> {
         match v {
-            BEST_METHOD_PERFORMANCE => Ok(BestMethod::Performance),
             BEST_METHOD_COST => Ok(BestMethod::Cost),
+            BEST_METHOD_PERFORMANCE => Ok(BestMethod::Performance),
             _ => Err(UnknownValue(v)),
         }
     }
@@ -100,11 +100,12 @@ impl fmt::Display for ProgramKind {
 #[derive(Debug, Clone)]
 pub struct WorkerParameters {
     pub best_method: BestMethod,
-    pub max_worker_price: u64,
+    pub max_worker_price: u128,
     pub min_cpu_count: u64,
     pub min_memory: u64,
-    pub min_network_speed: u64,
     pub max_network_usage: u64,
+    pub max_network_price: u128,
+    pub min_network_speed: u64,
 }
 
 impl fmt::Display for WorkerParameters {
@@ -113,12 +114,17 @@ impl fmt::Display for WorkerParameters {
         writeln!(f, "Max worker price: {} money/s", self.max_worker_price)?;
         writeln!(f, "Min CPU count: {}", self.min_cpu_count)?;
         writeln!(f, "Min memory: {} kilobytes", self.min_memory)?;
+        writeln!(f, "Max network usage: {} kilobits", self.max_network_usage)?;
+        writeln!(
+            f,
+            "Max network price: {} money/kilobits",
+            self.max_network_price
+        )?;
         writeln!(
             f,
             "Min network speed: {} kilobits/s",
             self.min_network_speed
-        )?;
-        writeln!(f, "Max network usage: {} kilobits", self.max_network_usage)
+        )
     }
 }
 
@@ -140,6 +146,7 @@ pub struct Job<PeerAddress> {
     pub includes_tests: bool,
 
     pub sender: PeerAddress,
+    pub nonce: u64,
 }
 
 impl<PeerAddress: fmt::Display> fmt::Display for Job<PeerAddress> {
@@ -176,6 +183,7 @@ impl<PeerAddress: fmt::Display> fmt::Display for Job<PeerAddress> {
         writeln!(f, "Includes tests: {}", self.includes_tests)?;
         writeln!(f)?;
         writeln!(f, "Sender: {}", self.sender)?;
+        writeln!(f, "Nonce: {}", self.nonce)?;
         writeln!(f, "---------")
     }
 }

@@ -5,7 +5,7 @@ contract Jobs {
     uint128 public counter;
 
     function set_counter(uint128 new_val) public {
-        require(counter != new_val);
+        require(counter != new_val, "Same value as before.");
         counter = new_val;
         emit CounterHasNewValue(counter);
     }
@@ -16,19 +16,13 @@ contract Jobs {
     }
 
     enum ProgramKind { Wasm }
-    enum BestMethod { Performance, Cost }
-
-    struct Task {
-        bytes arguments;
-        bytes[] result;
-    }
+    enum BestMethod { Cost, Performance }
 
     struct Job {
         ProgramKind program_kind;
         bytes[] addresses;
         bytes program_hash;
-        uint64 next_task_id;
-        mapping(uint => Task) tasks;
+        bytes[] arguments;
 
         uint64 timeout;
         uint64 max_failures;
@@ -36,24 +30,282 @@ contract Jobs {
         WorkerParameters worker_parameters;
 
         uint64 redundancy;
-        bool includes_tests;
+        bool is_program_pure;
 
         address sender;
-
-        bool is_locked;
+        uint128 nonce;
     }
 
     struct WorkerParameters {
         BestMethod best_method;
-        uint64 max_worker_price;
+        uint128 max_worker_price;
         uint64 min_cpu_count;
         uint64 min_memory;
-        uint64 min_network_speed;
         uint64 max_network_usage;
+        uint128 max_network_price;
+        uint64 min_network_speed;
     }
 
-    Job[] jobs;
+    struct Task {
+        bytes32 job_id;
+        bytes arguments;
+        bytes[] result;
+    }
 
+    struct User {
+        bytes32[] jobs;
+        Job[] pending_jobs;
+        uint128 next_nonce;
+        uint256 money;
+    }
+
+    mapping(bytes32 => Job) jobs;
+    mapping(bytes32 => Task) tasks;
+    mapping(address => User) users;
+
+    function next_nonce_and_increase() internal returns (uint128 nonce) {
+        nonce = users[msg.sender].next_nonce;
+        users[msg.sender].next_nonce++;
+    }
+
+    function create_job() public {
+        uint128 nonce = next_nonce_and_increase();
+        users[msg.sender].pending_jobs.push(Job(
+            ProgramKind.Wasm,
+            new bytes[](0),
+            new bytes(0),
+            new bytes[](0),
+            0,
+            0,
+            WorkerParameters (BestMethod.Cost, 0, 0, 0, 0, 0, 0),
+            0,
+            false,
+            msg.sender,
+            nonce
+        ));
+        emit JobNew(msg.sender, nonce);
+    }
+
+    function find_pending_program(uint64 nonce) internal view returns (uint) {
+        for (uint i = 0 ; i < users[msg.sender].pending_jobs.length ; i++) {
+            if (users[msg.sender].pending_jobs[i].nonce == nonce) {
+                return i;
+            }
+        }
+        require(false, "Not found.");
+    }
+
+    function get_program_kind_pending(uint64 nonce) public view returns (ProgramKind) {
+        return users[msg.sender].pending_jobs[find_pending_program(nonce)].program_kind;
+    }
+    function set_program_kind_pending(uint64 nonce, ProgramKind val) public {
+        users[msg.sender].pending_jobs[find_pending_program(nonce)].program_kind = val;
+    }
+    function get_program_kind(bytes32 job_id) public view returns (ProgramKind) {
+        return jobs[job_id].program_kind;
+    }
+    function set_program_kind_pending(bytes32 job_id, ProgramKind val) public {
+        jobs[job_id].program_kind = val;
+    }
+
+    function get_addresses_pending(uint64 nonce) public view returns (bytes[] memory) {
+        return users[msg.sender].pending_jobs[find_pending_program(nonce)].addresses;
+    }
+    function set_addresses_pending(uint64 nonce, bytes[] memory val) public {
+        users[msg.sender].pending_jobs[find_pending_program(nonce)].addresses = val;
+    }
+    function get_addresses(bytes32 job_id) public view returns (bytes[] memory) {
+        return jobs[job_id].addresses;
+    }
+    function set_addresses(bytes32 job_id, bytes[] memory val) public {
+        jobs[job_id].addresses = val;
+    }
+
+    function get_program_hash_pending(uint64 nonce) public view returns (bytes memory) {
+        return users[msg.sender].pending_jobs[find_pending_program(nonce)].program_hash;
+    }
+    function set_program_hash_pending(uint64 nonce, bytes memory val) public {
+        users[msg.sender].pending_jobs[find_pending_program(nonce)].program_hash = val;
+    }
+    function get_program_hash(bytes32 job_id) public view returns (bytes memory) {
+        return jobs[job_id].program_hash;
+    }
+    function set_program_hash(bytes32 job_id, bytes memory val) public {
+        jobs[job_id].program_hash = val;
+    }
+
+    function get_arguments_pending(uint64 nonce) public view returns (bytes[] memory) {
+        return users[msg.sender].pending_jobs[find_pending_program(nonce)].arguments;
+    }
+    function set_arguments_pending(uint64 nonce, bytes[] memory val) public {
+        users[msg.sender].pending_jobs[find_pending_program(nonce)].arguments = val;
+    }
+    function get_arguments(bytes32 job_id) public view returns (bytes[] memory) {
+        return jobs[job_id].arguments;
+    }
+    function set_arguments(bytes32 job_id, bytes[] memory val) public {
+        jobs[job_id].arguments = val;
+    }
+
+    function get_timeout_pending(uint64 nonce) public view returns (uint64) {
+        return users[msg.sender].pending_jobs[find_pending_program(nonce)].timeout;
+    }
+    function set_timeout_pending(uint64 nonce, uint64 val) public {
+        users[msg.sender].pending_jobs[find_pending_program(nonce)].timeout = val;
+    }
+    function get_timeout(bytes32 job_id) public view returns (uint64) {
+        return jobs[job_id].timeout;
+    }
+    function set_timeout(bytes32 job_id, uint64 val) public {
+        jobs[job_id].timeout = val;
+    }
+
+    function get_max_failures_pending(uint64 nonce) public view returns (uint64) {
+        return users[msg.sender].pending_jobs[find_pending_program(nonce)].max_failures;
+    }
+    function set_max_failures_pending(uint64 nonce, uint64 val) public {
+        users[msg.sender].pending_jobs[find_pending_program(nonce)].max_failures = val;
+    }
+    function get_max_failures(bytes32 job_id) public view returns (uint64) {
+        return jobs[job_id].max_failures;
+    }
+    function set_max_failures(bytes32 job_id, uint64 val) public {
+        jobs[job_id].max_failures = val;
+    }
+
+    function get_best_method_pending(uint64 nonce) public view returns (BestMethod) {
+        return users[msg.sender].pending_jobs[find_pending_program(nonce)].worker_parameters.best_method;
+    }
+    function set_best_method_pending(uint64 nonce, BestMethod val) public {
+        users[msg.sender].pending_jobs[find_pending_program(nonce)].worker_parameters.best_method = val;
+    }
+    function get_best_method(bytes32 job_id) public view returns (BestMethod) {
+        return jobs[job_id].worker_parameters.best_method;
+    }
+    function set_best_method(bytes32 job_id, BestMethod val) public {
+        jobs[job_id].worker_parameters.best_method = val;
+    }
+
+    function get_max_worker_price_pending(uint64 nonce) public view returns (uint128) {
+        return users[msg.sender].pending_jobs[find_pending_program(nonce)].worker_parameters.max_worker_price;
+    }
+    function set_max_worker_price_pending(uint64 nonce, uint128 val) public {
+        users[msg.sender].pending_jobs[find_pending_program(nonce)].worker_parameters.max_worker_price = val;
+    }
+    function get_max_worker_price(bytes32 job_id) public view returns (uint128) {
+        return jobs[job_id].worker_parameters.max_worker_price;
+    }
+    function set_max_worker_price(bytes32 job_id, uint128 val) public {
+        jobs[job_id].worker_parameters.max_worker_price = val;
+    }
+
+    function get_min_cpu_count_pending(uint64 nonce) public view returns (uint64) {
+        return users[msg.sender].pending_jobs[find_pending_program(nonce)].worker_parameters.min_cpu_count;
+    }
+    function set_min_cpu_count_pending(uint64 nonce, uint64 val) public {
+        users[msg.sender].pending_jobs[find_pending_program(nonce)].worker_parameters.min_cpu_count = val;
+    }
+    function get_min_cpu_count(bytes32 job_id) public view returns (uint64) {
+        return jobs[job_id].worker_parameters.min_cpu_count;
+    }
+    function set_min_cpu_count(bytes32 job_id, uint64 val) public {
+        jobs[job_id].worker_parameters.min_cpu_count = val;
+    }
+
+    function get_min_memory_pending(uint64 nonce) public view returns (uint64) {
+        return users[msg.sender].pending_jobs[find_pending_program(nonce)].worker_parameters.min_memory;
+    }
+    function set_min_memory_pending(uint64 nonce, uint64 val) public {
+        users[msg.sender].pending_jobs[find_pending_program(nonce)].worker_parameters.min_memory = val;
+    }
+    function get_min_memory(bytes32 job_id) public view returns (uint64) {
+        return jobs[job_id].worker_parameters.min_memory;
+    }
+    function set_min_memory(bytes32 job_id, uint64 val) public {
+        jobs[job_id].worker_parameters.min_memory = val;
+    }
+
+    function get_max_network_usage_pending(uint64 nonce) public view returns (uint64) {
+        return users[msg.sender].pending_jobs[find_pending_program(nonce)].worker_parameters.max_network_usage;
+    }
+    function set_max_network_usage_pending(uint64 nonce, uint64 val) public {
+        users[msg.sender].pending_jobs[find_pending_program(nonce)].worker_parameters.max_network_usage = val;
+    }
+    function get_max_network_usage(bytes32 job_id) public view returns (uint64) {
+        return jobs[job_id].worker_parameters.max_network_usage;
+    }
+    function set_max_network_usage(bytes32 job_id, uint64 val) public {
+        jobs[job_id].worker_parameters.max_network_usage = val;
+    }
+
+    function get_max_network_price_pending(uint64 nonce) public view returns (uint128) {
+        return users[msg.sender].pending_jobs[find_pending_program(nonce)].worker_parameters.max_network_price;
+    }
+    function set_max_network_price_pending(uint64 nonce, uint128 val) public {
+        users[msg.sender].pending_jobs[find_pending_program(nonce)].worker_parameters.max_network_price = val;
+    }
+    function get_max_network_price(bytes32 job_id) public view returns (uint128) {
+        return jobs[job_id].worker_parameters.max_network_price;
+    }
+    function set_max_network_price(bytes32 job_id, uint128 val) public {
+        jobs[job_id].worker_parameters.max_network_price = val;
+    }
+
+    function get_min_network_speed_pending(uint64 nonce) public view returns (uint64) {
+        return users[msg.sender].pending_jobs[find_pending_program(nonce)].worker_parameters.min_network_speed;
+    }
+    function set_min_network_speed_pending(uint64 nonce, uint64 val) public {
+        users[msg.sender].pending_jobs[find_pending_program(nonce)].worker_parameters.min_network_speed = val;
+    }
+    function get_min_network_speed(bytes32 job_id) public view returns (uint64) {
+        return jobs[job_id].worker_parameters.min_network_speed;
+    }
+    function set_min_network_speed(bytes32 job_id, uint64 val) public {
+        jobs[job_id].worker_parameters.min_network_speed = val;
+    }
+
+    function get_redundancy_pending(uint64 nonce) public view returns (uint64) {
+        return users[msg.sender].pending_jobs[find_pending_program(nonce)].redundancy;
+    }
+    function set_redundancy_pending(uint64 nonce, uint64 val) public {
+        users[msg.sender].pending_jobs[find_pending_program(nonce)].redundancy = val;
+    }
+    function get_redundancy(bytes32 job_id) public view returns (uint64) {
+        return jobs[job_id].redundancy;
+    }
+    function set_redundancy(bytes32 job_id, uint64 val) public {
+        jobs[job_id].redundancy = val;
+    }
+
+    function get_is_program_pure_pending(uint64 nonce) public view returns (bool) {
+        return users[msg.sender].pending_jobs[find_pending_program(nonce)].is_program_pure;
+    }
+    function set_is_program_pure_pending(uint64 nonce, bool val) public {
+        users[msg.sender].pending_jobs[find_pending_program(nonce)].is_program_pure = val;
+    }
+    function get_is_program_pure(bytes32 job_id) public view returns (bool) {
+        return jobs[job_id].is_program_pure;
+    }
+    function set_is_program_pure(bytes32 job_id, bool val) public {
+        jobs[job_id].is_program_pure = val;
+    }
+
+    function get_nonce_pending(uint64 nonce) public view returns (uint128) {
+        return users[msg.sender].pending_jobs[find_pending_program(nonce)].nonce;
+    }
+    function set_nonce_pending(uint64 nonce, uint128 val) public {
+        users[msg.sender].pending_jobs[find_pending_program(nonce)].nonce = val;
+    }
+    function get_nonce(bytes32 job_id) public view returns (uint128) {
+        return jobs[job_id].nonce;
+    }
+    function set_nonce(bytes32 job_id, uint128 val) public {
+        jobs[job_id].nonce = val;
+    }
+
+    // ------------------------------------------------------------
+
+    /*
     function send_wasm_job(
         bytes memory program_hash,
         uint64 timeout,
@@ -207,8 +459,9 @@ contract Jobs {
         return jobs[job_id].tasks[task_id].result[0];
     }
 
-    event JobNew(address sender, uint64 job_id);
     event JobLocked(uint64 job_id);
     event TaskNewResult(uint64 job_id, uint64 task_id, bytes result);
+    */
+    event JobNew(address sender, uint128 nonce);
     event CounterHasNewValue(uint128 new_counter);
 }

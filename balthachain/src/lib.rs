@@ -10,6 +10,7 @@ use futures::{compat::Compat01As03, executor::block_on, future, Stream, StreamEx
 use misc::{
     job::{BestMethod, Job, JobId, ProgramKind, TaskId, UnknownValue, WorkerParameters},
     multiaddr::{self, Multiaddr},
+    multiformats::encode_multibase_multihash_string,
     multihash::{self, Multihash},
 };
 use std::{
@@ -231,7 +232,10 @@ async fn run_async(mode: &RunMode, config: &ChainConfig) -> Result<(), Error> {
 
             let job_id = chain.jobs_send_job(&job).await?;
 
-            println!("Job stored ! Job id : {}", job_id);
+            println!(
+                "Job stored ! Job id : {}",
+                encode_multibase_multihash_string(&job_id)
+            );
         }
         RunMode::JobsGetJob { job_id } => {
             let job = chain.jobs_get_job(*job_id).await?;
@@ -241,8 +245,8 @@ async fn run_async(mode: &RunMode, config: &ChainConfig) -> Result<(), Error> {
             let result = chain.jobs_get_result(*job_id, *task_id).await?;
             println!(
                 "Result of task `{}` of job `{}`:\n{}",
-                task_id,
-                job_id,
+                encode_multibase_multihash_string(task_id),
+                encode_multibase_multihash_string(job_id),
                 String::from_utf8_lossy(&result[..])
             );
         }
@@ -252,7 +256,11 @@ async fn run_async(mode: &RunMode, config: &ChainConfig) -> Result<(), Error> {
             result,
         } => {
             chain.jobs_set_result(*job_id, *task_id, result).await?;
-            println!("Result of task `{}` of job `{}` stored.", task_id, job_id);
+            println!(
+                "Result of task `{}` of job `{}` stored.",
+                encode_multibase_multihash_string(task_id),
+                encode_multibase_multihash_string(job_id)
+            );
         }
     }
 
