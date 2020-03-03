@@ -131,7 +131,6 @@ impl fmt::Display for WorkerParameters {
 /// Description of a Job.
 #[derive(Debug, Clone)]
 pub struct Job<PeerAddress> {
-    /// `None` if the job hasn't been sent yet or isn't known.
     pub job_id: Option<JobId>,
 
     pub program_kind: ProgramKind,
@@ -146,7 +145,8 @@ pub struct Job<PeerAddress> {
     pub includes_tests: bool,
 
     pub sender: PeerAddress,
-    pub nonce: u64,
+    /// `None` if the job hasn't been sent yet or isn't known.
+    pub nonce: Option<u64>,
 }
 
 impl<PeerAddress: fmt::Display> fmt::Display for Job<PeerAddress> {
