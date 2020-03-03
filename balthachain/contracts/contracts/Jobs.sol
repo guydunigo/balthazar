@@ -15,6 +15,13 @@ contract Jobs {
         emit CounterHasNewValue(counter);
     }
 
+    function get_hash() public view returns (bytes32) {
+        return keccak256(abi.encodePacked(counter, BestMethod.Performance));
+    }
+    function get_encoded() public view returns (bytes memory) {
+        return abi.encodePacked(counter, BestMethod.Performance);
+    }
+
     enum ProgramKind { Wasm }
     enum BestMethod { Cost, Performance }
 
@@ -105,7 +112,7 @@ contract Jobs {
         // (See: https://medium.com/@gus_tavo_guim/reentrancy-attack-on-smart-contracts-how-to-identify-the-exploitable-and-an-example-of-an-attack-4470a2d8dfe4)
         users[msg.sender].pending_money -= amount;
         msg.sender.transfer(amount);
-        
+
         // Just in case the payment doesn't go through, let's not loose count of our total money.
         total_money -= amount;
     }
@@ -352,7 +359,6 @@ contract Jobs {
 
         user.draft_jobs[id] = user.draft_jobs[len - 1];
         delete user.draft_jobs[len-1];
-        user.draft_jobs.length--;
     }
 
     function calculate_max_price(Job storage job) internal view returns (uint) {
