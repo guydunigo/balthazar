@@ -216,15 +216,12 @@ where
                 let msg = worker::ManagerPing {}.into();
                 inject_answer_event_to_peer_request(&mut self.substreams, request_id, msg)
             }
-            EventIn::TasksExecute {
-                mut tasks,
-                user_data,
-            } => {
+            EventIn::TasksExecute { tasks, user_data } => {
                 let msg = worker::TasksExecute { tasks }.into();
                 inject_new_request_event(&mut self.substreams, user_data, msg)
             }
             EventIn::TasksPing {
-                task_ids,
+                mut task_ids,
                 user_data,
             } => {
                 let msg = worker::TasksPing {
@@ -250,7 +247,7 @@ where
                 inject_answer_event_to_peer_request(&mut self.substreams, request_id, msg)
             }
             EventIn::TasksAbord {
-                task_ids,
+                mut task_ids,
                 user_data,
             } => {
                 let msg = worker::TasksAbord {
@@ -520,13 +517,13 @@ fn process_request<TUserData>(
                 request_id: RequestId::new(connec_unique_id),
             })),
             // TODO: check unique
-            WorkerMsg::TasksExecute(worker::TasksExecute { mut tasks }) => {
+            WorkerMsg::TasksExecute(worker::TasksExecute { tasks }) => {
                 Some(Ok(EventOut::TasksExecute {
                     tasks,
                     request_id: RequestId::new(connec_unique_id),
                 }))
             }
-            WorkerMsg::TasksPing(worker::TasksPing { task_ids }) => {
+            WorkerMsg::TasksPing(worker::TasksPing { mut task_ids }) => {
                 // TODO: what should be done with the errors ?
                 let task_ids = task_ids
                     .drain(..)
@@ -538,7 +535,7 @@ fn process_request<TUserData>(
                     request_id: RequestId::new(connec_unique_id),
                 }))
             }
-            WorkerMsg::TasksAbord(worker::TasksAbord { task_ids }) => {
+            WorkerMsg::TasksAbord(worker::TasksAbord { mut task_ids }) => {
                 // TODO: what should be done with the errors ?
                 let task_ids = task_ids
                     .drain(..)

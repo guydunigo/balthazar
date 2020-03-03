@@ -91,6 +91,11 @@ contract Jobs {
     function calc_job_id(address sender, uint128 nonce) internal pure returns (bytes32) {
         return keccak256(abi.encodePacked(sender, nonce));
     }
+    /*
+    function calc_job_id_encoded(uint128 nonce) public view returns (bytes memory) {
+        return abi.encodePacked(msg.sender, nonce);
+    }
+    */
 
     function calc_task_id(bytes32 job_id, bytes storage argument) internal pure returns (bytes32) {
         return keccak256(abi.encodePacked(job_id, argument));
@@ -449,6 +454,8 @@ contract Jobs {
         }
     }
 
+    // Accepts the results, pays the workers and unlock the remaining money for the sender
+    // to recover.
     function validate_job(bytes32 job_id) public {
         require(jobs[job_id].non_null, "unknown job");
         require(msg.sender == jobs[job_id].sender, "not sender");

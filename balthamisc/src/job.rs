@@ -1,5 +1,8 @@
 //! Classes for reperenting a job and its subtasks.
-use super::multiformats::encode_multibase_multihash_string;
+extern crate ethereum_types;
+
+use super::multiformats::{encode_multibase_multihash_string, DefaultHash};
+use ethereum_types::Address;
 use multiaddr::Multiaddr;
 use multihash::Multihash;
 use std::fmt;
@@ -25,7 +28,7 @@ impl<T: fmt::Debug + fmt::Display> std::error::Error for UnknownValue<T> {}
 const BEST_METHOD_COST: u64 = 0;
 const BEST_METHOD_PERFORMANCE: u64 = 1;
 /// Method to choose which offer is the best to execute a task.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BestMethod {
     /// Choose the cheapest peer's offer.
     Cost,
@@ -62,7 +65,7 @@ impl fmt::Display for BestMethod {
 
 const PROGRAM_KIND_WASM: u64 = 0;
 /// Kind of program to execute.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ProgramKind {
     /// Webassembly program, along with a hash to verify the program.
     Wasm(Multihash),
@@ -96,9 +99,15 @@ impl fmt::Display for ProgramKind {
     }
 }
 
-/// Parameters required for the worker to execute the task.
-#[derive(Debug, Clone)]
-pub struct WorkerParameters {
+/// Description of a Job.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Job {
+    pub program_kind: ProgramKind,
+    pub addresses: Vec<Multiaddr>,
+    pub arguments: Vec<Vec<u8>>,
+
+    pub timeout: u64,
+    pub max_failures: u64,
     pub best_method: BestMethod,
     pub max_worker_price: u128,
     pub min_cpu_count: u64,
@@ -106,56 +115,25 @@ pub struct WorkerParameters {
     pub max_network_usage: u64,
     pub max_network_price: u128,
     pub min_network_speed: u64,
-}
-
-impl fmt::Display for WorkerParameters {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "Best method: {}", self.best_method)?;
-        writeln!(f, "Max worker price: {} money/s", self.max_worker_price)?;
-        writeln!(f, "Min CPU count: {}", self.min_cpu_count)?;
-        writeln!(f, "Min memory: {} kilobytes", self.min_memory)?;
-        writeln!(f, "Max network usage: {} kilobits", self.max_network_usage)?;
-        writeln!(
-            f,
-            "Max network price: {} money/kilobits",
-            self.max_network_price
-        )?;
-        writeln!(
-            f,
-            "Min network speed: {} kilobits/s",
-            self.min_network_speed
-        )
-    }
-}
-
-/// Description of a Job.
-#[derive(Debug, Clone)]
-pub struct Job<PeerAddress> {
-    pub job_id: Option<JobId>,
-
-    pub program_kind: ProgramKind,
-    pub addresses: Vec<Multiaddr>,
-    pub arguments: Vec<Vec<u8>>,
-
-    pub timeout: u64,
-    pub max_failures: u64,
-    pub worker_parameters: WorkerParameters,
 
     pub redundancy: u64,
-    pub includes_tests: bool,
 
-    pub sender: PeerAddress,
+    pub sender: Address,
     /// `None` if the job hasn't been sent yet or isn't known.
-    pub nonce: Option<u64>,
+    pub nonce: Option<u128>,
 }
 
-impl<PeerAddress: fmt::Display> fmt::Display for Job<PeerAddress> {
+impl fmt::Display for Job {
     #[allow(irrefutable_let_patterns)]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "---------")?;
         write!(f, "Job id: ")?;
-        if let Some(job_id) = &self.job_id {
-            writeln!(f, "{}", encode_multibase_multihash_string(job_id))?;
+        if self.nonce.is_some() {
+            writeln!(
+                f,
+                "{}",
+                encode_multibase_multihash_string(&self.job_id().expect("Already checked option."))
+            )?;
         } else {
             writeln!(f, "Unknown")?;
         }
@@ -178,14 +156,60 @@ impl<PeerAddress: fmt::Display> fmt::Display for Job<PeerAddress> {
         writeln!(f, "Timeout: {}s", self.timeout)?;
         writeln!(f, "Max failures: {}", self.max_failures)?;
         writeln!(f)?;
-        writeln!(f, "{}", self.worker_parameters)?;
+        writeln!(f, "Best method: {}", self.best_method)?;
+        writeln!(f, "Max worker price: {} money/s", self.max_worker_price)?;
+        writeln!(f, "Min CPU count: {}", self.min_cpu_count)?;
+        writeln!(f, "Min memory: {} kilobytes", self.min_memory)?;
+        writeln!(f, "Max network usage: {} kilobits", self.max_network_usage)?;
+        writeln!(
+            f,
+            "Max network price: {} money/kilobits",
+            self.max_network_price
+        )?;
+        writeln!(
+            f,
+            "Min network speed: {} kilobits/s",
+            self.min_network_speed
+        )?;
+        writeln!(f)?;
         writeln!(f, "Redundancy: {}", self.redundancy)?;
-        writeln!(f, "Includes tests: {}", self.includes_tests)?;
         writeln!(f)?;
         writeln!(f, "Sender: {}", self.sender)?;
-        writeln!(f, "Nonce: {}", self.nonce)?;
+        write!(f, "Nonce: ")?;
+        if let Some(nonce) = &self.nonce {
+            writeln!(f, "{}", nonce)?;
+        } else {
+            writeln!(f, "Unknown")?;
+        }
         writeln!(f, "---------")
     }
+}
+
+impl Job {
+    /// Calculate job id of current job if nonce is set.
+    pub fn job_id(&self) -> Option<JobId> {
+        if let Some(nonce) = self.nonce {
+            Some(job_id(&self.sender, nonce))
+        } else {
+            None
+        }
+    }
+}
+
+/// Calculate JobId.
+pub fn job_id(address: &Address, nonce: u128) -> JobId {
+    let mut buffer = Vec::with_capacity(address.0.len() + 16);
+    buffer.extend_from_slice(&address[..]);
+    buffer.extend_from_slice(&nonce.to_le_bytes()[..]);
+    DefaultHash::digest(&buffer[..])
+}
+
+/// Calculate TaskId.
+pub fn task_id(job_id: Multihash, argument: &[u8]) -> TaskId {
+    let mut buffer = Vec::with_capacity(job_id.digest().len() + argument.len());
+    buffer.extend_from_slice(job_id.digest());
+    buffer.extend_from_slice(&argument[..]);
+    DefaultHash::digest(&buffer[..])
 }
 
 /*
