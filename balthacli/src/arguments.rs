@@ -204,8 +204,8 @@ pub enum ChainJobsSub {
     Events,
     /// Get number of jobs stored.
     Length,
-    /// Send a new Job.
-    Create {
+    /// Create a new draft.
+    Draft {
         #[clap(parse(try_from_str = try_decode_multibase_multihash_string))]
         program_hash: Multihash,
         #[clap(short, long, number_of_values(1))]
@@ -218,22 +218,60 @@ pub enum ChainJobsSub {
         max_worker_price: u64,
         min_cpu_count: u64,
         min_memory: u64,
-        min_network_speed: u64,
         max_network_usage: u64,
+        max_network_price: u64,
+        min_network_speed: u64,
         redundancy: u64,
         /// Includes tests.
-        #[clap(name = "tests", short, long)]
-        includes_tests: bool,
+        #[clap(name = "pure", short, long)]
+        is_program_pure: bool,
     },
     /// Display a job and all its information.
-    Get { job_id: JobId },
+    Get {
+        /// Provide the job id for a pending job.
+        #[clap(name = "pending", short, long, conflicts_with("draft"))]
+        job_id: Option<JobId>,
+        /// Provide the nonce of a draft job.
+        #[clap(name = "draft", short, long)]
+        nonce: Option<u128>,
+    },
+    /// Display all pending jobs or drafts.
+    GetAll {
+        /// Provide the nonce of a draft job instead of pending ones.
+        #[clap(short, long)]
+        drafts: bool,
+    }
+    /// Delete a draft.
+    Delete {
+        nonce: u128,
+    }
     /// Get result for given task or set it if `--set` is provided.
     Result {
-        job_id: JobId,
         task_id: TaskId,
         /// Set result instead of getting it.
-        #[clap(short, long)]
+        #[clap(short, long, requires("workers"))]
         set: Option<String>,
+        #[clap(name = "workers", short, long, number_of_values(1))]
+        workers: Option<Vec<(Address, u64, u64)>>,
+    },
+    /// Get or send money to the Jobs smart-contract.
+    Money {
+        /// Send the given value to the pending account
+        #[clap(short, long, conflicts_with("recover"))]
+        send: Option<u128>,
+        /// Get money from the Jobs smart-contract.
+        #[clap(short, long)]
+        recover: Option<u128>,
+    }
+    /// Set a job as ready, if it meets readiness criteria and there's enough pending
+    /// money, will lock the job and send the tasks for execution.
+    Ready {
+        nonce: u128
+    }
+    /// When all the tasks have a corresponding result, the owner can set job as validated,
+    /// to pay the workers and unlock the remaning money.
+    Validate {
+        job_id: JobId,
     },
 }
 
@@ -257,8 +295,7 @@ impl Into<chain::RunMode> for ChainSub {
                 chain::RunMode::JobsSubscribe(events_names)
             }
             ChainSub::Jobs(ChainJobsSub::Events) => chain::RunMode::JobsEvents,
-            ChainSub::Jobs(ChainJobsSub::Length) => chain::RunMode::JobsLength,
-            ChainSub::Jobs(ChainJobsSub::Create {
+            ChainSub::Jobs(ChainJobsSub::Draft {
                 program_hash,
                 addresses,
                 arguments,
@@ -268,13 +305,15 @@ impl Into<chain::RunMode> for ChainSub {
                 max_worker_price,
                 min_cpu_count,
                 min_memory,
-                min_network_speed,
                 max_network_usage,
+                max_network_price,
+                min_network_speed,
                 redundancy,
-                includes_tests,
-            }) => chain::RunMode::JobsSendJob {
-                program_kind: ProgramKind::Wasm(program_hash),
+                is_program_pure,
+            }) => chain::RunMode::JobsNewDraft {
+                program_kind: ProgramKind::Wasm,
                 addresses,
+                program_hash,
                 arguments: arguments.iter().map(|s| s.clone().into_bytes()).collect(),
                 timeout,
                 max_failures,
@@ -282,26 +321,47 @@ impl Into<chain::RunMode> for ChainSub {
                 max_worker_price,
                 min_cpu_count,
                 min_memory,
-                min_network_speed,
                 max_network_usage,
+                max_network_price,
+                min_network_speed,
                 redundancy,
-                includes_tests,
+                is_program_pure,
             },
-            ChainSub::Jobs(ChainJobsSub::Get { job_id }) => chain::RunMode::JobsGetJob { job_id },
+            ChainSub::Jobs(ChainJobsSub::Get { job_id: Some(job_id), .. }) => chain::RunMode::JobsGetJob { job_id },
+            ChainSub::Jobs(ChainJobsSub::Get { nonce: Some(nonce), ..  }) => chain::RunMode::JobsGetDraftJob { nonce },
+            ChainSub::Jobs(ChainJobsSub::GetAll) => chain::RunMode::JobsGetJobs,
+            ChainSub::Jobs(ChainJobsSub::GetAll) => chain::RunMode::JobsGetDraftJobs,
+            ChainSub::Jobs(ChainJobsSub::Delete { nonce }) => chain::RunMode::JobsDeleteDraftJob { nonce },
             ChainSub::Jobs(ChainJobsSub::Result {
-                job_id,
                 task_id,
                 set: None,
+                ..
             }) => chain::RunMode::JobsGetResult { job_id, task_id },
             ChainSub::Jobs(ChainJobsSub::Result {
                 job_id,
                 task_id,
                 set: Some(result),
+                workers: Some(workers),
             }) => chain::RunMode::JobsSetResult {
                 job_id,
                 task_id,
                 result: result.clone().into_bytes(),
+                workers
             },
+            ChainSub::Jobs(ChainJobsSub::Money {
+                send: None,
+                recover: None,
+            }) => chain::RunMode::JobsGetMoney,
+            ChainSub::Jobs(ChainJobsSub::Money {
+                send: Some(amount),
+                recover: None,
+            }) => chain::RunMode::JobsSendMoney { amount },
+            ChainSub::Jobs(ChainJobsSub::Money {
+                recover: Some(amount),
+                ..
+            }) => chain::RunMode::JobsRecoverMoney { amount },
+            ChainSub::Jobs(ChainJobsSub::Ready { nonce }) => chain::RunMode::JobsReady { nonce },
+            ChainSub::Jobs(ChainJobsSub::Validate { job_id }) => chain::RunMode::JobsValidate { job_id },
         }
     }
 }

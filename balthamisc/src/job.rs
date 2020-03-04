@@ -1,10 +1,12 @@
 //! Classes for reperenting a job and its subtasks.
 extern crate ethereum_types;
+extern crate serde_derive;
 
 use super::multiformats::{encode_multibase_multihash_string, DefaultHash};
 use ethereum_types::Address;
 use multiaddr::Multiaddr;
 use multihash::Multihash;
+use serde_derive::{Deserialize, Serialize};
 use std::fmt;
 
 // TODO: those are temporary aliases.
@@ -28,7 +30,7 @@ impl<T: fmt::Debug + fmt::Display> std::error::Error for UnknownValue<T> {}
 const BEST_METHOD_COST: u64 = 0;
 const BEST_METHOD_PERFORMANCE: u64 = 1;
 /// Method to choose which offer is the best to execute a task.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BestMethod {
     /// Choose the cheapest peer's offer.
     Cost,
@@ -65,26 +67,26 @@ impl fmt::Display for BestMethod {
 
 const PROGRAM_KIND_WASM: u64 = 0;
 /// Kind of program to execute.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum ProgramKind {
-    /// Webassembly program, along with a hash to verify the program.
-    Wasm(Multihash),
+    /// Webassembly program
+    Wasm,
 }
 
-impl Into<(u64, Option<Multihash>)> for ProgramKind {
-    fn into(self) -> (u64, Option<Multihash>) {
+impl Into<u64> for ProgramKind {
+    fn into(self) -> u64 {
         match self {
-            ProgramKind::Wasm(hash) => (PROGRAM_KIND_WASM, Some(hash)),
+            ProgramKind::Wasm => PROGRAM_KIND_WASM,
         }
     }
 }
 
-impl std::convert::TryFrom<(u64, Option<Multihash>)> for ProgramKind {
-    type Error = UnknownValue<(u64, Option<Multihash>)>;
+impl std::convert::TryFrom<u64> for ProgramKind {
+    type Error = UnknownValue<u64>;
 
-    fn try_from(v: (u64, Option<Multihash>)) -> Result<ProgramKind, Self::Error> {
+    fn try_from(v: u64) -> Result<ProgramKind, Self::Error> {
         match v {
-            (PROGRAM_KIND_WASM, Some(hash)) => Ok(ProgramKind::Wasm(hash)),
+            PROGRAM_KIND_WASM => Ok(ProgramKind::Wasm),
             _ => Err(UnknownValue(v)),
         }
     }
@@ -92,10 +94,7 @@ impl std::convert::TryFrom<(u64, Option<Multihash>)> for ProgramKind {
 
 impl fmt::Display for ProgramKind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let string = match self {
-            ProgramKind::Wasm(_) => "Wasm",
-        };
-        write!(f, "{}", string)
+        write!(f, "{:?}", self)
     }
 }
 
@@ -104,19 +103,21 @@ impl fmt::Display for ProgramKind {
 pub struct Job {
     pub program_kind: ProgramKind,
     pub addresses: Vec<Multiaddr>,
+    pub program_hash: Multihash,
     pub arguments: Vec<Vec<u8>>,
 
     pub timeout: u64,
     pub max_failures: u64,
     pub best_method: BestMethod,
-    pub max_worker_price: u128,
+    pub max_worker_price: u64,
     pub min_cpu_count: u64,
     pub min_memory: u64,
     pub max_network_usage: u64,
-    pub max_network_price: u128,
+    pub max_network_price: u64,
     pub min_network_speed: u64,
 
     pub redundancy: u64,
+    pub is_program_pure: bool,
 
     pub sender: Address,
     /// `None` if the job hasn't been sent yet or isn't known.
@@ -138,20 +139,27 @@ impl fmt::Display for Job {
             writeln!(f, "Unknown")?;
         }
         writeln!(f, "Program kind: {}", self.program_kind)?;
-        write!(f, "Program hash: ")?;
-        if let ProgramKind::Wasm(ref hash) = self.program_kind {
-            writeln!(f, "{}", encode_multibase_multihash_string(&hash))?;
-        } else {
-            unreachable!();
-            // writeln!(f, "Unknown")?;
-        }
+        write!(
+            f,
+            "Program hash: {}",
+            encode_multibase_multihash_string(&self.program_hash)
+        )?;
         writeln!(f, "Addresses: {:?}", self.addresses)?;
-        let arguments: Vec<String> = self
-            .arguments
-            .iter()
-            .map(|e| String::from_utf8_lossy(&e[..]).to_string())
-            .collect();
-        writeln!(f, "Arguments: {:?}", arguments)?;
+        writeln!(f, "Arguments: [")?;
+        for (i, a) in self.arguments.iter().enumerate() {
+            write!(f, "  ")?;
+            if let Some(job_id) = self.job_id() {
+                write!(
+                    f,
+                    "{}",
+                    encode_multibase_multihash_string(&task_id(&job_id, i as u128, &a[..]))
+                )?;
+            } else {
+                write!(f, "{}", i)?;
+            }
+            writeln!(f, ": {}", String::from_utf8_lossy(&a[..]))?;
+        }
+        writeln!(f, "]")?;
         writeln!(f)?;
         writeln!(f, "Timeout: {}s", self.timeout)?;
         writeln!(f, "Max failures: {}", self.max_failures)?;
@@ -173,6 +181,11 @@ impl fmt::Display for Job {
         )?;
         writeln!(f)?;
         writeln!(f, "Redundancy: {}", self.redundancy)?;
+        writeln!(
+            f,
+            "Is program pure? {}",
+            if self.is_program_pure { "Yes" } else { "No" }
+        )?;
         writeln!(f)?;
         writeln!(f, "Sender: {}", self.sender)?;
         write!(f, "Nonce: ")?;
@@ -181,6 +194,8 @@ impl fmt::Display for Job {
         } else {
             writeln!(f, "Unknown")?;
         }
+        writeln!(f)?;
+        writeln!(f, "Max price: {} money", self.calc_max_price())?;
         writeln!(f, "---------")
     }
 }
@@ -194,6 +209,13 @@ impl Job {
             None
         }
     }
+
+    pub fn calc_max_price(&self) -> u64 {
+        self.redundancy
+            * self.addresses.len() as u64
+            * (self.timeout * self.max_worker_price
+                + self.max_network_usage * self.max_network_price)
+    }
 }
 
 /// Calculate JobId.
@@ -205,9 +227,10 @@ pub fn job_id(address: &Address, nonce: u128) -> JobId {
 }
 
 /// Calculate TaskId.
-pub fn task_id(job_id: Multihash, argument: &[u8]) -> TaskId {
+pub fn task_id(job_id: &Multihash, i: u128, argument: &[u8]) -> TaskId {
     let mut buffer = Vec::with_capacity(job_id.digest().len() + argument.len());
     buffer.extend_from_slice(job_id.digest());
+    buffer.extend_from_slice(&i.to_le_bytes()[..]);
     buffer.extend_from_slice(&argument[..]);
     DefaultHash::digest(&buffer[..])
 }

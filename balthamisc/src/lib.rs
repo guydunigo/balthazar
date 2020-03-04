@@ -1,7 +1,6 @@
 pub extern crate multiaddr;
 extern crate multibase;
 pub extern crate multihash;
-
 extern crate tokio;
 
 use futures::future::poll_fn;

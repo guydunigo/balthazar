@@ -22,9 +22,9 @@ contract Jobs {
     struct Job {
         bytes[] arguments;
         uint64 timeout;
-        uint128 max_worker_price;
+        uint64 max_worker_price;
         uint64 max_network_usage;
-        uint128 max_network_price;
+        uint64 max_network_price;
         uint64 redundancy;
 
         uint64 max_failures;
@@ -52,8 +52,8 @@ contract Jobs {
         uint argument_id;
         bytes result;
         address[] workers;
-        uint128[] worker_prices;
-        uint128[] network_prices;
+        uint64[] worker_prices;
+        uint64[] network_prices;
 
         bool non_null;
     }
@@ -97,8 +97,8 @@ contract Jobs {
     }
     */
 
-    function calc_task_id(bytes32 job_id, bytes storage argument) internal pure returns (bytes32) {
-        return keccak256(abi.encodePacked(job_id, argument));
+    function calc_task_id(bytes32 job_id, uint128 index, bytes storage argument) internal pure returns (bytes32) {
+        return keccak256(abi.encodePacked(job_id, index, argument));
     }
 
     // ------------------------------------
@@ -289,11 +289,11 @@ contract Jobs {
 
     function get_worker_parameters_draft(uint128 nonce) public view returns (
         // BestMethod,
-        uint128,
+        uint64,
         // uint64,
         // uint64,
         uint64,
-        uint128// ,
+        uint64// ,
         // uint64
     ) {
         Job storage j = users[msg.sender].draft_jobs[find_draft_program(nonce)];
@@ -311,11 +311,11 @@ contract Jobs {
     function set_worker_parameters_draft(
         uint128 nonce,
         // BestMethod best_method,
-        uint128 max_worker_price,
+        uint64 max_worker_price,
         // uint64 min_cpu_count,
         // uint64 min_memory,
         uint64 max_network_usage,
-        uint128 max_network_price// ,
+        uint64 max_network_price// ,
         // uint64 min_network_speed
     ) public {
         Job storage j = users[msg.sender].draft_jobs[find_draft_program(nonce)];
@@ -338,11 +338,11 @@ contract Jobs {
     }
     function get_worker_parameters(bytes32 job_id) public view returns (
         // BestMethod,
-        uint128,
+        uint64,
         // uint64,
         // uint64,
         uint64,
-        uint128// ,
+        uint64// ,
         // uint64
     ) {
         require(jobs[job_id].non_null, "unknown job");
@@ -363,7 +363,7 @@ contract Jobs {
         return (jobs[job_id].sender, jobs[job_id].nonce);
     }
 
-    function is_draft_ready(Job storage job) private view returns (bool) {
+    function is_draft_ready(Job storage job) internal view returns (bool) {
         return // job.addresses.length > 0 &&
             // job.program_hash.length > 0 &&
             job.arguments.length > 0 &&
@@ -382,12 +382,15 @@ contract Jobs {
     }
     */
 
-    function delete_draft(uint id) public {
-        uint len = users[msg.sender].draft_jobs.length;
+    function delete_draft(uint id) internal {
         User storage user = users[msg.sender];
 
-        user.draft_jobs[id] = user.draft_jobs[len - 1];
+        user.draft_jobs[id] = user.draft_jobs[user.draft_jobs.length - 1];
         user.draft_jobs.pop();
+    }
+
+    function delete_draft_nonce(uint128 nonce) public {
+        delete_draft(find_draft_program(nonce));
     }
 
     function ready(uint128 nonce) public {
@@ -402,15 +405,15 @@ contract Jobs {
         delete_draft(find_draft_program(nonce));
         emit JobPending(job_id);
 
-        for (uint i; i < job.arguments.length ; i++) {
-            bytes32 task_id = calc_task_id(job_id, job.arguments[i]);
+        for (uint128 i; i < job.arguments.length ; i++) {
+            bytes32 task_id = calc_task_id(job_id, i, job.arguments[i]);
             require(tasks[task_id].non_null == false, "task collision");
             tasks[task_id] = Task (job_id,
                                    i,
                                    new bytes(0),
                                    new address[](0),
-                                   new uint128[](0),
-                                   new uint128[](0),
+                                   new uint64[](0),
+                                   new uint64[](0),
                                    true);
             emit TaskPending(task_id);
         }
@@ -424,7 +427,7 @@ contract Jobs {
     // ------------------------------------
     // Function that require proper consensus.
 
-    function set_result(bytes32 task_id, bytes memory result, address[] memory workers, uint128[] memory worker_prices, uint128[] memory network_prices) public {
+    function set_result(bytes32 task_id, bytes memory result, address[] memory workers, uint64[] memory worker_prices, uint64[] memory network_prices) public {
         require(tasks[task_id].non_null, "unknown task");
         require(tasks[task_id].result.length == 0, "already completed task");
         require(result.length > 0, "empty result");
@@ -447,8 +450,8 @@ contract Jobs {
         require(jobs[job_id].non_null, "unknown job");
 
         result = true;
-        for (uint i ; i < jobs[job_id].arguments.length ; i++) {
-            if (tasks[calc_task_id(job_id, jobs[job_id].arguments[i])].result.length == 0) {
+        for (uint128 i ; i < jobs[job_id].arguments.length ; i++) {
+            if (tasks[calc_task_id(job_id, i, jobs[job_id].arguments[i])].result.length == 0) {
                 result = false;
             }
         }
@@ -456,15 +459,15 @@ contract Jobs {
 
     // Accepts the results, pays the workers and unlock the remaining money for the sender
     // to recover.
-    function validate_job(bytes32 job_id) public {
+    function validate_results(bytes32 job_id) public {
         require(jobs[job_id].non_null, "unknown job");
         require(msg.sender == jobs[job_id].sender, "not sender");
         require(is_job_completed(job_id), "incomplete job");
 
         uint total_amount;
 
-        for (uint i ; i < jobs[job_id].arguments.length ; i++) {
-            Task storage task = tasks[calc_task_id(job_id, jobs[job_id].arguments[i])];
+        for (uint128 i ; i < jobs[job_id].arguments.length ; i++) {
+            Task storage task = tasks[calc_task_id(job_id, i, jobs[job_id].arguments[i])];
             for (uint64 j ; j < task.workers.length ; j++) {
                 uint amount = task.worker_prices[j] * jobs[job_id].timeout
                    + task.network_prices[j] * jobs[job_id].max_network_usage;
@@ -477,6 +480,11 @@ contract Jobs {
         users[msg.sender].locked_money -= max_price;
         users[msg.sender].pending_money += max_price - total_amount;
         emit PendingMoneyChanged(msg.sender, users[msg.sender].pending_money);
+
+        bytes32[] storage pending_jobs = users[msg.sender].pending_jobs;
+
+        pending_jobs[find_draft_program(jobs[job_id].nonce)] = pending_jobs[pending_jobs.length - 1];
+        users[msg.sender].pending_jobs.pop();
     }
 
     // ------------------------------------------------------------
