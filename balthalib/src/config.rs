@@ -92,7 +92,7 @@ impl BalthazarConfig {
     pub fn wasm(&self) -> &Option<(Vec<u8>, Vec<Vec<u8>>)> {
         &self.wasm
     }
-    pub fn set_wasm(&mut self, new: Option<(Vec<u8>, Vec<u8>)>) {
+    pub fn set_wasm(&mut self, new: Option<(Vec<u8>, Vec<Vec<u8>>)>) {
         self.wasm = new;
     }
 }

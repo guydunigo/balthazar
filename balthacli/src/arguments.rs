@@ -202,8 +202,6 @@ pub enum ChainJobsSub {
     Subscribe { events_names: Vec<JobsEventKind> },
     /// List events and their parameters.
     Events,
-    /// Get number of jobs stored.
-    Length,
     /// Create a new draft.
     Draft {
         #[clap(parse(try_from_str = try_decode_multibase_multihash_string))]
@@ -229,7 +227,8 @@ pub enum ChainJobsSub {
     /// Display a job and all its information.
     Get {
         /// Provide the job id for a pending job.
-        #[clap(name = "pending", short, long, conflicts_with("draft"))]
+        // TODO: at least of of both required
+        #[clap(name = "pending", short, long, conflicts_with("draft"),parse(try_from_str = try_decode_multibase_multihash_string))]
         job_id: Option<JobId>,
         /// Provide the nonce of a draft job.
         #[clap(name = "draft", short, long)]
@@ -240,18 +239,17 @@ pub enum ChainJobsSub {
         /// Provide the nonce of a draft job instead of pending ones.
         #[clap(short, long)]
         drafts: bool,
-    }
+    },
     /// Delete a draft.
-    Delete {
-        nonce: u128,
-    }
+    Delete { nonce: u128 },
     /// Get result for given task or set it if `--set` is provided.
     Result {
+        #[clap(parse(try_from_str = try_decode_multibase_multihash_string))]
         task_id: TaskId,
         /// Set result instead of getting it.
         #[clap(short, long, requires("workers"))]
         set: Option<String>,
-        #[clap(name = "workers", short, long, number_of_values(1))]
+        #[clap(name = "workers", short, long, number_of_values(1), parse(try_from_str = try_parse_workers))]
         workers: Option<Vec<(Address, u64, u64)>>,
     },
     /// Get or send money to the Jobs smart-contract.
@@ -262,15 +260,14 @@ pub enum ChainJobsSub {
         /// Get money from the Jobs smart-contract.
         #[clap(short, long)]
         recover: Option<u128>,
-    }
+    },
     /// Set a job as ready, if it meets readiness criteria and there's enough pending
     /// money, will lock the job and send the tasks for execution.
-    Ready {
-        nonce: u128
-    }
+    Ready { nonce: u128 },
     /// When all the tasks have a corresponding result, the owner can set job as validated,
     /// to pay the workers and unlock the remaning money.
     Validate {
+        #[clap(parse(try_from_str = try_decode_multibase_multihash_string))]
         job_id: JobId,
     },
 }
@@ -327,27 +324,36 @@ impl Into<chain::RunMode> for ChainSub {
                 redundancy,
                 is_program_pure,
             },
-            ChainSub::Jobs(ChainJobsSub::Get { job_id: Some(job_id), .. }) => chain::RunMode::JobsGetJob { job_id },
-            ChainSub::Jobs(ChainJobsSub::Get { nonce: Some(nonce), ..  }) => chain::RunMode::JobsGetDraftJob { nonce },
-            ChainSub::Jobs(ChainJobsSub::GetAll) => chain::RunMode::JobsGetJobs,
-            ChainSub::Jobs(ChainJobsSub::GetAll) => chain::RunMode::JobsGetDraftJobs,
-            ChainSub::Jobs(ChainJobsSub::Delete { nonce }) => chain::RunMode::JobsDeleteDraftJob { nonce },
-            ChainSub::Jobs(ChainJobsSub::Result {
-                task_id,
-                set: None,
+            ChainSub::Jobs(ChainJobsSub::Get {
+                job_id: Some(job_id),
                 ..
-            }) => chain::RunMode::JobsGetResult { job_id, task_id },
+            }) => chain::RunMode::JobsGetJob { job_id },
+            ChainSub::Jobs(ChainJobsSub::Get {
+                nonce: Some(nonce), ..
+            }) => chain::RunMode::JobsGetDraftJob { nonce },
+            ChainSub::Jobs(ChainJobsSub::Get { .. }) => unreachable!(),
+            ChainSub::Jobs(ChainJobsSub::GetAll { drafts: false }) => {
+                chain::RunMode::JobsGetPendingJobs
+            }
+            ChainSub::Jobs(ChainJobsSub::GetAll { drafts: true }) => {
+                chain::RunMode::JobsGetDraftJobs
+            }
+            ChainSub::Jobs(ChainJobsSub::Delete { nonce }) => {
+                chain::RunMode::JobsDeleteDraftJob { nonce }
+            }
             ChainSub::Jobs(ChainJobsSub::Result {
-                job_id,
+                task_id, set: None, ..
+            }) => chain::RunMode::JobsGetResult { task_id },
+            ChainSub::Jobs(ChainJobsSub::Result {
                 task_id,
                 set: Some(result),
                 workers: Some(workers),
             }) => chain::RunMode::JobsSetResult {
-                job_id,
                 task_id,
                 result: result.clone().into_bytes(),
-                workers
+                workers,
             },
+            ChainSub::Jobs(ChainJobsSub::Result { .. }) => unreachable!(),
             ChainSub::Jobs(ChainJobsSub::Money {
                 send: None,
                 recover: None,
@@ -361,7 +367,9 @@ impl Into<chain::RunMode> for ChainSub {
                 ..
             }) => chain::RunMode::JobsRecoverMoney { amount },
             ChainSub::Jobs(ChainJobsSub::Ready { nonce }) => chain::RunMode::JobsReady { nonce },
-            ChainSub::Jobs(ChainJobsSub::Validate { job_id }) => chain::RunMode::JobsValidate { job_id },
+            ChainSub::Jobs(ChainJobsSub::Validate { job_id }) => {
+                chain::RunMode::JobsValidate { job_id }
+            }
         }
     }
 }
@@ -456,7 +464,7 @@ impl std::convert::TryInto<(RunMode, BalthazarConfig)> for BalthazarArgs {
                 if let (Some(wasm), Some(args)) = (wasm_file_addr, args) {
                     config.set_wasm(Some((
                         wasm.into_bytes(),
-                        args.iter().map(|a| a.into_bytes()).collect(),
+                        args.iter().map(|a| a.clone().into_bytes()).collect(),
                     )));
                 }
             }
@@ -547,4 +555,25 @@ impl Into<StorageType> for DefaultStorageArg {
 
 fn try_parse_default_storage(s: &str) -> Result<StorageType, String> {
     DefaultStorageArg::from_str(s).map(|a| a.into())
+}
+
+fn try_parse_workers(s: &str) -> Result<(Address, u64, u64), String> {
+    let mut iter = s.split(",");
+    let address = iter
+        .next()
+        .ok_or_else(|| "no worker".to_string())?
+        .parse()
+        .map_err(|_| "invalid worker address".to_string())?;
+    let worker_price = iter
+        .next()
+        .ok_or_else(|| "no worker_price".to_string())?
+        .parse()
+        .map_err(|_| "invalid worker price".to_string())?;
+    let network_price = iter
+        .next()
+        .ok_or_else(|| "no network_price".to_string())?
+        .parse()
+        .map_err(|_| "invalid network price".to_string())?;
+
+    Ok((address, worker_price, network_price))
 }

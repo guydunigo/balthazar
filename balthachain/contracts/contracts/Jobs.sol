@@ -487,6 +487,11 @@ contract Jobs {
         users[msg.sender].pending_jobs.pop();
     }
 
+    function get_task(bytes32 task_id) public view returns (bytes32 job_id, bytes memory) {
+        require(tasks[task_id].non_null, "unknown task");
+        return (tasks[task_id].argument_id, jobs[tasks[task_id].job_id].arguments[tasks[task_id].argument_id]);
+    }
+
     // ------------------------------------------------------------
     // Events
 

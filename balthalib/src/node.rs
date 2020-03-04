@@ -17,7 +17,8 @@ use tokio::{runtime::Runtime, sync::RwLock};
 
 use chain::{Chain, JobsEvent};
 use misc::{
-    job::{JobId, TaskId},
+    job::{task_id, JobId, TaskId},
+    multihash::Multihash,
     WorkerSpecs,
 };
 use net::PeerRc;
@@ -90,7 +91,7 @@ struct Balthazar {
     config: Arc<BalthazarConfig>,
     tx: Sender<Event>,
     swarm_in: Sender<net::EventIn>,
-    pending_tasks: Arc<RwLock<VecDeque<(JobId, TaskId, Option<PeerRc>)>>>,
+    pending_tasks: Arc<RwLock<VecDeque<(TaskId, Option<PeerRc>)>>>,
 }
 /*
 {
@@ -122,13 +123,13 @@ impl Balthazar {
 
     async fn pending_tasks<'a>(
         &'a self,
-    ) -> impl 'a + std::ops::Deref<Target = VecDeque<(JobId, TaskId, Option<PeerRc>)>> {
+    ) -> impl 'a + std::ops::Deref<Target = VecDeque<(TaskId, Option<PeerRc>)>> {
         self.pending_tasks.read().await
     }
 
     async fn pending_tasks_mut<'a>(
         &'a self,
-    ) -> impl 'a + std::ops::DerefMut<Target = VecDeque<(JobId, TaskId, Option<PeerRc>)>> {
+    ) -> impl 'a + std::ops::DerefMut<Target = VecDeque<(TaskId, Option<PeerRc>)>> {
         self.pending_tasks.write().await
     }
 
@@ -137,18 +138,18 @@ impl Balthazar {
     }
 
     /// Get the next task that doesn't have any worker.
-    async fn next_pending_task(&self) -> Option<(JobId, TaskId)> {
+    async fn next_pending_task(&self) -> Option<TaskId> {
         let mut pending_tasks = self.pending_tasks_mut().await;
         let next_index =
             pending_tasks
                 .iter()
                 .enumerate()
-                .find_map(|(i, (_, _, o))| if o.is_none() { Some(i) } else { None });
+                .find_map(|(i, (_, o))| if o.is_none() { Some(i) } else { None });
         if let Some(i) = next_index {
-            let (j, t, _) = pending_tasks
+            let (t, _) = pending_tasks
                 .remove(i)
                 .expect("We just found the value, it should exists.");
-            Some((j, t))
+            Some(t)
         } else {
             None
         }
@@ -248,28 +249,9 @@ impl Balthazar {
             .await;
         match event {
             // let mut free_workers_iter = self.find_available_worker().await;
-            chain::JobsEvent::JobLocked { job_id } => {
+            chain::JobsEvent::TaskPending { task_id } => {
                 let mut p = self.pending_tasks_mut().await;
-                self.chain()
-                    .jobs_get_all_arguments(job_id)
-                    .await
-                    .iter()
-                    .enumerate()
-                    .for_each(|(task_id, _)| {
-                        /*
-                        let w = if let Some(worker) = free_workers_iter {
-                            self.send_msg_to_behaviour(net::EventIn::TasksExecute (
-                                worker.read().expect("couldn't lock on peer").peer_id.clone(),
-                                vec![])).await;
-
-                                Some(worker)
-                        } else {
-                            None
-                        };
-                        */
-                        // TODO: stop calling it after it has returned None once.
-                        (*p).push_back((job_id, task_id as u64, None))
-                    });
+                p.push_back((task_id, None))
             }
             _ => (),
         }
@@ -280,17 +262,13 @@ impl Balthazar {
         match (self.config.node_type(), event) {
             (NodeType::Manager, net::EventOut::WorkerNew(peer_id)) => {
                 if let Some((wasm, args)) = self.config.wasm() {
-                    let mut tasks = HashMap::new();
-                    tasks.insert(
-                        wasm.clone(),
-                        TaskExecute {
-                            job_id: wasm.clone(),
-                            // task_id: wasm.clone(),
-                            job_addr: vec![wasm.clone()],
-                            arguments: args.clone(),
-                            timeout: 100,
-                        },
-                    );
+                    let mut tasks = vec![TaskExecute {
+                        job_id: wasm.clone(),
+                        job_addr: vec![wasm.clone()],
+                        arguments: args.clone(),
+                        timeout: 100,
+                        max_network_usage: 100,
+                    }];
                     let args_str: Vec<Cow<str>> = args
                         .iter()
                         .map(|a| String::from_utf8_lossy(&a[..]))
@@ -332,96 +310,106 @@ impl Balthazar {
             }
             (NodeType::Worker, net::EventOut::TasksExecute(tasks)) => {
                 for task in tasks.iter() {
-                    self.send_msg_to_behaviour(net::EventIn::TaskStatus(
-                        task.task_id.clone(),
-                        TaskStatus::Pending,
-                    ))
-                    .await;
-                    let storage = StoragesWrapper::default();
-                    let string_job_addr = String::from_utf8_lossy(&task.job_addr[0][..]);
-                    let string_arguments = String::from_utf8_lossy(&task.arguments[..]);
+                    for (index, argument) in task.arguments.iter().enumerate() {
+                        // TODO: expect
+                        let task_id = task_id(
+                            &Multihash::from_bytes(task.job_id.clone())
+                                .expect("not a correct multihash"),
+                            index as u128,
+                            argument,
+                        );
+                        self.send_msg_to_behaviour(net::EventIn::TaskStatus(
+                            task_id.clone(),
+                            TaskStatus::Pending,
+                        ))
+                        .await;
+                        let storage = StoragesWrapper::default();
+                        let string_job_addr = String::from_utf8_lossy(&task.job_addr[0][..]);
+                        let string_argument = String::from_utf8_lossy(&argument[..]);
 
-                    self.spawn_log(
-                        LogKind::Worker,
-                        format!("will get program `{}`...", string_job_addr),
-                    )
-                    .await;
-                    match storage.get(&task.job_addr[0][..]).await {
-                        Ok(wasm) => {
-                            self.spawn_log(
-                                LogKind::Worker,
-                                format!("received program `{}`.", string_job_addr),
-                            )
-                            .await;
-                            self.spawn_log(
-                                LogKind::Worker,
-                                format!(
-                                    "spawning wasm executor for `{}` with argument `{}`...",
-                                    string_job_addr, string_arguments,
-                                ),
-                            )
-                            .await;
+                        self.spawn_log(
+                            LogKind::Worker,
+                            format!("will get program `{}`...", string_job_addr),
+                        )
+                        .await;
+                        match storage.get(&task.job_addr[0][..]).await {
+                            Ok(wasm) => {
+                                self.spawn_log(
+                                    LogKind::Worker,
+                                    format!("received program `{}`.", string_job_addr),
+                                )
+                                .await;
+                                self.spawn_log(
+                                    LogKind::Worker,
+                                    format!(
+                                        "spawning wasm executor for `{}` with argument `{}`...",
+                                        string_job_addr, string_argument,
+                                    ),
+                                )
+                                .await;
 
-                            self.send_msg_to_behaviour(net::EventIn::TaskStatus(
-                                task.task_id.clone(),
-                                TaskStatus::Started(
-                                    SystemTime::now()
-                                        .duration_since(UNIX_EPOCH)
-                                        .unwrap()
-                                        .as_secs() as i64,
-                                ),
-                            ))
-                            .await;
+                                self.send_msg_to_behaviour(net::EventIn::TaskStatus(
+                                    task_id.clone(),
+                                    TaskStatus::Started(
+                                        SystemTime::now()
+                                            .duration_since(UNIX_EPOCH)
+                                            .unwrap()
+                                            .as_secs()
+                                            as i64,
+                                    ),
+                                ))
+                                .await;
 
-                            match WasmRunner::run_async(&wasm[..], &task.arguments[..]).await {
-                                Ok(result) => {
-                                    self.spawn_log(
-                                        LogKind::Worker,
-                                        format!(
-                                            "task result for `{}` with `{}`: `{:?}`",
-                                            string_job_addr,
-                                            string_arguments,
-                                            String::from_utf8_lossy(&result[..])
-                                        ),
-                                    )
-                                    .await;
-                                    self.send_msg_to_behaviour(net::EventIn::TaskStatus(
-                                        task.task_id.clone(),
-                                        TaskStatus::Completed(result),
-                                    ))
-                                    .await;
-                                }
-                                Err(error) => {
-                                    self.send_msg_to_behaviour(net::EventIn::TaskStatus(
-                                        task.task_id.clone(),
-                                        TaskStatus::Error(TaskErrorKind::Running),
-                                    ))
-                                    .await;
-                                    self.spawn_log(
-                                        LogKind::Worker,
-                                        format!(
-                                            "task error for `{}` with `{}`: `{:?}`",
-                                            string_job_addr, string_arguments, error
-                                        ),
-                                    )
-                                    .await;
+                                match WasmRunner::run_async(&wasm[..], &argument[..]).await {
+                                    Ok(result) => {
+                                        self.spawn_log(
+                                            LogKind::Worker,
+                                            format!(
+                                                "task result for `{}` with `{}`: `{:?}`",
+                                                string_job_addr,
+                                                string_argument,
+                                                String::from_utf8_lossy(&result[..])
+                                            ),
+                                        )
+                                        .await;
+                                        self.send_msg_to_behaviour(net::EventIn::TaskStatus(
+                                            task_id.clone(),
+                                            TaskStatus::Completed(result),
+                                        ))
+                                        .await;
+                                    }
+                                    Err(error) => {
+                                        self.send_msg_to_behaviour(net::EventIn::TaskStatus(
+                                            task_id.clone(),
+                                            TaskStatus::Error(TaskErrorKind::Running),
+                                        ))
+                                        .await;
+                                        self.spawn_log(
+                                            LogKind::Worker,
+                                            format!(
+                                                "task error for `{}` with `{}`: `{:?}`",
+                                                string_job_addr, string_argument, error
+                                            ),
+                                        )
+                                        .await;
+                                    }
                                 }
                             }
-                        }
-                        Err(error) => {
-                            self.send_msg_to_behaviour(net::EventIn::TaskStatus(
-                                task.task_id.clone(),
-                                TaskStatus::Error(TaskErrorKind::Download),
-                            ))
-                            .await;
-                            self.spawn_log(
-                                LogKind::Worker,
-                                format!(
-                                    "error while fetching `{}`: `{:?}`",
-                                    string_job_addr, error
-                                ),
-                            )
-                            .await;
+                            Err(error) => {
+                                self.send_msg_to_behaviour(net::EventIn::TaskStatus(
+                                    task_id.clone(),
+                                    TaskStatus::Error(TaskErrorKind::Download),
+                                ))
+                                .await;
+                                self.spawn_log(
+                                    LogKind::Worker,
+                                    format!(
+                                        "error while fetching `{}`: `{:?}`",
+                                        string_job_addr, error
+                                    ),
+                                )
+                                .await;
+                            }
                         }
                     }
                 }

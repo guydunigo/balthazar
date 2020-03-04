@@ -1120,6 +1120,17 @@ impl<'a> Chain<'a> {
             jobs.call_with_confirmations("validate_results", job_id, addr, Default::default(), 0);
         Ok(Compat01As03::new(fut).await?)
     }
+
+    pub async fn jobs_get_task(&self, task_id: &TaskId) -> Result<(JobId, Vec<u8>), Error> {
+        let jobs = self.jobs()?;
+        let task_id = Vec::from(task_id.digest());
+        let addr = self.local_address()?;
+
+        let fut = jobs.query("get_task", task_id, addr, Default::default(), None);
+        let (task_id, argument): (Vec<u8>, Vec<u8>) = Compat01As03::new(fut).await?;
+        let task_id = multihash::wrap(DefaultHash::CODE, &task_id[..]);
+        Ok((task_id, argument))
+    }
 }
 
 #[cfg(test)]
