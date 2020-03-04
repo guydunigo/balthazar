@@ -208,7 +208,7 @@ pub enum ChainJobsSub {
         program_hash: Multihash,
         #[clap(short, long, number_of_values(1))]
         addresses: Vec<Multiaddr>,
-        #[clap(name = "parameters", short, long, number_of_values(1))]
+        #[clap(name = "input", short, long, number_of_values(1))]
         arguments: Vec<String>,
         timeout: u64,
         max_failures: u64,

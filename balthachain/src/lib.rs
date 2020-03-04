@@ -11,7 +11,7 @@ use ethabi::Event;
 use futures::{compat::Compat01As03, executor::block_on, future, Stream, StreamExt};
 use misc::{
     job::{BestMethod, Job, JobId, ProgramKind, TaskId, UnknownValue},
-    multiaddr::{self, Multiaddr},
+    multiaddr::{self, Multiaddr, ToMultiaddr},
     multiformats::{
         encode_multibase_multihash_string, try_decode_multibase_multihash_string, DefaultHash,
     },
@@ -777,7 +777,7 @@ impl<'a> Chain<'a> {
                     .ok_or(Error::CouldntFindJobNonceEvent)?;
 
                 let fut = jobs.call_with_confirmations(
-                    "send_parameters_draft",
+                    "set_parameters_draft",
                     (nonce, job.timeout, job.max_failures, job.redundancy),
                     addr,
                     Default::default(),
@@ -855,7 +855,7 @@ impl<'a> Chain<'a> {
         let data: JobData = serde_json::from_str(&data[..])?;
         let mut addresses = Vec::with_capacity(data.addresses.len());
         for a in data.addresses.iter() {
-            addresses.push(Multiaddr::from_bytes(a.clone().into_bytes())?);
+            addresses.push((&a[..]).to_multiaddr()?);
         }
 
         let fut = jobs.query(
@@ -915,7 +915,7 @@ impl<'a> Chain<'a> {
         let data: JobData = serde_json::from_str(&data[..])?;
         let mut addresses = Vec::with_capacity(data.addresses.len());
         for a in data.addresses.iter() {
-            addresses.push(Multiaddr::from_bytes(a.clone().into_bytes())?);
+            addresses.push((&a[..]).to_multiaddr()?);
         }
 
         let fut = jobs.query(

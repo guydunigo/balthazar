@@ -139,7 +139,7 @@ impl fmt::Display for Job {
             writeln!(f, "Unknown")?;
         }
         writeln!(f, "Program kind: {}", self.program_kind)?;
-        write!(
+        writeln!(
             f,
             "Program hash: {}",
             encode_multibase_multihash_string(&self.program_hash)
