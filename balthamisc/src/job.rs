@@ -212,7 +212,7 @@ impl Job {
 
     pub fn calc_max_price(&self) -> u64 {
         self.redundancy
-            * self.addresses.len() as u64
+            * self.arguments.len() as u64
             * (self.timeout * self.max_worker_price
                 + self.max_network_usage * self.max_network_price)
     }
@@ -222,7 +222,7 @@ impl Job {
 pub fn job_id(address: &Address, nonce: u128) -> JobId {
     let mut buffer = Vec::with_capacity(address.0.len() + 16);
     buffer.extend_from_slice(&address[..]);
-    buffer.extend_from_slice(&nonce.to_le_bytes()[..]);
+    buffer.extend_from_slice(&nonce.to_be_bytes()[..]);
     DefaultHash::digest(&buffer[..])
 }
 
@@ -230,7 +230,7 @@ pub fn job_id(address: &Address, nonce: u128) -> JobId {
 pub fn task_id(job_id: &Multihash, i: u128, argument: &[u8]) -> TaskId {
     let mut buffer = Vec::with_capacity(job_id.digest().len() + argument.len());
     buffer.extend_from_slice(job_id.digest());
-    buffer.extend_from_slice(&i.to_le_bytes()[..]);
+    buffer.extend_from_slice(&i.to_be_bytes()[..]);
     buffer.extend_from_slice(&argument[..]);
     DefaultHash::digest(&buffer[..])
 }
