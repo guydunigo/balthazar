@@ -9,6 +9,7 @@ use futures::{
 use std::{
     borrow::Cow,
     collections::{HashMap, HashSet, VecDeque},
+    convert::TryFrom,
     fmt,
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
@@ -17,7 +18,7 @@ use tokio::{runtime::Runtime, sync::RwLock};
 
 use chain::{Chain, JobsEvent};
 use misc::{
-    job::{task_id, JobId, TaskId},
+    job::{JobId, TaskId},
     multihash::Multihash,
     WorkerSpecs,
 };
@@ -262,7 +263,7 @@ impl Balthazar {
         match (self.config.node_type(), event) {
             (NodeType::Manager, net::EventOut::WorkerNew(peer_id)) => {
                 if let Some((wasm, args)) = self.config.wasm() {
-                    let mut tasks = vec![TaskExecute {
+                    let tasks = vec![TaskExecute {
                         job_id: wasm.clone(),
                         job_addr: vec![wasm.clone()],
                         arguments: args.clone(),
@@ -301,9 +302,7 @@ impl Balthazar {
                     LogKind::Manager,
                     format!(
                         "Task status from peer `{}` for task `{}`: `{:?}`",
-                        peer_id,
-                        String::from_utf8_lossy(&task_id[..]),
-                        status
+                        peer_id, task_id, status
                     ),
                 )
                 .await;
@@ -312,9 +311,8 @@ impl Balthazar {
                 for task in tasks.iter() {
                     for (index, argument) in task.arguments.iter().enumerate() {
                         // TODO: expect
-                        let task_id = task_id(
-                            &Multihash::from_bytes(task.job_id.clone())
-                                .expect("not a correct multihash"),
+                        let task_id = TaskId::task_id(
+                            &JobId::try_from(&task.job_id[..]).expect("not a correct multihash"),
                             index as u128,
                             argument,
                         );

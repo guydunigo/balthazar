@@ -10,11 +10,9 @@ pub use config::{Address, ChainConfig};
 use ethabi::Event;
 use futures::{compat::Compat01As03, executor::block_on, future, Stream, StreamExt};
 use misc::{
-    job::{BestMethod, Job, JobId, ProgramKind, TaskId, UnknownValue},
+    job::{BestMethod, Job, JobId, ProgramKind, TaskId, UnknownValue, HASH_SIZE},
     multiaddr::{self, Multiaddr, ToMultiaddr},
-    multiformats::{
-        encode_multibase_multihash_string, try_decode_multibase_multihash_string, DefaultHash,
-    },
+    multiformats::{encode_multibase_multihash_string, try_decode_multibase_multihash_string},
     multihash::{self, Multihash},
 };
 use serde::{Deserialize, Serialize};
@@ -232,7 +230,10 @@ async fn run_async(mode: &RunMode, config: &ChainConfig) -> Result<(), Error> {
                 let stream = Box::new(chain.jobs_subscribe().await?);
                 stream
                     .for_each(|e| {
-                        println!("{:?}", e);
+                        match e {
+                            Ok(evt) => println!("{}", evt),
+                            Err(_) => println!("{:?}", e),
+                        }
                         future::ready(())
                     })
                     .await;
@@ -290,9 +291,9 @@ async fn run_async(mode: &RunMode, config: &ChainConfig) -> Result<(), Error> {
 
             let nonce = chain.jobs_new_draft(&job).await?;
 
-            println!("Draft stored ! Nonce: {}", nonce);
             println!("{}", chain.jobs_get_draft_job(nonce).await?);
-            println!("You still need to send the money for it and set it as ready.");
+            println!("Draft stored !");
+            println!("You might still need to send the money for it and set it as ready.");
         }
         RunMode::JobsGetJob { job_id } => {
             let job = chain.jobs_get_job(job_id).await?;
@@ -307,7 +308,7 @@ async fn run_async(mode: &RunMode, config: &ChainConfig) -> Result<(), Error> {
                 .jobs_get_pending_jobs()
                 .await?
                 .iter()
-                .map(|h| encode_multibase_multihash_string(h))
+                .map(|h| format!("{}", h))
                 .collect();
             println!("{:?}", jobs);
         }
@@ -325,7 +326,7 @@ async fn run_async(mode: &RunMode, config: &ChainConfig) -> Result<(), Error> {
             let result = chain.jobs_get_result(task_id).await?;
             println!(
                 "Result of task `{}`:\n{}",
-                encode_multibase_multihash_string(task_id),
+                task_id,
                 String::from_utf8_lossy(&result[..])
             );
         }
@@ -335,10 +336,7 @@ async fn run_async(mode: &RunMode, config: &ChainConfig) -> Result<(), Error> {
             workers,
         } => {
             chain.jobs_set_result(task_id, result, &workers[..]).await?;
-            println!(
-                "Result of task `{}` stored.",
-                encode_multibase_multihash_string(task_id),
-            );
+            println!("Result of task `{}` stored.", task_id,);
         }
         RunMode::JobsGetMoney => {
             let (pending, locked) = chain.jobs_get_pending_locked_money().await?;
@@ -365,10 +363,7 @@ async fn run_async(mode: &RunMode, config: &ChainConfig) -> Result<(), Error> {
             let job = chain.jobs_get_job(job_id).await?;
             println!("{}", job);
             chain.jobs_validate_results(job_id).await?;
-            println!(
-                "{} validated, workers paid, and money available.",
-                encode_multibase_multihash_string(job_id)
-            );
+            println!("{} validated, workers paid, and money available.", job_id);
         }
     }
 
@@ -388,10 +383,14 @@ pub enum JobsEvent {
 impl fmt::Display for JobsEvent {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            JobsEvent::JobPending { job_id } => write!(fmt, "JobPending {{ job_id: {} }}", job_id,),
+            JobsEvent::TaskPending { task_id } => {
+                write!(fmt, "TaskPending {{ task_id: {} }}", task_id,)
+            }
             JobsEvent::NewResult { task_id, result } => write!(
                 fmt,
                 "NewResult {{ task_id: {}, result: {} }}",
-                encode_multibase_multihash_string(&task_id),
+                task_id,
                 String::from_utf8_lossy(&result[..])
             ),
             _ => write!(fmt, "{:?}", self),
@@ -443,9 +442,9 @@ impl TryFrom<(&ethabi::Contract, Log)> for JobsEvent {
                     }
                     JobsEventKind::JobPending => {
                         let len = log.data.0.len();
-                        let expected = 32;
+                        let expected = HASH_SIZE;
                         if len == expected {
-                            let job_id = multihash::wrap(DefaultHash::CODE, &log.data.0[..]);
+                            let job_id = (&log.data.0[..]).try_into()?;
                             return Ok(JobsEvent::JobPending { job_id });
                         } else {
                             return Err(Error::JobsEventDataWrongSize {
@@ -457,9 +456,9 @@ impl TryFrom<(&ethabi::Contract, Log)> for JobsEvent {
                     }
                     JobsEventKind::TaskPending => {
                         let len = log.data.0.len();
-                        let expected = 32;
+                        let expected = HASH_SIZE;
                         if len == expected {
-                            let task_id = multihash::wrap(DefaultHash::CODE, &log.data.0[..]);
+                            let task_id = (&log.data.0[..]).try_into()?;
                             return Ok(JobsEvent::TaskPending { task_id });
                         } else {
                             return Err(Error::JobsEventDataWrongSize {
@@ -471,9 +470,9 @@ impl TryFrom<(&ethabi::Contract, Log)> for JobsEvent {
                     }
                     JobsEventKind::NewResult => {
                         let len = log.data.0.len();
-                        let expected = 32 * 2;
+                        let expected = HASH_SIZE + 32;
                         if len > expected {
-                            let task_id = multihash::wrap(DefaultHash::CODE, &log.data.0[..32]);
+                            let task_id = (&log.data.0[..HASH_SIZE]).try_into()?;
                             return Ok(JobsEvent::NewResult {
                                 task_id,
                                 result: Vec::from(&log.data.0[32..]),
@@ -838,19 +837,24 @@ impl<'a> Chain<'a> {
 
     pub async fn jobs_get_job(&self, job_id: &JobId) -> Result<Job, Error> {
         let jobs = self.jobs()?;
-        let job_id = Vec::from(job_id.digest());
         let addr = self.local_address()?;
 
         let fut = jobs.query(
             "get_parameters",
-            job_id.clone(),
+            job_id.as_bytes32(),
             addr,
             Default::default(),
             None,
         );
         let (timeout, max_failures, redundancy): (u64, u64, u64) = Compat01As03::new(fut).await?;
 
-        let fut = jobs.query("get_data", job_id.clone(), addr, Default::default(), None);
+        let fut = jobs.query(
+            "get_data",
+            job_id.as_bytes32(),
+            addr,
+            Default::default(),
+            None,
+        );
         let data: String = Compat01As03::new(fut).await?;
         let data: JobData = serde_json::from_str(&data[..])?;
         let mut addresses = Vec::with_capacity(data.addresses.len());
@@ -860,7 +864,7 @@ impl<'a> Chain<'a> {
 
         let fut = jobs.query(
             "get_worker_parameters",
-            job_id.clone(),
+            job_id.as_bytes32(),
             addr,
             Default::default(),
             None,
@@ -868,10 +872,22 @@ impl<'a> Chain<'a> {
         let (max_worker_price, max_network_usage, max_network_price): (u64, u64, u64) =
             Compat01As03::new(fut).await?;
 
-        let fut = jobs.query("get_sender_nonce", job_id, addr, Default::default(), None);
+        let fut = jobs.query(
+            "get_sender_nonce",
+            job_id.as_bytes32(),
+            addr,
+            Default::default(),
+            None,
+        );
         let (sender, nonce): (Address, u128) = Compat01As03::new(fut).await?;
 
-        let fut = jobs.query("get_arguments", nonce, addr, Default::default(), None);
+        let fut = jobs.query(
+            "get_arguments",
+            job_id.as_bytes32(),
+            addr,
+            Default::default(),
+            None,
+        );
         let arguments: Vec<Vec<u8>> = Compat01As03::new(fut).await?;
 
         let job = Job {
@@ -961,10 +977,7 @@ impl<'a> Chain<'a> {
         let fut = jobs.query("get_pending_jobs", (), addr, Default::default(), None);
         let mut pending_jobs: Vec<[u8; 32]> = Compat01As03::new(fut).await?;
 
-        Ok(pending_jobs
-            .drain(..)
-            .map(|digest| multihash::wrap(DefaultHash::CODE, &digest[..]))
-            .collect())
+        Ok(pending_jobs.drain(..).map(JobId::from).collect())
     }
 
     pub async fn jobs_get_draft_jobs(&self) -> Result<Vec<u128>, Error> {
@@ -991,7 +1004,7 @@ impl<'a> Chain<'a> {
 
     pub async fn jobs_get_result(&self, task_id: &TaskId) -> Result<Vec<u8>, Error> {
         let jobs = self.jobs()?;
-        let task_id = Vec::from(task_id.digest());
+        let task_id = Vec::from(task_id.as_bytes());
         let addr = self.local_address()?;
 
         let fut = jobs.query("get_result", task_id, addr, Default::default(), None);
@@ -1005,7 +1018,7 @@ impl<'a> Chain<'a> {
         workers_infos: &[(Address, u64, u64)],
     ) -> Result<types::TransactionReceipt, Error> {
         let jobs = self.jobs()?;
-        let task_id = Vec::from(task_id.digest());
+        let task_id = Vec::from(task_id.as_bytes());
         let addr = self.local_address()?;
 
         let mut workers = Vec::new();
@@ -1113,23 +1126,32 @@ impl<'a> Chain<'a> {
         job_id: &JobId,
     ) -> Result<types::TransactionReceipt, Error> {
         let jobs = self.jobs()?;
-        let job_id = Vec::from(job_id.digest());
         let addr = self.local_address()?;
 
-        let fut =
-            jobs.call_with_confirmations("validate_results", job_id, addr, Default::default(), 0);
+        let fut = jobs.call_with_confirmations(
+            "validate_results",
+            job_id.as_bytes32(),
+            addr,
+            Default::default(),
+            0,
+        );
         Ok(Compat01As03::new(fut).await?)
     }
 
-    pub async fn jobs_get_task(&self, task_id: &TaskId) -> Result<(JobId, Vec<u8>), Error> {
+    pub async fn jobs_get_task(&self, task_id: &TaskId) -> Result<(JobId, u128, Vec<u8>), Error> {
         let jobs = self.jobs()?;
-        let task_id = Vec::from(task_id.digest());
         let addr = self.local_address()?;
 
-        let fut = jobs.query("get_task", task_id, addr, Default::default(), None);
-        let (task_id, argument): (Vec<u8>, Vec<u8>) = Compat01As03::new(fut).await?;
-        let task_id = multihash::wrap(DefaultHash::CODE, &task_id[..]);
-        Ok((task_id, argument))
+        let fut = jobs.query(
+            "get_task",
+            task_id.as_bytes32(),
+            addr,
+            Default::default(),
+            None,
+        );
+        let (job_id, argument_id, argument): (Vec<u8>, u128, Vec<u8>) =
+            Compat01As03::new(fut).await?;
+        Ok((job_id.as_slice().try_into()?, argument_id, argument))
     }
 }
 

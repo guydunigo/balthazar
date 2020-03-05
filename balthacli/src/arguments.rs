@@ -228,7 +228,7 @@ pub enum ChainJobsSub {
     Get {
         /// Provide the job id for a pending job.
         // TODO: at least of of both required
-        #[clap(name = "pending", short, long, conflicts_with("draft"),parse(try_from_str = try_decode_multibase_multihash_string))]
+        #[clap(name = "pending", short, long, conflicts_with("draft"))]
         job_id: Option<JobId>,
         /// Provide the nonce of a draft job.
         #[clap(name = "draft", short, long)]
@@ -244,7 +244,6 @@ pub enum ChainJobsSub {
     Delete { nonce: u128 },
     /// Get result for given task or set it if `--set` is provided.
     Result {
-        #[clap(parse(try_from_str = try_decode_multibase_multihash_string))]
         task_id: TaskId,
         /// Set result instead of getting it.
         #[clap(short, long, requires("workers"))]
@@ -266,10 +265,7 @@ pub enum ChainJobsSub {
     Ready { nonce: u128 },
     /// When all the tasks have a corresponding result, the owner can set job as validated,
     /// to pay the workers and unlock the remaning money.
-    Validate {
-        #[clap(parse(try_from_str = try_decode_multibase_multihash_string))]
-        job_id: JobId,
-    },
+    Validate { job_id: JobId },
 }
 
 impl Into<chain::RunMode> for ChainSub {

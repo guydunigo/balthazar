@@ -2,19 +2,137 @@
 extern crate ethereum_types;
 extern crate serde_derive;
 
-use super::multiformats::{encode_multibase_multihash_string, DefaultHash};
+use super::multiformats::{
+    encode_multibase_multihash_string, try_decode_multibase_multihash_string, Error,
+};
 use ethereum_types::Address;
 use multiaddr::Multiaddr;
-use multihash::Multihash;
+use multihash::{wrap, Keccak256, Multihash};
 use serde_derive::{Deserialize, Serialize};
-use std::fmt;
+use std::{
+    convert::{TryFrom, TryInto},
+    fmt,
+    str::FromStr,
+};
+
+/// Hashing algorithm used in the blockchain.
+pub type DefaultHash = Keccak256;
+/// Hash size of the [`DefaultHash`] algorithm in bytes.
+pub const HASH_SIZE: usize = 32;
 
 // TODO: those are temporary aliases.
 /// Identifies a unique job on the network.
-pub type JobId = Multihash;
+pub type JobId = HashId;
 /// Identifies a unique task for a given job.
-// TODO: should it also contain the job id ?
-pub type TaskId = Multihash;
+pub type TaskId = HashId;
+
+#[derive(Clone, Debug)]
+pub struct HashId {
+    inner: Multihash,
+}
+
+impl HashId {
+    /// Get inner hash.
+    pub fn hash(&self) -> &Multihash {
+        &self.inner
+    }
+
+    pub fn as_bytes(&self) -> &[u8] {
+        self.hash().digest()
+    }
+
+    pub fn from_bytes(bytes: Vec<u8>) -> Result<Self, Error> {
+        Multihash::from_bytes(bytes)?.try_into()
+    }
+
+    pub fn into_bytes(self) -> Vec<u8> {
+        self.inner.into_bytes()
+    }
+
+    pub fn as_bytes32(&self) -> [u8; 32] {
+        let mut res = [0; HASH_SIZE];
+        res.copy_from_slice(&self.hash().digest()[..HASH_SIZE]);
+        res
+    }
+
+    /// Calculate JobId.
+    pub fn job_id(address: &Address, nonce: u128) -> JobId {
+        let mut buffer = Vec::with_capacity(address.0.len() + 16);
+        buffer.extend_from_slice(&address[..]);
+        buffer.extend_from_slice(&nonce.to_be_bytes()[..]);
+        DefaultHash::digest(&buffer[..])
+            .try_into()
+            .expect("We just built it ourselves.")
+    }
+
+    /// Calculate TaskId.
+    pub fn task_id(job_id: &JobId, i: u128, argument: &[u8]) -> TaskId {
+        let mut buffer = Vec::with_capacity(HASH_SIZE + argument.len());
+        buffer.extend_from_slice(job_id.as_bytes());
+        buffer.extend_from_slice(&i.to_be_bytes()[..]);
+        buffer.extend_from_slice(&argument[..]);
+        DefaultHash::digest(&buffer[..])
+            .try_into()
+            .expect("We just built it ourselves.")
+    }
+}
+
+impl TryFrom<Multihash> for HashId {
+    type Error = Error;
+
+    fn try_from(src: Multihash) -> Result<Self, Self::Error> {
+        // TODO: proper error and TryFrom ?
+        if src.algorithm() != DefaultHash::CODE {
+            Err(Error::WrongHashAlgorithm {
+                expected: DefaultHash::CODE,
+                got: src.algorithm(),
+            })
+        } else {
+            Ok(TaskId { inner: src })
+        }
+    }
+}
+
+impl TryFrom<&[u8]> for HashId {
+    type Error = Error;
+
+    fn try_from(src: &[u8]) -> Result<Self, Self::Error> {
+        if src.len() != HASH_SIZE {
+            Err(Error::WrongSourceLength {
+                expected: HASH_SIZE,
+                got: src.len(),
+            })
+        } else {
+            Self::try_from(wrap(DefaultHash::CODE, src))
+        }
+    }
+}
+
+impl From<[u8; HASH_SIZE]> for HashId {
+    fn from(src: [u8; HASH_SIZE]) -> Self {
+        Self::try_from(&src[..]).expect("We should already have the correct size.")
+    }
+}
+
+impl Into<Multihash> for HashId {
+    fn into(self) -> Multihash {
+        self.inner
+    }
+}
+
+impl FromStr for HashId {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        try_decode_multibase_multihash_string(s)?.try_into()
+    }
+}
+
+impl fmt::Display for HashId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", encode_multibase_multihash_string(self.hash()))
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct UnknownValue<T>(T);
@@ -130,11 +248,7 @@ impl fmt::Display for Job {
         writeln!(f, "---------")?;
         write!(f, "Job id: ")?;
         if self.nonce.is_some() {
-            writeln!(
-                f,
-                "{}",
-                encode_multibase_multihash_string(&self.job_id().expect("Already checked option."))
-            )?;
+            writeln!(f, "{}", self.job_id().expect("Already checked option."))?;
         } else {
             writeln!(f, "Unknown")?;
         }
@@ -149,15 +263,11 @@ impl fmt::Display for Job {
         for (i, a) in self.arguments.iter().enumerate() {
             write!(f, "  ")?;
             if let Some(job_id) = self.job_id() {
-                write!(
-                    f,
-                    "{}",
-                    encode_multibase_multihash_string(&task_id(&job_id, i as u128, &a[..]))
-                )?;
+                write!(f, "{}", TaskId::task_id(&job_id, i as u128, &a[..]))?;
             } else {
                 write!(f, "{}", i)?;
             }
-            writeln!(f, ": {}", String::from_utf8_lossy(&a[..]))?;
+            writeln!(f, " : {}", String::from_utf8_lossy(&a[..]))?;
         }
         writeln!(f, "]")?;
         writeln!(f)?;
@@ -204,7 +314,7 @@ impl Job {
     /// Calculate job id of current job if nonce is set.
     pub fn job_id(&self) -> Option<JobId> {
         if let Some(nonce) = self.nonce {
-            Some(job_id(&self.sender, nonce))
+            Some(JobId::job_id(&self.sender, nonce))
         } else {
             None
         }
@@ -216,23 +326,6 @@ impl Job {
             * (self.timeout * self.max_worker_price
                 + self.max_network_usage * self.max_network_price)
     }
-}
-
-/// Calculate JobId.
-pub fn job_id(address: &Address, nonce: u128) -> JobId {
-    let mut buffer = Vec::with_capacity(address.0.len() + 16);
-    buffer.extend_from_slice(&address[..]);
-    buffer.extend_from_slice(&nonce.to_be_bytes()[..]);
-    DefaultHash::digest(&buffer[..])
-}
-
-/// Calculate TaskId.
-pub fn task_id(job_id: &Multihash, i: u128, argument: &[u8]) -> TaskId {
-    let mut buffer = Vec::with_capacity(job_id.digest().len() + argument.len());
-    buffer.extend_from_slice(job_id.digest());
-    buffer.extend_from_slice(&i.to_be_bytes()[..]);
-    buffer.extend_from_slice(&argument[..]);
-    DefaultHash::digest(&buffer[..])
 }
 
 /*

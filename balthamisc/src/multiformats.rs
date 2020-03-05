@@ -1,16 +1,24 @@
 //! Tools for manipulating multiformats: [`multibase`], [`multihash`], [`multiaddr`].
+use super::job::DefaultHash;
 use multibase::{decode, encode, Base};
-use multihash::{Keccak256, Multihash};
+use multihash::Multihash;
 use std::fmt;
 
 pub const DEFAULT_BASE: Base = Base::Base64Pad;
-pub type DefaultHash = Keccak256;
 
 #[derive(Debug)]
 pub enum Error {
     Multibase(multibase::Error),
     MultihashDecode(multihash::DecodeOwnedError),
     MultihashEncode(multihash::EncodeError),
+    WrongHashAlgorithm {
+        expected: multihash::Code,
+        got: multihash::Code,
+    },
+    WrongSourceLength {
+        expected: usize,
+        got: usize,
+    },
 }
 
 impl fmt::Display for Error {

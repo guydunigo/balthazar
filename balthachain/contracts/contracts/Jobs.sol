@@ -49,7 +49,7 @@ contract Jobs {
 
     struct Task {
         bytes32 job_id;
-        uint argument_id;
+        uint128 argument_id;
         bytes result;
         address[] workers;
         uint64[] worker_prices;
@@ -99,6 +99,28 @@ contract Jobs {
 
     function calc_task_id(bytes32 job_id, uint128 index, bytes storage argument) internal pure returns (bytes32) {
         return keccak256(abi.encodePacked(job_id, index, argument));
+    }
+
+    function is_draft_ready(Job storage job) internal view returns (bool) {
+        return // job.addresses.length > 0 &&
+            // job.program_hash.length > 0 &&
+            job.arguments.length > 0 &&
+
+            job.timeout > 0 &&
+            job.max_failures > 0 &&
+
+            job.max_worker_price > 0 &&
+
+            users[msg.sender].pending_money >= calc_max_price(job);
+    }
+
+    function find_draft_program(uint128 nonce) internal view returns (uint) {
+        for (uint i ; i < users[msg.sender].draft_jobs.length ; i++) {
+            if (users[msg.sender].draft_jobs[i].nonce == nonce) {
+                return i;
+            }
+        }
+        require(false, "Not found.");
     }
 
     // ------------------------------------
@@ -179,15 +201,6 @@ contract Jobs {
             true
         ));
         emit JobNew(msg.sender, nonce);
-    }
-
-    function find_draft_program(uint128 nonce) internal view returns (uint) {
-        for (uint i ; i < users[msg.sender].draft_jobs.length ; i++) {
-            if (users[msg.sender].draft_jobs[i].nonce == nonce) {
-                return i;
-            }
-        }
-        require(false, "Not found.");
     }
 
     function get_parameters_draft(uint128 nonce) public view returns (
@@ -363,29 +376,16 @@ contract Jobs {
         return (jobs[job_id].sender, jobs[job_id].nonce);
     }
 
-    function is_draft_ready(Job storage job) internal view returns (bool) {
-        return // job.addresses.length > 0 &&
-            // job.program_hash.length > 0 &&
-            job.arguments.length > 0 &&
-
-            job.timeout > 0 &&
-            job.max_failures > 0 &&
-
-            job.max_worker_price > 0 &&
-
-            users[msg.sender].pending_money >= calc_max_price(job);
-    }
-    /*
-    function is_draft_ready_nonce(uint128 nonce) public view returns (bool) {
-        Job storage job = users[msg.sender].draft_jobs[find_draft_program(nonce)];
-        return is_draft_ready(job);
-    }
-    */
-
-    function delete_draft(uint id) internal {
+    function delete_draft(uint id) internal returns (Job memory job) {
         User storage user = users[msg.sender];
+        require(user.draft_jobs.length > id, "unknown id");
 
-        user.draft_jobs[id] = user.draft_jobs[user.draft_jobs.length - 1];
+        job = user.draft_jobs[id];
+
+        if (user.draft_jobs.length > id + 1) {
+            user.draft_jobs[id] = user.draft_jobs[user.draft_jobs.length - 1];
+        }
+
         user.draft_jobs.pop();
     }
 
@@ -398,17 +398,20 @@ contract Jobs {
         require(is_draft_ready(job), "conditions unmet");
 
         bytes32 job_id = calc_job_id(job.sender, job.nonce);
-        // TODO: better check if job already is set
         require(jobs[job_id].non_null == false, "job collision");
 
+        // TODO: a lot of copies ? Directly store the job in jobs from the beginning?
         jobs[job_id] = job;
         delete_draft(find_draft_program(nonce));
+        job = jobs[job_id];
+
+        users[msg.sender].pending_jobs.push(job_id);
         emit JobPending(job_id);
 
         for (uint128 i; i < job.arguments.length ; i++) {
             bytes32 task_id = calc_task_id(job_id, i, job.arguments[i]);
             require(tasks[task_id].non_null == false, "task collision");
-            tasks[task_id] = Task (job_id,
+            tasks[task_id] = Task(job_id,
                                    i,
                                    new bytes(0),
                                    new address[](0),
@@ -482,14 +485,26 @@ contract Jobs {
         emit PendingMoneyChanged(msg.sender, users[msg.sender].pending_money);
 
         bytes32[] storage pending_jobs = users[msg.sender].pending_jobs;
-
-        pending_jobs[find_draft_program(jobs[job_id].nonce)] = pending_jobs[pending_jobs.length - 1];
-        users[msg.sender].pending_jobs.pop();
+        uint i;
+        for (; i < pending_jobs.length ; i++) {
+            if (pending_jobs[i] == job_id) {
+                break;
+            }
+        }
+        if (pending_jobs.length - 1 > i) {
+            pending_jobs[i] = pending_jobs[pending_jobs.length - 1];
+        }
+        pending_jobs.pop();
     }
 
-    function get_task(bytes32 task_id) public view returns (bytes32, bytes memory) {
-        require(tasks[task_id].non_null, "unknown task");
-        return (tasks[task_id].job_id, jobs[tasks[task_id].job_id].arguments[tasks[task_id].argument_id]);
+    function get_task(bytes32 task_id) public view returns (bytes32, uint128, bytes memory) {
+        Task storage task = tasks[task_id];
+        require(task.non_null, "unknown task");
+        return (
+            task.job_id,
+            task.argument_id,
+            jobs[task.job_id].arguments[task.argument_id]
+        );
     }
 
     // ------------------------------------------------------------

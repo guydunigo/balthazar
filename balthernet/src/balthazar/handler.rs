@@ -24,7 +24,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use misc::{job::TaskId, multihash::Multihash, WorkerSpecs};
+use misc::{job::TaskId, WorkerSpecs};
 use proto::{
     protobuf::ProtoBufProtocol,
     worker::{self, NodeType, WorkerMsg, WorkerMsgWrapper},
@@ -527,7 +527,7 @@ fn process_request<TUserData>(
                 // TODO: what should be done with the errors ?
                 let task_ids = task_ids
                     .drain(..)
-                    .map(Multihash::from_bytes)
+                    .map(TaskId::from_bytes)
                     .filter_map(Result::ok)
                     .collect();
                 Some(Ok(EventOut::TasksPing {
@@ -539,7 +539,7 @@ fn process_request<TUserData>(
                 // TODO: what should be done with the errors ?
                 let task_ids = task_ids
                     .drain(..)
-                    .map(Multihash::from_bytes)
+                    .map(TaskId::from_bytes)
                     .filter_map(Result::ok)
                     .collect();
                 Some(Ok(EventOut::TasksAbord {
@@ -552,7 +552,7 @@ fn process_request<TUserData>(
                 status_data,
             }) => {
                 // TODO: what should be done with the errors ?
-                if let Ok(task_id) = Multihash::from_bytes(task_id) {
+                if let Ok(task_id) = TaskId::from_bytes(task_id) {
                     Some(Ok(EventOut::TaskStatus {
                         task_id,
                         status: status_data.into(),
@@ -605,7 +605,7 @@ fn process_answer<TUserData>(
             WorkerMsg::ManagerPong(worker::ManagerPong { }) => None,
             WorkerMsg::TasksPong(worker::TasksPong { mut statuses }) => {
                 let statuses: Vec<_> = statuses.drain(..)
-                    .filter_map(|s| if let Ok(task_id) = Multihash::from_bytes(s.task_id) { Some((task_id,s.status_data.into())) } else { None }).collect();
+                    .filter_map(|s| if let Ok(task_id) = TaskId::from_bytes(s.task_id) { Some((task_id,s.status_data.into())) } else { None }).collect();
                 Some(EventOut::TasksPong {
                     statuses,
                     user_data,
