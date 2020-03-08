@@ -35,8 +35,8 @@ impl StorageConfig {
         &mut self,
         new: Option<Multiaddr>,
     ) -> Result<(), ipfs::IpfsStorageCreationError> {
-        if let Some(ref addr) = new {
-            ipfs::IpfsStorage::new(addr.clone())?;
+        if let Some(addr) = &new {
+            ipfs::IpfsStorage::new(addr)?;
         }
         self.ipfs_api = new;
         Ok(())

@@ -4,8 +4,8 @@
 use super::{ipfs, GenericReader, Storage, StorageConfig, StorageType};
 use bytes::Bytes;
 use futures::{future::BoxFuture, stream::BoxStream};
-use multiaddr::{AddrComponent, Multiaddr};
-use std::error::Error;
+use multiaddr::{Multiaddr, Protocol};
+use std::{convert::TryFrom, error::Error};
 
 pub type StoragesWrapperCreationError = ipfs::IpfsStorageCreationError;
 
@@ -24,7 +24,7 @@ pub struct StoragesWrapper {
 impl StoragesWrapper {
     pub fn new_with_config(config: &StorageConfig) -> Result<Self, StoragesWrapperCreationError> {
         let ipfs = if let Some(addr) = config.ipfs_api() {
-            ipfs::IpfsStorage::new(addr.clone())?
+            ipfs::IpfsStorage::new(&addr)?
         } else {
             Default::default()
         };
@@ -74,9 +74,9 @@ impl StoragesWrapper {
     ///
     /// ```
     pub fn get_storage_type_based_on_address(&self, addr: &[u8]) -> StorageType {
-        match Multiaddr::from_bytes(addr.to_owned()) {
+        match Multiaddr::try_from(addr.to_owned()) {
             Ok(multiaddr) => match multiaddr.iter().next() {
-                Some(AddrComponent::IPFS(_)) => StorageType::Ipfs,
+                Some(Protocol::P2p(_)) => StorageType::Ipfs,
                 _ => *self.default_storage_type(),
             },
             Err(_) => *self.default_storage_type(),
@@ -117,7 +117,7 @@ mod tests {
     }
 
     #[test]
-    fn it_chooses_the_correct_storage_type_based_on_addres() {
+    fn it_chooses_the_correct_storage_type_based_on_address() {
         let addr = Vec::from(&b"/ipfs/QmPZ9gcCEpqKTo6aq61g2nXGUhM4iCL3ewB6LDXZCtioEB"[..]);
         check_correct_type_based_on_address(addr, StorageType::Ipfs);
     }

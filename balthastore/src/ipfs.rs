@@ -48,9 +48,9 @@ pub type IpfsStorageCreationError = Either<InvalidUri, MultiaddrToStringConversi
 
 impl IpfsStorage {
     /// Creates a new client connecting to the listening multiaddr.
-    pub fn new(listen_addr: Multiaddr) -> Result<Self, IpfsStorageCreationError> {
+    pub fn new(listen_addr: &Multiaddr) -> Result<Self, IpfsStorageCreationError> {
         let usual_addr =
-            try_internet_multiaddr_to_usual_format(&listen_addr).map_err(Either::Right)?;
+            try_internet_multiaddr_to_usual_format(listen_addr).map_err(Either::Right)?;
         let http_addr = format!("http://{}", usual_addr);
         Ok(IpfsStorage {
             ipfs_client: IpfsClient::new_from_uri(&http_addr[..]).map_err(Either::Left)?,
@@ -113,7 +113,7 @@ mod tests {
 
     #[test]
     fn it_connects_to_given_address() {
-        let storage = IpfsStorage::new("/dns4/ipfs.io".parse().unwrap()).unwrap();
+        let storage = IpfsStorage::new(&"/dns4/ipfs.io".parse().unwrap()).unwrap();
 
         Runtime::new()
             .unwrap()

@@ -14,7 +14,7 @@
 //! [`ipfs::IpfsStorage`].
 extern crate bytes;
 extern crate futures;
-extern crate multiaddr;
+extern crate parity_multiaddr as multiaddr;
 
 use bytes::Bytes;
 use futures::{future::BoxFuture, stream::BoxStream, FutureExt, StreamExt};

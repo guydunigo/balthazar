@@ -9,4 +9,4 @@ edition = "2018"
 [dependencies]
 balthalib = { path = "../balthalib" }
 clap = "3.0.0-beta.1"
-multiaddr = "0.3.1"
+parity-multiaddr = "0.7.3"

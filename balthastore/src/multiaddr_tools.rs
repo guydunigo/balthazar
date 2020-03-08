@@ -1,4 +1,4 @@
-use multiaddr::{AddrComponent, Multiaddr};
+use multiaddr::{Multiaddr, Protocol};
 use std::{error::Error, fmt};
 
 /// Tries to convert a multiaddress into a usual [`String`].
@@ -35,34 +35,34 @@ use std::{error::Error, fmt};
 pub fn try_internet_multiaddr_to_usual_format(
     multiaddr: &Multiaddr,
 ) -> Result<String, MultiaddrToStringConversionError> {
-    use AddrComponent::*;
     use MultiaddrToStringConversionError::*;
+    use Protocol::*;
 
     let mut components = multiaddr.iter();
 
     if let Some(first_component) = components.next() {
         let mut vec = Vec::new();
         match first_component {
-            IP4(addr) => vec.extend(addr.to_string().bytes()),
-            IP6(addr) => vec.extend(addr.to_string().bytes()),
-            DNS4(name) => vec.extend(name.bytes()),
-            DNS6(name) => vec.extend(name.bytes()),
-            _ => return Err(IncorrectFirstComponent(first_component)),
+            Ip4(addr) => vec.extend(addr.to_string().bytes()),
+            Ip6(addr) => vec.extend(addr.to_string().bytes()),
+            Dns4(name) => vec.extend(name.bytes()),
+            Dns6(name) => vec.extend(name.bytes()),
+            _ => return Err(IncorrectFirstComponent(format!("{}", first_component))),
         }
 
         if let Some(second_component) = components.next() {
             vec.push(b':');
             match second_component {
-                TCP(port) => vec.extend(port.to_string().bytes()),
-                UDP(port) => vec.extend(port.to_string().bytes()),
+                Tcp(port) => vec.extend(port.to_string().bytes()),
+                Udp(port) => vec.extend(port.to_string().bytes()),
                 // TODO: Perhaps just ignore it ?
-                _ => return Err(IncorrectSecondComponent(second_component)),
+                _ => return Err(IncorrectSecondComponent(format!("{}", second_component))),
             }
         }
 
         Ok(String::from_utf8_lossy(&vec[..]).to_string())
     } else {
-        Err(MultiaddrToStringConversionError::EmptyMultiaddr)
+        Err(EmptyMultiaddr)
     }
 }
 
@@ -74,10 +74,10 @@ pub enum MultiaddrToStringConversionError {
     EmptyMultiaddr,
     /// The first component of the multiaddress isn't supported, see
     /// [`try_internet_multiaddr_to_usual_format`] for a list of supported ones.
-    IncorrectFirstComponent(AddrComponent),
+    IncorrectFirstComponent(String),
     /// The second component, if provided, isn't supported, see
     /// [`try_internet_multiaddr_to_usual_format`] for a list of supported ones.
-    IncorrectSecondComponent(AddrComponent),
+    IncorrectSecondComponent(String),
 }
 
 impl fmt::Display for MultiaddrToStringConversionError {
@@ -92,7 +92,7 @@ impl Error for MultiaddrToStringConversionError {}
 mod tests {
     use super::try_internet_multiaddr_to_usual_format;
     use super::MultiaddrToStringConversionError;
-    use multiaddr::AddrComponent;
+    use multiaddr::Protocol;
 
     #[test]
     fn it_can_parse_correct_addresses() {
@@ -120,18 +120,18 @@ mod tests {
 
     #[test]
     fn it_cant_parse_incorrect_addresses() {
-        use AddrComponent::*;
         use MultiaddrToStringConversionError::*;
+        use Protocol::*;
 
         let addresses = vec![
             ("", EmptyMultiaddr),
             (
                 "/unix/socketname",
-                IncorrectFirstComponent(UNIX("socketname".to_string())),
+                IncorrectFirstComponent(format!("{}", Unix("socketname".into()))),
             ),
             (
                 "/ip4/127.0.0.1/sctp/3333",
-                IncorrectSecondComponent(SCTP(3333)),
+                IncorrectSecondComponent(format!("{}", Sctp(3333))),
             ),
         ];
 

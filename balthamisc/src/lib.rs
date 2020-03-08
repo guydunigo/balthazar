@@ -1,4 +1,4 @@
-pub extern crate multiaddr;
+pub extern crate parity_multiaddr as multiaddr;
 extern crate multibase;
 pub extern crate multihash;
 extern crate tokio;

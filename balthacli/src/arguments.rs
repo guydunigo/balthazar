@@ -1,7 +1,7 @@
 //! Look at [the `clap` documentation](`clap`)
 //! and [the `structopt` documentation](https://docs.rs/structopt/0.3.9/structopt/)
 #![allow(clippy::redundant_clone)]
-extern crate multiaddr;
+extern crate parity_multiaddr as multiaddr;
 
 use clap::{arg_enum, Clap};
 // TODO: use uniform Multiaddr

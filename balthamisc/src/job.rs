@@ -156,6 +156,12 @@ pub enum BestMethod {
     Performance,
 }
 
+impl Default for BestMethod {
+    fn default() -> Self {
+        BestMethod::Cost
+    }
+}
+
 impl Into<u64> for BestMethod {
     fn into(self) -> u64 {
         match self {
@@ -185,7 +191,7 @@ impl fmt::Display for BestMethod {
 
 const PROGRAM_KIND_WASM: u64 = 0;
 /// Kind of program to execute.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Copy)]
 pub enum ProgramKind {
     /// Webassembly program
     Wasm,
@@ -215,6 +221,13 @@ impl fmt::Display for ProgramKind {
         write!(f, "{:?}", self)
     }
 }
+
+pub const MIN_TIMEOUT: u64 = 1;
+pub const MIN_CPU_COUNT: u64 = 1;
+pub const MIN_REDUNDANCY: u64 = 1;
+pub const MIN_WORKER_PRICE: u64 = 1;
+pub const MIN_NETWORK_PRICE: u64 = 1;
+pub const DEFAULT_PURITY: bool = false;
 
 /// Description of a Job.
 #[derive(Debug, Clone, PartialEq)]
@@ -311,6 +324,155 @@ impl fmt::Display for Job {
 }
 
 impl Job {
+    pub fn new(
+        program_kind: ProgramKind,
+        addresses: Vec<Multiaddr>,
+        program_hash: Multihash,
+        arguments: Vec<Vec<u8>>,
+        sender: Address,
+    ) -> Self {
+        Job {
+            program_kind,
+            addresses,
+            program_hash,
+            arguments,
+            timeout: MIN_TIMEOUT,
+            max_failures: 0,
+            best_method: BestMethod::default(),
+            max_worker_price: MIN_WORKER_PRICE,
+            min_cpu_count: MIN_CPU_COUNT,
+            min_memory: 0,
+            max_network_usage: 0,
+            max_network_price: MIN_NETWORK_PRICE,
+            min_network_speed: 0,
+            redundancy: MIN_REDUNDANCY,
+            is_program_pure: DEFAULT_PURITY,
+            sender,
+            nonce: None,
+        }
+    }
+
+    pub fn program_kind(&self) -> ProgramKind {
+        self.program_kind
+    }
+    pub fn set_program_kind(&mut self, new: ProgramKind) {
+        self.program_kind = new;
+    }
+    pub fn addresses(&self) -> &Vec<Multiaddr> {
+        &self.addresses
+    }
+    pub fn program_hash(&self) -> &Multihash {
+        &self.program_hash
+    }
+    pub fn arguments(&self) -> &Vec<Vec<u8>> {
+        &self.arguments
+    }
+    pub fn timeout(&self) -> u64 {
+        self.timeout
+    }
+    pub fn set_timeout(&mut self, new: u64) {
+        self.timeout = if new > MIN_TIMEOUT { new } else { MIN_TIMEOUT };
+    }
+    pub fn max_failures(&self) -> u64 {
+        self.max_failures
+    }
+    pub fn set_max_failures(&mut self, new: u64) {
+        self.max_failures = new;
+    }
+    pub fn best_method(&self) -> BestMethod {
+        self.best_method
+    }
+    pub fn set_best_method(&mut self, new: BestMethod) {
+        self.best_method = new;
+    }
+    pub fn max_worker_price(&self) -> u64 {
+        self.max_worker_price
+    }
+    pub fn set_max_worker_price(&mut self, new: u64) {
+        self.max_worker_price = if new > MIN_WORKER_PRICE {
+            new
+        } else {
+            MIN_WORKER_PRICE
+        };
+    }
+    pub fn min_cpu_count(&self) -> u64 {
+        self.min_cpu_count
+    }
+    pub fn set_min_cpu_count(&mut self, new: u64) {
+        self.min_cpu_count = if new > MIN_CPU_COUNT {
+            new
+        } else {
+            MIN_CPU_COUNT
+        };
+    }
+    pub fn min_memory(&self) -> u64 {
+        self.min_memory
+    }
+    pub fn set_min_memory(&mut self, new: u64) {
+        self.min_memory = new;
+    }
+    pub fn max_network_usage(&self) -> u64 {
+        self.max_network_usage
+    }
+    pub fn set_max_network_usage(&mut self, new: u64) {
+        self.max_network_usage = new;
+    }
+    pub fn max_network_price(&self) -> u64 {
+        self.max_network_price
+    }
+    pub fn set_max_network_price(&mut self, new: u64) {
+        self.max_network_price = if new > MIN_NETWORK_PRICE {
+            new
+        } else {
+            MIN_NETWORK_PRICE
+        };
+    }
+    pub fn min_network_speed(&self) -> u64 {
+        self.min_network_speed
+    }
+    pub fn set_min_network_speed(&mut self, new: u64) {
+        self.min_network_speed = new;
+    }
+    pub fn redundancy(&self) -> u64 {
+        self.redundancy
+    }
+    pub fn set_redundancy(&mut self, new: u64) {
+        self.redundancy = if new > MIN_REDUNDANCY {
+            new
+        } else {
+            MIN_REDUNDANCY
+        };
+    }
+    pub fn is_program_pure(&self) -> bool {
+        self.is_program_pure
+    }
+    pub fn set_is_program_pure(&mut self, new: bool) {
+        self.is_program_pure = new;
+    }
+    pub fn sender(&self) -> Address {
+        self.sender
+    }
+    pub fn nonce(&self) -> &Option<u128> {
+        &self.nonce
+    }
+    pub fn set_nonce(&mut self, new: Option<u128>) {
+        self.nonce = new;
+    }
+
+    // TODO: self-described error?
+    /// Is job correct and complete to be sent to the blockchain?
+    /// All values must be defined and above their minimum value
+    /// and `addresses` and `arguments` must be non-empty.
+    pub fn is_correct(&self) -> bool {
+        !self.addresses.is_empty()
+            && !self.arguments.is_empty()
+            && self.timeout >= MIN_TIMEOUT
+            && self.max_worker_price >= MIN_WORKER_PRICE
+            && self.min_cpu_count >= MIN_CPU_COUNT
+            && self.max_network_price >= MIN_NETWORK_PRICE
+            && self.redundancy >= MIN_REDUNDANCY
+    }
+
     /// Calculate job id of current job if nonce is set.
     pub fn job_id(&self) -> Option<JobId> {
         if let Some(nonce) = self.nonce {
@@ -320,6 +482,7 @@ impl Job {
         }
     }
 
+    /// Calculates the maximum amount of money that can be used by the whole job.
     pub fn calc_max_price(&self) -> u64 {
         self.redundancy
             * self.arguments.len() as u64

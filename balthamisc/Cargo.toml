@@ -9,8 +9,8 @@ edition = "2018"
 [dependencies]
 tokio = { version = "0.2.13", features = ["sync"] }
 futures = "0.3.4"
-multiaddr = "0.3.1"
-multihash = "0.10.0"
+parity-multiaddr = "0.7.3"
+multihash = "0.10.1"
 multibase = "0.8.0"
 ethereum-types = "0.8.0"
 serde = "1.0.104"
