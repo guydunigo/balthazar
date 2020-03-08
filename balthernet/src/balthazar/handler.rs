@@ -354,7 +354,7 @@ where
 /// - `user_data`: for requests coming from us (i.e. through the
 /// [`BalthBehaviour`](`super::BalthBehaviour`)),
 /// - `request_id`: for answers at peer's requests coming.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum EventIn<TUserData> {
     NodeTypeRequest {
         node_type: NodeType,

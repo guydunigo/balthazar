@@ -30,7 +30,7 @@ impl UniqueConnecId {
 ///
 /// We don't implement `Clone` on purpose, in order to prevent users from answering the same
 /// request twice.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct RequestId {
     /// Unique identifier for an incoming connection.
     connec_unique_id: UniqueConnecId,

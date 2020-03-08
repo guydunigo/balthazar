@@ -163,7 +163,11 @@ pub fn wrap_answer(
     peer_id: PeerId,
     event: HandlerIn<QueryId>,
 ) -> Poll<NetworkBehaviourAction<HandlerIn<QueryId>, EventOut>> {
-    Poll::Ready(NetworkBehaviourAction::SendEvent { peer_id, event })
+    Poll::Ready(NetworkBehaviourAction::NotifyHandler {
+        handler: NotifyHandler::Any,
+        peer_id,
+        event,
+    })
 }
 
 /// Check if the peer is in relationship with us, if yes does the given action,
@@ -289,7 +293,8 @@ pub fn node_type_answer(
         behaviour.inject_generate_event(EventOut::PeerHasNewType(peer_id.clone(), node_type));
 
         if let Some(worker_specs) = request_man {
-            Poll::Ready(NetworkBehaviourAction::SendEvent {
+            Poll::Ready(NetworkBehaviourAction::NotifyHandler {
+                handler: NotifyHandler::Any,
                 peer_id,
                 event: HandlerIn::ManagerRequest {
                     worker_specs,
@@ -437,7 +442,8 @@ pub fn manager_answer(
             behaviour.inject_generate_event(evt);
         }
 
-        Poll::Ready(NetworkBehaviourAction::SendEvent {
+        Poll::Ready(NetworkBehaviourAction::NotifyHandler {
+            handler: NotifyHandler::Any,
             peer_id: peer_id_clone,
             event: HandlerIn::ManagerBye {
                 user_data: behaviour.next_query_unique_id(),

@@ -19,10 +19,13 @@ use futures::{
     Stream,
 };
 use libp2p::{
-    core::{nodes::ListenerId, ConnectedPoint},
+    core::{
+        connection::{ConnectionId, ListenerId},
+        ConnectedPoint,
+    },
     swarm::{
         protocols_handler::{IntoProtocolsHandler, ProtocolsHandler},
-        NetworkBehaviour, NetworkBehaviourAction, PollParameters,
+        NetworkBehaviour, NetworkBehaviourAction, NotifyHandler, PollParameters,
     },
     Multiaddr, PeerId,
 };
@@ -152,7 +155,11 @@ impl BalthBehaviour {
     fn inject_send_to_peer_event(&mut self, peer_id: PeerId, event: HandlerIn<QueryId>) {
         self.events
             .push_front(InternalEvent::NetworkBehaviourAction(
-                NetworkBehaviourAction::SendEvent { peer_id, event },
+                NetworkBehaviourAction::NotifyHandler {
+                    handler: NotifyHandler::Any,
+                    peer_id,
+                    event,
+                },
             ));
     }
 
@@ -180,7 +187,11 @@ impl BalthBehaviour {
         let mut peer = peer.write().unwrap();
 
         if peer.endpoint.is_some() {
-            Poll::Ready(NetworkBehaviourAction::SendEvent { peer_id, event })
+            Poll::Ready(NetworkBehaviourAction::NotifyHandler {
+                handler: NotifyHandler::Any,
+                peer_id,
+                event,
+            })
         } else {
             peer.pending_messages.push(event);
             Poll::Ready(NetworkBehaviourAction::DialPeer { peer_id })
@@ -288,9 +299,10 @@ impl NetworkBehaviour for BalthBehaviour {
         eprintln!("ERR listener {:?} : {:?}", id, err);
     }
 
-    fn inject_node_event(
+    fn inject_event(
         &mut self,
         peer_id: PeerId,
+        _connection: ConnectionId,
         event: <<Self::ProtocolsHandler as IntoProtocolsHandler>::Handler as ProtocolsHandler>::OutEvent,
     ) {
         self.inject_handler_event(peer_id, event);
@@ -310,7 +322,11 @@ impl NetworkBehaviour for BalthBehaviour {
                     Poll::Ready(NetworkBehaviourAction::GenerateEvent(EventOut::Pong))
                 }
                 Some(EventIn::Handler(peer_id, event)) => {
-                    Poll::Ready(NetworkBehaviourAction::SendEvent { peer_id, event })
+                    Poll::Ready(NetworkBehaviourAction::NotifyHandler {
+                        handler: NotifyHandler::Any,
+                        peer_id,
+                        event,
+                    })
                 }
                 Some(EventIn::TasksExecute(peer_id, tasks)) => {
                     let event = HandlerIn::TasksExecute {
@@ -335,7 +351,8 @@ impl NetworkBehaviour for BalthBehaviour {
                         ..
                     }) = self.node_type_data
                     {
-                        Poll::Ready(NetworkBehaviourAction::SendEvent {
+                        Poll::Ready(NetworkBehaviourAction::NotifyHandler {
+                            handler: NotifyHandler::Any,
                             peer_id: manager.read().unwrap().peer_id.clone(),
                             event: HandlerIn::TasksPong {
                                 statuses,
@@ -422,7 +439,8 @@ impl NetworkBehaviour for BalthBehaviour {
                         .node_type
                         .is_none() =>
                 {
-                    Poll::Ready(NetworkBehaviourAction::SendEvent {
+                    Poll::Ready(NetworkBehaviourAction::NotifyHandler {
+                        handler: NotifyHandler::Any,
                         peer_id,
                         event: HandlerIn::NodeTypeRequest {
                             node_type: (&self.node_type_data).into(),
@@ -445,7 +463,7 @@ impl NetworkBehaviour for BalthBehaviour {
 /// Handle an event coming out of the handler.
 ///
 /// > **Note when adding new events:** For request messages, the handling function has to return
-/// > a `Poll::Ready(NetworkBehaviourAction::SendEvent {..})` value.
+/// > a `Poll::Ready(NetworkBehaviourAction::NotifyHandler {..})` value.
 /// > To make sure of this (and panic if it's not the case),
 /// > wrap the handler function into [`ensure_answer`].
 fn handler_event(
