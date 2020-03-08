@@ -6,7 +6,6 @@ use super::multiformats::{
     encode_multibase_multihash_string, try_decode_multibase_multihash_string, Error,
 };
 use ethereum_types::Address;
-use multiaddr::Multiaddr;
 use multihash::{wrap, Keccak256, Multihash};
 use serde_derive::{Deserialize, Serialize};
 use std::{
@@ -233,7 +232,7 @@ pub const DEFAULT_PURITY: bool = false;
 #[derive(Debug, Clone, PartialEq)]
 pub struct Job {
     pub program_kind: ProgramKind,
-    pub addresses: Vec<Multiaddr>,
+    pub addresses: Vec<String>,
     pub program_hash: Multihash,
     pub arguments: Vec<Vec<u8>>,
 
@@ -326,7 +325,7 @@ impl fmt::Display for Job {
 impl Job {
     pub fn new(
         program_kind: ProgramKind,
-        addresses: Vec<Multiaddr>,
+        addresses: Vec<String>,
         program_hash: Multihash,
         arguments: Vec<Vec<u8>>,
         sender: Address,
@@ -358,7 +357,7 @@ impl Job {
     pub fn set_program_kind(&mut self, new: ProgramKind) {
         self.program_kind = new;
     }
-    pub fn addresses(&self) -> &Vec<Multiaddr> {
+    pub fn addresses(&self) -> &Vec<String> {
         &self.addresses
     }
     pub fn program_hash(&self) -> &Multihash {

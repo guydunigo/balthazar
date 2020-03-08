@@ -24,3 +24,4 @@ libp2p = { git = "https://github.com/libp2p/rust-libp2p" }
 # libp2p = { path = "../my_rust-libp2p" }
 # web3 = { git = "https://github.com/tomusdrw/rust-web3" }
 # multihash = { git = "https://github.com/multiformats/rust-multihash" }
+ipfs-api = { path = "../rust-ipfs-api/ipfs-api" }

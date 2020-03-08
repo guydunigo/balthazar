@@ -11,7 +11,7 @@ use ethabi::Event;
 use futures::{compat::Compat01As03, executor::block_on, future, Stream, StreamExt};
 use misc::{
     job::{BestMethod, Job, JobId, ProgramKind, TaskId, UnknownValue, HASH_SIZE},
-    multiaddr::{self, Multiaddr, ToMultiaddr},
+    multiaddr,
     multiformats::{encode_multibase_multihash_string, try_decode_multibase_multihash_string},
     multihash::{self, Multihash},
 };
@@ -117,7 +117,7 @@ pub enum RunMode {
     /// Create draft job and return the cost to pay.
     JobsNewDraft {
         program_kind: ProgramKind,
-        addresses: Vec<Multiaddr>,
+        addresses: Vec<String>,
         program_hash: Multihash,
         arguments: Vec<Vec<u8>>,
         timeout: u64,
@@ -269,25 +269,25 @@ async fn run_async(mode: &RunMode, config: &ChainConfig) -> Result<(), Error> {
             redundancy,
             is_program_pure,
         } => {
-            let job = Job {
-                program_kind: program_kind.clone(),
-                addresses: addresses.clone(),
-                program_hash: program_hash.clone(),
-                arguments: arguments.clone(),
-                timeout: *timeout,
-                max_failures: *max_failures,
-                best_method: *best_method,
-                max_worker_price: *max_worker_price,
-                min_cpu_count: *min_cpu_count,
-                min_memory: *min_memory,
-                max_network_usage: *max_network_usage,
-                max_network_price: *max_network_price,
-                min_network_speed: *min_network_speed,
-                redundancy: *redundancy,
-                is_program_pure: *is_program_pure,
-                sender: chain.local_address()?,
-                nonce: None,
-            };
+            let mut job = Job::new(
+                *program_kind,
+                addresses.clone(),
+                program_hash.clone(),
+                arguments.clone(),
+                chain.local_address()?,
+            );
+            job.set_timeout(*timeout);
+            job.set_max_failures(*max_failures);
+            job.set_best_method(*best_method);
+            job.set_max_worker_price(*max_worker_price);
+            job.set_min_cpu_count(*min_cpu_count);
+            job.set_min_memory(*min_memory);
+            job.set_max_network_usage(*max_network_usage);
+            job.set_max_network_price(*max_network_price);
+            job.set_min_network_speed(*min_network_speed);
+            job.set_redundancy(*redundancy);
+            job.set_is_program_pure(*is_program_pure);
+            job.set_nonce(None);
 
             let nonce = chain.jobs_new_draft(&job).await?;
 
@@ -786,8 +786,8 @@ impl<'a> Chain<'a> {
 
                 // TODO: serialize other data.
                 let data = JobData {
-                    program_kind: job.program_kind.clone(),
-                    addresses: job.addresses.iter().map(|a| format!("{}", a)).collect(),
+                    program_kind: job.program_kind,
+                    addresses: job.addresses.clone(),
                     program_hash: encode_multibase_multihash_string(&job.program_hash),
                     best_method: job.best_method,
                     min_cpu_count: job.min_cpu_count,
@@ -857,10 +857,6 @@ impl<'a> Chain<'a> {
         );
         let data: String = Compat01As03::new(fut).await?;
         let data: JobData = serde_json::from_str(&data[..])?;
-        let mut addresses = Vec::with_capacity(data.addresses.len());
-        for a in data.addresses.iter() {
-            addresses.push((&a[..]).to_multiaddr()?);
-        }
 
         let fut = jobs.query(
             "get_worker_parameters",
@@ -890,25 +886,25 @@ impl<'a> Chain<'a> {
         );
         let arguments: Vec<Vec<u8>> = Compat01As03::new(fut).await?;
 
-        let job = Job {
-            program_kind: data.program_kind,
-            addresses,
-            program_hash: try_decode_multibase_multihash_string(&data.program_hash)?,
+        let mut job = Job::new(
+            data.program_kind,
+            data.addresses,
+            try_decode_multibase_multihash_string(&data.program_hash)?,
             arguments,
-            timeout,
-            max_failures,
-            best_method: data.best_method,
-            max_worker_price,
-            min_cpu_count: data.min_cpu_count,
-            min_memory: data.min_memory,
-            max_network_usage,
-            max_network_price,
-            min_network_speed: data.min_network_speed,
-            redundancy,
-            is_program_pure: data.is_program_pure,
             sender,
-            nonce: Some(nonce),
-        };
+        );
+        job.set_timeout(timeout);
+        job.set_max_failures(max_failures);
+        job.set_best_method(data.best_method);
+        job.set_max_worker_price(max_worker_price);
+        job.set_min_cpu_count(data.min_cpu_count);
+        job.set_min_memory(data.min_memory);
+        job.set_max_network_usage(max_network_usage);
+        job.set_max_network_price(max_network_price);
+        job.set_min_network_speed(data.min_network_speed);
+        job.set_redundancy(redundancy);
+        job.set_is_program_pure(data.is_program_pure);
+        job.set_nonce(Some(nonce));
 
         Ok(job)
     }
@@ -929,10 +925,6 @@ impl<'a> Chain<'a> {
         let fut = jobs.query("get_data_draft", nonce, addr, Default::default(), None);
         let data: String = Compat01As03::new(fut).await?;
         let data: JobData = serde_json::from_str(&data[..])?;
-        let mut addresses = Vec::with_capacity(data.addresses.len());
-        for a in data.addresses.iter() {
-            addresses.push((&a[..]).to_multiaddr()?);
-        }
 
         let fut = jobs.query(
             "get_worker_parameters_draft",
@@ -947,25 +939,25 @@ impl<'a> Chain<'a> {
         let fut = jobs.query("get_arguments_draft", nonce, addr, Default::default(), None);
         let arguments: Vec<Vec<u8>> = Compat01As03::new(fut).await?;
 
-        let job = Job {
-            program_kind: data.program_kind,
-            addresses,
-            program_hash: try_decode_multibase_multihash_string(&data.program_hash)?,
+        let mut job = Job::new(
+            data.program_kind,
+            data.addresses,
+            try_decode_multibase_multihash_string(&data.program_hash)?,
             arguments,
-            timeout,
-            max_failures,
-            best_method: data.best_method,
-            max_worker_price,
-            min_cpu_count: data.min_cpu_count,
-            min_memory: data.min_memory,
-            max_network_usage,
-            max_network_price,
-            min_network_speed: data.min_network_speed,
-            redundancy,
-            is_program_pure: data.is_program_pure,
-            sender: addr,
-            nonce: Some(nonce),
-        };
+            addr,
+        );
+        job.set_timeout(timeout);
+        job.set_max_failures(max_failures);
+        job.set_best_method(data.best_method);
+        job.set_max_worker_price(max_worker_price);
+        job.set_min_cpu_count(data.min_cpu_count);
+        job.set_min_memory(data.min_memory);
+        job.set_max_network_usage(max_network_usage);
+        job.set_max_network_price(max_network_price);
+        job.set_min_network_speed(data.min_network_speed);
+        job.set_redundancy(redundancy);
+        job.set_is_program_pure(data.is_program_pure);
+        job.set_nonce(Some(nonce));
 
         Ok(job)
     }
@@ -1077,7 +1069,7 @@ impl<'a> Chain<'a> {
             "send_pending_money",
             (),
             addr,
-            Options::with(|o| o.value = Some(amount.into())),
+            Options::with(|o| o.value = Some(amount)),
             0,
         );
         Ok(Compat01As03::new(fut).await?)

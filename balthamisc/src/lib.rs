@@ -1,6 +1,6 @@
-pub extern crate parity_multiaddr as multiaddr;
 extern crate multibase;
 pub extern crate multihash;
+pub extern crate parity_multiaddr as multiaddr;
 extern crate tokio;
 
 use futures::future::poll_fn;
