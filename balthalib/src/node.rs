@@ -263,13 +263,18 @@ impl Balthazar {
         match (self.config.node_type(), event) {
             (NodeType::Manager, net::EventOut::WorkerNew(peer_id)) => {
                 if let Some((wasm, args)) = self.config.wasm() {
-                    let tasks = vec![TaskExecute {
-                        job_id: wasm.clone(),
-                        job_addr: vec![wasm.clone()],
-                        arguments: args.clone(),
-                        timeout: 100,
-                        max_network_usage: 100,
-                    }];
+                    let tasks = args
+                        .iter()
+                        .cloned()
+                        .enumerate()
+                        .map(|(i, argument)| TaskExecute {
+                            task_id: Vec::from(&i.to_be_bytes()[..]),
+                            job_addr: vec![wasm.clone()],
+                            argument,
+                            timeout: 100,
+                            max_network_usage: 100,
+                        })
+                        .collect();
                     let args_str: Vec<Cow<str>> = args
                         .iter()
                         .map(|a| String::from_utf8_lossy(&a[..]))
@@ -309,105 +314,99 @@ impl Balthazar {
             }
             (NodeType::Worker, net::EventOut::TasksExecute(tasks)) => {
                 for task in tasks.iter() {
-                    for (index, argument) in task.arguments.iter().enumerate() {
-                        // TODO: expect
-                        let task_id = TaskId::task_id(
-                            &JobId::try_from(&task.job_id[..]).expect("not a correct multihash"),
-                            index as u128,
-                            argument,
-                        );
-                        self.send_msg_to_behaviour(net::EventIn::TaskStatus(
-                            task_id.clone(),
-                            TaskStatus::Pending,
-                        ))
-                        .await;
-                        let storage = StoragesWrapper::default();
-                        let string_job_addr = String::from_utf8_lossy(&task.job_addr[0][..]);
-                        let string_argument = String::from_utf8_lossy(&argument[..]);
+                    // TODO: expect
+                    let task_id =
+                        TaskId::try_from(&task.task_id[..]).expect("not a correct multihash");
+                    self.send_msg_to_behaviour(net::EventIn::TaskStatus(
+                        task_id.clone(),
+                        TaskStatus::Pending,
+                    ))
+                    .await;
+                    let storage = StoragesWrapper::default();
+                    let string_job_addr = String::from_utf8_lossy(&task.job_addr[0][..]);
+                    let string_argument = String::from_utf8_lossy(&task.argument[..]);
 
-                        self.spawn_log(
-                            LogKind::Worker,
-                            format!("will get program `{}`...", string_job_addr),
-                        )
-                        .await;
-                        match storage.get(&task.job_addr[0][..]).await {
-                            Ok(wasm) => {
-                                self.spawn_log(
-                                    LogKind::Worker,
-                                    format!("received program `{}`.", string_job_addr),
-                                )
-                                .await;
-                                self.spawn_log(
-                                    LogKind::Worker,
-                                    format!(
-                                        "spawning wasm executor for `{}` with argument `{}`...",
-                                        string_job_addr, string_argument,
-                                    ),
-                                )
-                                .await;
+                    self.spawn_log(
+                        LogKind::Worker,
+                        format!("will get program `{}`...", string_job_addr),
+                    )
+                    .await;
+                    match storage.get(&task.job_addr[0][..]).await {
+                        Ok(wasm) => {
+                            self.spawn_log(
+                                LogKind::Worker,
+                                format!("received program `{}`.", string_job_addr),
+                            )
+                            .await;
+                            self.spawn_log(
+                                LogKind::Worker,
+                                format!(
+                                    "spawning wasm executor for `{}` with argument `{}`...",
+                                    string_job_addr, string_argument,
+                                ),
+                            )
+                            .await;
 
-                                self.send_msg_to_behaviour(net::EventIn::TaskStatus(
-                                    task_id.clone(),
-                                    TaskStatus::Started(
-                                        SystemTime::now()
-                                            .duration_since(UNIX_EPOCH)
-                                            .unwrap()
-                                            .as_secs()
-                                            as i64,
-                                    ),
-                                ))
-                                .await;
+                            self.send_msg_to_behaviour(net::EventIn::TaskStatus(
+                                task_id.clone(),
+                                TaskStatus::Started(
+                                    SystemTime::now()
+                                        .duration_since(UNIX_EPOCH)
+                                        .unwrap()
+                                        .as_secs() as i64,
+                                ),
+                            ))
+                            .await;
 
-                                match WasmRunner::run_async(&wasm[..], &argument[..]).await {
-                                    Ok(result) => {
-                                        self.spawn_log(
-                                            LogKind::Worker,
-                                            format!(
-                                                "task result for `{}` with `{}`: `{:?}`",
-                                                string_job_addr,
-                                                string_argument,
-                                                String::from_utf8_lossy(&result[..])
-                                            ),
-                                        )
-                                        .await;
-                                        self.send_msg_to_behaviour(net::EventIn::TaskStatus(
-                                            task_id.clone(),
-                                            TaskStatus::Completed(result),
-                                        ))
-                                        .await;
-                                    }
-                                    Err(error) => {
-                                        self.send_msg_to_behaviour(net::EventIn::TaskStatus(
-                                            task_id.clone(),
-                                            TaskStatus::Error(TaskErrorKind::Running),
-                                        ))
-                                        .await;
-                                        self.spawn_log(
-                                            LogKind::Worker,
-                                            format!(
-                                                "task error for `{}` with `{}`: `{:?}`",
-                                                string_job_addr, string_argument, error
-                                            ),
-                                        )
-                                        .await;
-                                    }
+                            match WasmRunner::run_async(&wasm[..], &task.argument[..]).await {
+                                Ok(result) => {
+                                    self.spawn_log(
+                                        LogKind::Worker,
+                                        format!(
+                                            "task result for `{}` with `{}`: `{:?}`",
+                                            string_job_addr,
+                                            string_argument,
+                                            String::from_utf8_lossy(&result[..])
+                                        ),
+                                    )
+                                    .await;
+                                    self.send_msg_to_behaviour(net::EventIn::TaskStatus(
+                                        task_id.clone(),
+                                        TaskStatus::Completed(result),
+                                    ))
+                                    .await;
+                                }
+                                Err(error) => {
+                                    self.send_msg_to_behaviour(net::EventIn::TaskStatus(
+                                        task_id.clone(),
+                                        TaskStatus::Error(TaskErrorKind::Running),
+                                    ))
+                                    .await;
+                                    self.spawn_log(
+                                        LogKind::Worker,
+                                        format!(
+                                            "task error for `{}` with `{}`: `{:?}`",
+                                            string_job_addr, string_argument, error
+                                        ),
+                                    )
+                                    .await;
                                 }
                             }
-                            Err(error) => {
-                                self.send_msg_to_behaviour(net::EventIn::TaskStatus(
-                                    task_id.clone(),
-                                    TaskStatus::Error(TaskErrorKind::Download),
-                                ))
-                                .await;
-                                self.spawn_log(
-                                    LogKind::Worker,
-                                    format!(
-                                        "error while fetching `{}`: `{:?}`",
-                                        string_job_addr, error
-                                    ),
-                                )
-                                .await;
-                            }
+                        }
+                        Err(error) => {
+                            self.send_msg_to_behaviour(net::EventIn::TaskStatus(
+                                task_id.clone(),
+                                TaskStatus::Error(TaskErrorKind::Download),
+                            ))
+                            .await;
+                            self.spawn_log(
+                                LogKind::Worker,
+                                format!(
+                                    "error while fetching `{}`: `{:?}`",
+                                    string_job_addr, error
+                                ),
+                            )
+                            .await;
                         }
                     }
                 }
