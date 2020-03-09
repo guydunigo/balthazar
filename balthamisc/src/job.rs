@@ -459,10 +459,10 @@ impl Job {
     }
 
     // TODO: self-described error?
-    /// Is job correct and complete to be sent to the blockchain?
+    /// Is job correct and complete to be set as ready on the blockchain?
     /// All values must be defined and above their minimum value
     /// and `addresses` and `arguments` must be non-empty.
-    pub fn is_correct(&self) -> bool {
+    pub fn is_complete(&self) -> bool {
         !self.addresses.is_empty()
             && !self.arguments.is_empty()
             && self.timeout >= MIN_TIMEOUT

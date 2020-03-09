@@ -5,7 +5,7 @@ contract Jobs {
     uint128 public counter;
 
     function set_counter(uint128 new_val) public {
-        require(counter != new_val, "Same value as before.");
+        // require(counter != new_val, "Same value as before.");
         counter = new_val;
         emit CounterHasNewValue(counter);
     }
@@ -30,16 +30,6 @@ contract Jobs {
         uint64 max_failures;
 
         string data;
-        /*
-        ProgramKind program_kind;
-        bytes[] addresses;
-        bytes program_hash;
-        BestMethod best_method;
-        uint64 min_cpu_count;
-        uint64 min_memory;
-        uint64 min_network_speed;
-        bool is_program_pure;
-        */
 
         address sender;
         uint128 nonce;
@@ -67,8 +57,6 @@ contract Jobs {
         uint256 pending_money;
     }
 
-    // uint256 public total_money;
-
     mapping(bytes32 => Job) jobs;
     mapping(bytes32 => Task) tasks;
     mapping(address => User) users;
@@ -82,34 +70,23 @@ contract Jobs {
         * job.redundancy * job.arguments.length;
     }
 
-    /*
-    function calc_max_price_draft(uint128 nonce) public view returns (uint) {
-        return calc_max_price(users[msg.sender].draft_jobs[find_draft_program(nonce)]);
-    }
-    */
-
     function calc_job_id(address sender, uint128 nonce) internal pure returns (bytes32) {
         return keccak256(abi.encodePacked(sender, nonce));
     }
-    /*
-    function calc_job_id_encoded(uint128 nonce) public view returns (bytes memory) {
-        return abi.encodePacked(msg.sender, nonce);
-    }
-    */
 
     function calc_task_id(bytes32 job_id, uint128 index, bytes storage argument) internal pure returns (bytes32) {
         return keccak256(abi.encodePacked(job_id, index, argument));
     }
 
     function is_draft_ready(Job storage job) internal view returns (bool) {
-        return // job.addresses.length > 0 &&
-            // job.program_hash.length > 0 &&
-            job.arguments.length > 0 &&
+        return job.arguments.length > 0 &&
 
             job.timeout > 0 &&
             job.max_failures > 0 &&
 
             job.max_worker_price > 0 &&
+            job.max_network_price > 0 &&
+            job.redundancy > 0 &&
 
             users[msg.sender].pending_money >= calc_max_price(job);
     }
@@ -120,7 +97,7 @@ contract Jobs {
                 return i;
             }
         }
-        require(false, "Not found.");
+        revert("Not found.");
     }
 
     // ------------------------------------
@@ -152,20 +129,16 @@ contract Jobs {
     function send_pending_money() public payable {
         users[msg.sender].pending_money += msg.value;
         emit PendingMoneyChanged(msg.sender, users[msg.sender].pending_money);
-        // total_money += msg.value;
     }
+    // Reverts if there is not enough money in user's pending money.
     function recover_pending_money(uint256 amount) public {
-        // require(total_money >= amount, "too few in sc");
-        require(users[msg.sender].pending_money >= amount, "too few in pending");
+        require(users[msg.sender].pending_money >= amount/*, "too few in pending"*/);
 
         // prevent re-entrancy attack
         // (See: https://medium.com/@gus_tavo_guim/reentrancy-attack-on-smart-contracts-how-to-identify-the-exploitable-and-an-example-of-an-attack-4470a2d8dfe4)
         users[msg.sender].pending_money -= amount;
         msg.sender.transfer(amount);
         emit PendingMoneyChanged(msg.sender, users[msg.sender].pending_money);
-
-        // Just in case the payment doesn't go through, let's not loose count of our total money.
-        // total_money -= amount;
     }
 
     // ------------------------------------
@@ -174,26 +147,12 @@ contract Jobs {
     function create_job() public {
         uint128 nonce = next_nonce_and_increase();
         users[msg.sender].draft_jobs.push(Job(
-        /*
-            ProgramKind.Wasm,
             new bytes[](0),
-            new bytes(0),
-            new bytes[](0),
-            0,
-            0,
-            BestMethod.Cost, 0, 0, 0, 0, 0, 0,
             1,
-            false,
-            msg.sender,
-            nonce,
-            true
-        */
-            new bytes[](0),
+            1,
             0,
-            0,
-            0,
-            0,
-            0,
+            1,
+            1,
             0,
             new string(0),
             msg.sender,
@@ -207,61 +166,41 @@ contract Jobs {
         // ProgramKind,
         uint64,
         uint64,
-        uint64// ,
-        // bool,
-        // bytes memory
+        uint64
     ) {
         Job storage j = users[msg.sender].draft_jobs[find_draft_program(nonce)];
 
         return (
-            // j.program_kind,
             j.timeout,
             j.max_failures,
-            j.redundancy// ,
-            // j.is_program_pure,
-            // j.program_hash
+            j.redundancy
         );
     }
+    // Reverts if `timeout` or `max_failures` is null.
     function set_parameters_draft(
         uint128 nonce,
-        // ProgramKind kind,
         uint64 timeout,
         uint64 max_failures,
         uint64 redundancy// ,
-        // bool is_program_pure,
-        // bytes memory program_hash
     ) public {
+        require(timeout > 0 && redundancy > 0/*, "invalid data"*/);
         Job storage j = users[msg.sender].draft_jobs[find_draft_program(nonce)];
-        // require(j.program_kind != kind, "same value");
-        // require(j.timeout != timeout, "same value");
-        // require(j.max_failures != max_failures, "same value");
-        // require(j.redundancy != redundancy, "same value");
-        // require(j.is_program_pure != is_program_pure, "same value");
-        // require(j.program_hash != program_hash, "same value");
 
-        // j.program_kind = kind;
         j.timeout = timeout;
         j.max_failures = max_failures;
         j.redundancy = redundancy;
-        // j.is_program_pure = is_program_pure;
-        // j.program_hash = program_hash;
     }
+    // Reverts if there is no job corresponding to `job_id`.
     function get_parameters(bytes32 job_id) public view returns (
-        // ProgramKind,
         uint64,
         uint64,
-        uint64// ,
-        // bool,
-        // bytes memory
+        uint64
     ) {
-        require(jobs[job_id].non_null, "unknown job");
+        require(jobs[job_id].non_null/*, "unknown job"*/);
         return (
-            // jobs[job_id].program_kind,
             jobs[job_id].timeout,
             jobs[job_id].max_failures,
-            jobs[job_id].redundancy// ,
-            // jobs[job_id].is_program_pure,
-            // jobs[job_id].program_hash
+            jobs[job_id].redundancy
         );
     }
 
@@ -271,114 +210,78 @@ contract Jobs {
     function set_data_draft(uint128 nonce, string memory val) public {
         users[msg.sender].draft_jobs[find_draft_program(nonce)].data = val;
     }
+    // Reverts if there is no job corresponding to `job_id`.
     function get_data(bytes32 job_id) public view returns (string memory) {
-        require(jobs[job_id].non_null, "unknown job");
+        require(jobs[job_id].non_null/*, "unknown job"*/);
         return jobs[job_id].data;
     }
-
-    /*
-    function get_addresses_draft(uint128 nonce) public view returns (bytes[] memory) {
-        return users[msg.sender].draft_jobs[find_draft_program(nonce)].addresses;
-    }
-    function set_addresses_draft(uint128 nonce, bytes[] memory val) public {
-        users[msg.sender].draft_jobs[find_draft_program(nonce)].addresses = val;
-    }
-    function get_addresses(bytes32 job_id) public view returns (bytes[] memory) {
-        require(jobs[job_id].non_null, "unknown job");
-        return jobs[job_id].addresses;
-    }
-    */
 
     function get_arguments_draft(uint128 nonce) public view returns (bytes[] memory) {
         return users[msg.sender].draft_jobs[find_draft_program(nonce)].arguments;
     }
+    // Reverts if the provided array is empty.
     function set_arguments_draft(uint128 nonce, bytes[] memory val) public {
+        require(val.length > 0/*, "empty array"*/);
         users[msg.sender].draft_jobs[find_draft_program(nonce)].arguments = val;
     }
+    // Reverts if there is no job corresponding to `job_id`.
     function get_arguments(bytes32 job_id) public view returns (bytes[] memory) {
-        require(jobs[job_id].non_null, "unknown job");
+        require(jobs[job_id].non_null/*, "unknown job"*/);
         return jobs[job_id].arguments;
     }
 
     function get_worker_parameters_draft(uint128 nonce) public view returns (
-        // BestMethod,
         uint64,
-        // uint64,
-        // uint64,
         uint64,
-        uint64// ,
-        // uint64
+        uint64
     ) {
         Job storage j = users[msg.sender].draft_jobs[find_draft_program(nonce)];
 
         return (
-            // j.best_method,
             j.max_worker_price,
-            // j.min_cpu_count,
-            // j.min_memory,
             j.max_network_usage,
-            j.max_network_price// ,
-            // j.min_network_speed
+            j.max_network_price
         );
     }
+    // Reverts if `max_worker_price` or `max_network_price` is null.
     function set_worker_parameters_draft(
         uint128 nonce,
-        // BestMethod best_method,
         uint64 max_worker_price,
-        // uint64 min_cpu_count,
-        // uint64 min_memory,
         uint64 max_network_usage,
-        uint64 max_network_price// ,
-        // uint64 min_network_speed
+        uint64 max_network_price
     ) public {
+        require(max_worker_price > 0 && max_network_price > 0/*, "invalid data"*/);
         Job storage j = users[msg.sender].draft_jobs[find_draft_program(nonce)];
 
-        // require(j.best_method != best_method, "same best_method");
-        // require(j.max_worker_price != max_worker_price, "same max_worker_price");
-        // require(j.min_cpu_count != min_cpu_count, "same min_cpu_count");
-        // require(j.min_memory != min_memory, "same min_memory");
-        // require(j.max_network_usage != max_network_usage, "same max_network_usage");
-        // require(j.max_network_price != max_network_price, "same max_network_price");
-        // require(j.min_network_speed != min_network_speed, "same min_network_speed");
-
-        // j.best_method = best_method;
         j.max_worker_price = max_worker_price;
-        // j.min_cpu_count = min_cpu_count;
-        // j.min_memory = min_memory;
         j.max_network_usage = max_network_usage;
         j.max_network_price = max_network_price;
-        // j.min_network_speed = min_network_speed;
     }
+    // Reverts if there is no job corresponding to `job_id`.
     function get_worker_parameters(bytes32 job_id) public view returns (
-        // BestMethod,
         uint64,
-        // uint64,
-        // uint64,
         uint64,
-        uint64// ,
-        // uint64
+        uint64
     ) {
-        require(jobs[job_id].non_null, "unknown job");
+        require(jobs[job_id].non_null/*, "unknown job"*/);
 
         return (
-            // jobs[job_id].best_method,
             jobs[job_id].max_worker_price,
-            // jobs[job_id].min_cpu_count,
-            // jobs[job_id].min_memory,
             jobs[job_id].max_network_usage,
             jobs[job_id].max_network_price// ,
-            // jobs[job_id].min_network_speed
         );
     }
 
+    // Reverts if there is no job corresponding to `job_id`.
     function get_sender_nonce(bytes32 job_id) public view returns (address, uint128) {
-        require(jobs[job_id].non_null, "unknown job");
+        require(jobs[job_id].non_null/*, "unknown job"*/);
         return (jobs[job_id].sender, jobs[job_id].nonce);
     }
 
+    // Reverts if there is no draft job corresponding to `id`.
     function delete_draft(uint id) internal returns (Job memory job) {
         User storage user = users[msg.sender];
-        require(user.draft_jobs.length > id, "unknown id");
+        require(user.draft_jobs.length > id/*, "unknown id"*/);
 
         job = user.draft_jobs[id];
 
@@ -444,13 +347,15 @@ contract Jobs {
         emit NewResult(task_id, result);
     }
 
+    // Reverts if there is no task corresponding to `task_id`.
     function get_result(bytes32 task_id) public view returns (bytes memory) {
-        require(tasks[task_id].non_null, "unknown task");
+        require(tasks[task_id].non_null/*, "unknown task"*/);
         return tasks[task_id].result;
     }
 
+    // Reverts if there is no job corresponding to `job_id`.
     function is_job_completed(bytes32 job_id) public view returns (bool result) {
-        require(jobs[job_id].non_null, "unknown job");
+        require(jobs[job_id].non_null/*, "unknown job"*/);
 
         result = true;
         for (uint128 i ; i < jobs[job_id].arguments.length ; i++) {
@@ -497,9 +402,10 @@ contract Jobs {
         pending_jobs.pop();
     }
 
+    // Reverts if there is no task corresponding to `task_id`.
     function get_task(bytes32 task_id) public view returns (bytes32, uint128, bytes memory) {
         Task storage task = tasks[task_id];
-        require(task.non_null, "unknown task");
+        require(task.non_null/*, "unknown task"*/);
         return (
             task.job_id,
             task.argument_id,

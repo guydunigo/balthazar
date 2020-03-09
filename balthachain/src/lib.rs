@@ -53,6 +53,7 @@ pub enum Error {
     NotEnoughMoneyInPending,
     DataParseError(serde_json::Error),
     CouldntDecodeMultihash(misc::multiformats::Error),
+    JobNotComplete, // TODO: ? (Job),
 }
 
 impl From<web3::Error> for Error {
@@ -1102,9 +1103,11 @@ impl<'a> Chain<'a> {
         let addr = self.local_address()?;
 
         let job = self.jobs_get_draft_job(nonce).await?;
-        let (pending, _): (types::U256, _) = self.jobs_get_pending_locked_money().await?;
+        if !job.is_complete() {
+            return Err(Error::JobNotComplete);
+        }
 
-        // TODO: check other features
+        let (pending, _): (types::U256, _) = self.jobs_get_pending_locked_money().await?;
         if pending.low_u128() < job.calc_max_price() as u128 {
             return Err(Error::NotEnoughMoneyInPending);
         }

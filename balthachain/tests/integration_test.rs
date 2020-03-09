@@ -59,8 +59,6 @@ fn config() -> ChainConfig {
 
 #[test]
 fn it_can_process_a_new_job() -> Result<(), Error> {
-    let pwd = std::env::current_dir().unwrap();
-    println!("{}", pwd.to_string_lossy());
     let conf = config();
     let chain = Chain::new(&conf);
 
