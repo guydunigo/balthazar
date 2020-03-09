@@ -19,7 +19,7 @@ use tokio::{runtime::Runtime, sync::RwLock};
 use chain::{Chain, JobsEvent};
 use misc::{
     job::{JobId, TaskId},
-    multihash::Multihash,
+    multihash::{Multihash, Keccak256},
     WorkerSpecs,
 };
 use net::PeerRc;
@@ -268,7 +268,7 @@ impl Balthazar {
                         .cloned()
                         .enumerate()
                         .map(|(i, argument)| TaskExecute {
-                            task_id: Vec::from(&i.to_be_bytes()[..]),
+                            task_id: Keccak256::digest(&i.to_be_bytes()[..]).into_bytes(),
                             job_addr: vec![wasm.clone()],
                             argument,
                             timeout: 100,
@@ -312,11 +312,11 @@ impl Balthazar {
                 )
                 .await;
             }
-            (NodeType::Worker, net::EventOut::TasksExecute(tasks)) => {
-                for task in tasks.iter() {
+            (NodeType::Worker, net::EventOut::TasksExecute(mut tasks)) => {
+                for task in tasks.drain(..) {
                     // TODO: expect
                     let task_id =
-                        TaskId::try_from(&task.task_id[..]).expect("not a correct multihash");
+                        TaskId::from_bytes(task.task_id).expect("not a correct multihash");
                     self.send_msg_to_behaviour(net::EventIn::TaskStatus(
                         task_id.clone(),
                         TaskStatus::Pending,

@@ -40,6 +40,7 @@ impl HashId {
         self.hash().digest()
     }
 
+    /// From bytes of a multihash.
     pub fn from_bytes(bytes: Vec<u8>) -> Result<Self, Error> {
         Multihash::from_bytes(bytes)?.try_into()
     }
@@ -95,6 +96,7 @@ impl TryFrom<Multihash> for HashId {
 impl TryFrom<&[u8]> for HashId {
     type Error = Error;
 
+    /// Tries to parse a [`DefaultHash`] from a raw array (not multihash encoding).
     fn try_from(src: &[u8]) -> Result<Self, Self::Error> {
         if src.len() != HASH_SIZE {
             Err(Error::WrongSourceLength {

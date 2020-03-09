@@ -57,10 +57,10 @@ pub enum Subcommand {
     /// Starts as a manager node.
     Manager {
         /// Provide a wasm program that will be passed to workers.
-        #[clap(name = "wasm", short, long, requires("args"))]
+        #[clap(name = "wasm", short, long, requires("arg"))]
         wasm_file_addr: Option<String>,
         /// Arguments to pass to the program.
-        #[clap(short, long, number_of_values(1))]
+        #[clap(name = "arg", short, long, number_of_values(1))]
         args: Option<Vec<String>>,
     },
     /// Interract with the blockchain.
