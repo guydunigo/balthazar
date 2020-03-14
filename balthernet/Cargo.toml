@@ -9,7 +9,11 @@ edition = "2018"
 [dependencies]
 balthaproto = { path = "../balthaproto" }
 balthamisc = { path = "../balthamisc" }
-libp2p = "0.16.2"
 futures = "0.3.4"
 void = "1.0.2"
 tokio = { version = "0.2.13", features = ["sync"] }
+
+[dependencies.libp2p]
+version = "0.16.2"
+default-features = false
+features = ["dns", "kad", "mdns", "ping", "secio", "tcp", "mplex", "yamux", "websocket"]

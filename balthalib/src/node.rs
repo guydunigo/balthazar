@@ -19,7 +19,7 @@ use tokio::{runtime::Runtime, sync::RwLock};
 use chain::{Chain, JobsEvent};
 use misc::{
     job::{JobId, TaskId},
-    multihash::{Multihash, Keccak256},
+    multihash::{Keccak256, Multihash},
     WorkerSpecs,
 };
 use net::PeerRc;
