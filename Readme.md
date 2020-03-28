@@ -37,13 +37,12 @@ Contains different miscelaneous types and functions used by other libraries.
 1. Install the `rustup` and `cargo` (See [the official Rust website](https://rust-lang.org))
 2. Run `cargo build --release`, it **will** take a long while, continue the next steps in the meantime.
 
-> The following steps aren't much relevant yet as the program isn't dynamically storing and fetching the wasm program.
-3. ~~In parallel, install the wasm toolchain: `rustup target add wasm32-unkown-unkown`~~
-4. ~~Run `./build_wasm.sh` to compile the example web-assembly program~~
+3. In parallel, install the wasm toolchain: `rustup target add wasm32-unkown-unkown`
+4. Run `./build_wasm.sh` to compile the example web-assembly program
 
 ### Running
 
-> **Note:** This might not work as the wasm program might not be fetcheable on IPFS and currently the program's address is statically written inside the manager, which will change soon.
+> **Note:** This information is outdated and won't work anymore.
 
 1. Set up an IPFS daemon locally on default port (See [the official website](https://ipfs.io))
 2. Run the manager in one terminal `cargo run --release`
