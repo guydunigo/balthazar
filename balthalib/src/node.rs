@@ -208,6 +208,7 @@ impl Balthazar {
 
         let balth = Balthazar::new(config, tx, swarm_in);
 
+        /*
         let chain = balth.chain();
         let chain_fut = chain.jobs_subscribe().await?.for_each(|e| {
             async {
@@ -219,13 +220,14 @@ impl Balthazar {
             }
             .boxed()
         });
+        */
 
         let swarm_fut = swarm_out.for_each(|e| spawn_event(balth.tx.clone(), Event::Swarm(e)));
 
         // TODO: concurrent ?
         let channel_fut = rx.for_each(|e| balth.clone().handle_event(e));
 
-        join!(chain_fut, swarm_fut, channel_fut);
+        join!(/*chain_fut, */swarm_fut, channel_fut);
 
         Ok(())
     }

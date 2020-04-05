@@ -26,10 +26,10 @@ pub enum EventIn {
 pub enum EventOut {
     /// Node type discovered for a peer.
     PeerHasNewType(PeerId, NodeType),
-    /// Peer has been connected to given endpoint.
-    PeerConnected(PeerId, ConnectedPoint),
-    /// Peer has been disconnected from given endpoint.
-    PeerDisconnected(PeerId, ConnectedPoint),
+    /// Peer has been connected.
+    PeerConnected(PeerId),
+    /// Peer has been disconnected from all endpoints.
+    PeerDisconnected(PeerId),
     /// Answer to a [`EventIn::Ping`].
     Pong,
     /// When a peer sends us a message, but we aren't in a worker-manager relationship.
@@ -116,8 +116,8 @@ pub struct Peer {
     pub peer_id: PeerId,
     /// Known addresses
     pub addrs: HashSet<Multiaddr>,
-    /// If there's an open connection, the connection infos
-    pub endpoint: Option<ConnectedPoint>,
+    /// Is peer connected?
+    pub connected: bool,
     /// Has it already been dialed at least once?
     /// TODO: use a date to recheck periodically ?
     pub dialed: bool,
@@ -132,7 +132,7 @@ impl Peer {
         Peer {
             peer_id,
             addrs: HashSet::new(),
-            endpoint: None,
+            connected: false,
             dialed: false,
             node_type: None,
             pending_messages: Vec::new(),

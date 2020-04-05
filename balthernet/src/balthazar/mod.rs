@@ -19,13 +19,10 @@ use futures::{
     Stream,
 };
 use libp2p::{
-    core::{
-        connection::{ConnectionId, ListenerId},
-        ConnectedPoint,
-    },
+    core::connection::{ConnectionId, ListenerId},
     swarm::{
         protocols_handler::{IntoProtocolsHandler, ProtocolsHandler},
-        NetworkBehaviour, NetworkBehaviourAction, NotifyHandler, PollParameters,
+        DialPeerCondition, NetworkBehaviour, NetworkBehaviourAction, NotifyHandler, PollParameters,
     },
     Multiaddr, PeerId,
 };
@@ -186,7 +183,7 @@ impl BalthBehaviour {
         let peer = self.get_peer_or_insert(&peer_id);
         let mut peer = peer.write().unwrap();
 
-        if peer.endpoint.is_some() {
+        if peer.connected {
             Poll::Ready(NetworkBehaviourAction::NotifyHandler {
                 handler: NotifyHandler::Any,
                 peer_id,
@@ -194,7 +191,10 @@ impl BalthBehaviour {
             })
         } else {
             peer.pending_messages.push(event);
-            Poll::Ready(NetworkBehaviourAction::DialPeer { peer_id })
+            Poll::Ready(NetworkBehaviourAction::DialPeer {
+                peer_id,
+                condition: DialPeerCondition::Disconnected,
+            })
         }
     }
 
@@ -226,55 +226,36 @@ impl NetworkBehaviour for BalthBehaviour {
             .unwrap_or_else(Vec::new)
     }
 
-    fn inject_connected(&mut self, peer_id: PeerId, endpoint: ConnectedPoint) {
+    fn inject_connected(&mut self, peer_id: &PeerId) {
         let peer = self.get_peer_or_insert(&peer_id);
         let mut peer = peer.write().unwrap();
+        peer.connected = true;
 
-        if let Some(ref endpoint) = peer.endpoint {
-            panic!(
-                "Peer `{:?}` already has an endpoint `{:?}`.",
-                peer_id, endpoint
-            );
-        } else {
-            // If the node_type is unknown, plans to send a request:
-            if peer.node_type.is_none() {
-                self.events
-                    .push_front(InternalEvent::AskNodeType(peer_id.clone()));
-            }
-
-            match endpoint.clone() {
-                ConnectedPoint::Dialer { address } => {
-                    peer.addrs.insert(address);
-                }
-                ConnectedPoint::Listener { send_back_addr, .. } => {
-                    peer.addrs.insert(send_back_addr);
-                }
-            }
-
-            peer.endpoint = Some(endpoint.clone());
-            peer.pending_messages.drain(..).for_each(|msg| {
-                self.events
-                    .push_front(InternalEvent::SendMessage(peer_id.clone(), msg))
-            });
-
-            self.inject_generate_event(EventOut::PeerConnected(peer_id, endpoint));
+        // If the node_type is unknown, plans to send a request:
+        if peer.node_type.is_none() {
+            self.events
+                .push_front(InternalEvent::AskNodeType(peer_id.clone()));
         }
+
+        peer.pending_messages.drain(..).for_each(|msg| {
+            self.events
+                .push_front(InternalEvent::SendMessage(peer_id.clone(), msg))
+        });
+
+        self.inject_generate_event(EventOut::PeerConnected(peer_id.clone()));
     }
 
-    fn inject_disconnected(&mut self, peer_id: &PeerId, endpoint: ConnectedPoint) {
+    fn inject_disconnected(&mut self, peer_id: &PeerId) {
         if let Some(peer) = self.peers.get_mut(peer_id) {
-            if peer.write().unwrap().endpoint.take().is_some() {
-                self.inject_generate_event(EventOut::PeerDisconnected(peer_id.clone(), endpoint));
-            } else {
-                panic!(
-                    "Peer `{:?}` already doesn't have any endpoint `{:?}`.",
-                    peer_id, endpoint
-                );
+            {
+                let mut peer = peer.write().unwrap();
+                peer.connected = false;
             }
+            self.inject_generate_event(EventOut::PeerDisconnected(peer_id.clone()));
         } else {
             panic!(
-                "Peer `{:?}` doesn't exist so can't remove endpoint `{:?}`.",
-                peer_id, endpoint
+                "Peer `{:?}` doesn't exist, so can't be disconnected.",
+                peer_id
             );
         }
     }
@@ -420,7 +401,10 @@ impl NetworkBehaviour for BalthBehaviour {
 
                     if !peer.dialed {
                         peer.dialed = true;
-                        Poll::Ready(NetworkBehaviourAction::DialPeer { peer_id })
+                        Poll::Ready(NetworkBehaviourAction::DialPeer {
+                            peer_id,
+                            condition: DialPeerCondition::Disconnected,
+                        })
                     } else {
                         Poll::Pending
                     }
