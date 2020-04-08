@@ -82,8 +82,8 @@ impl FetchStorage for IpfsStorage {
     // TODO: fetch downloads the file first, worst solution but only one found which returns
     // exactly correct size...
     // TODO: object_stat size isn't exact file size... how to do that without downloading data ?
-    // TODO: utterly ugly and disgusting :'P
     fn get_size(&self, addr: &[u8]) -> BoxFuture<Result<u64, Box<dyn Error + Send>>> {
+        // TODO: utterly ugly and disgusting :'P
         /*
         let addr = String::from_utf8_lossy(addr).to_string();
         async move {
