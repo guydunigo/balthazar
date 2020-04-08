@@ -11,7 +11,7 @@ balthaproto = { path = "../balthaproto" }
 balthamisc = { path = "../balthamisc" }
 futures = "0.3.4"
 void = "1.0.2"
-tokio = { version = "0.2.15", features = ["sync"] }
+tokio = { version = "0.2.16", features = ["sync"] }
 
 [dependencies.libp2p]
 version = "0.17.0"

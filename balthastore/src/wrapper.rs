@@ -1,7 +1,7 @@
-//! Provides [`StoragesWrapper`] to use different [`Storage`] at once in a transparently.
+//! Provides [`StoragesWrapper`] to use different storages at once in a transparently.
 // TODO: Instructions to add new Storage
 
-use super::{ipfs, GenericReader, Storage, StorageConfig, StorageType};
+use super::{ipfs, FetchStorage, GenericReader, StorageConfig, StorageType, StoreStorage};
 use bytes::Bytes;
 use futures::{future::BoxFuture, stream::BoxStream};
 use multiaddr::{Multiaddr, Protocol};
@@ -14,7 +14,7 @@ pub type StoragesWrapperCreationError = ipfs::IpfsStorageCreationError;
 /// For instance, files named using the format `/ipfs/[MULTIHASH]` will be routed towards the
 /// underlying [`ipfs::IpfsStorage`].
 ///
-/// [`StoragesWrapper`] has a **default** storage defined and [`Storage::store`] calls will use it and [`Storage::get`] calls that couldn't be automatically linked to another [`Storage`] are sent to it as well.
+/// [`StoragesWrapper`] has a **default** storage defined and [`StoreStorage::store`] calls will use it and [`FetchStorage::fetch`] calls that couldn't be automatically linked to another storage are sent to it as well.
 #[derive(Clone, Default)]
 pub struct StoragesWrapper {
     config: StorageConfig,
@@ -35,7 +35,7 @@ impl StoragesWrapper {
         })
     }
 
-    pub fn storage_type_to_storage(&self, storage_type: &StorageType) -> &dyn Storage {
+    pub fn storage_type_to_storage(&self, storage_type: &StorageType) -> &dyn StoreStorage {
         match storage_type {
             StorageType::Ipfs => self.storage_ipfs(),
         }
@@ -45,9 +45,9 @@ impl StoragesWrapper {
         self.config.default_storage()
     }
 
-    /// Returns the [`Storage`] corresponding to the
+    /// Returns the [`StoreStorage`] corresponding to the
     /// [`default_storage_type`](`StoragesWrapper::default_storage_type`) answer.
-    pub fn default_storage(&self) -> &dyn Storage {
+    pub fn default_storage(&self) -> &dyn StoreStorage {
         self.storage_type_to_storage(self.default_storage_type())
     }
 
@@ -83,26 +83,32 @@ impl StoragesWrapper {
         }
     }
 
-    /// Returns the [`Storage`] corresponding to the [`get_storage_type_based_on_address`](`StoragesWrapper::get_storage_type_based_on_address`) answer.
-    pub fn get_storage_based_on_address(&self, addr: &[u8]) -> &dyn Storage {
+    /// Returns the [`StoreStorage`] corresponding to the [`get_storage_type_based_on_address`](`StoragesWrapper::get_storage_type_based_on_address`) answer.
+    pub fn get_storage_based_on_address(&self, addr: &[u8]) -> &dyn StoreStorage {
         let storage_type = self.get_storage_type_based_on_address(addr);
         self.storage_type_to_storage(&storage_type)
     }
 }
 
-impl Storage for StoragesWrapper {
+impl FetchStorage for StoragesWrapper {
+    /// Tries to determine automatically the best [`StoreStorage`] to retrieve data at `addr`
+    /// using [`get_storage_type_based_on_address`](`StoragesWrapper::get_storage_type_based_on_address`).
+    fn fetch_stream(&self, addr: &[u8]) -> BoxStream<Result<Bytes, Box<dyn Error + Send>>> {
+        self.get_storage_based_on_address(addr).fetch_stream(addr)
+    }
+
+    fn get_size(&self, addr: &[u8]) -> BoxFuture<Result<u64, Box<dyn Error + Send>>> {
+        self.get_storage_based_on_address(addr).get_size(addr)
+    }
+}
+
+impl StoreStorage for StoragesWrapper {
     /// Stores the data into the [`default_storage_type`](`StoragesWrapper::default_storage_type`).
     fn store_stream(
         &self,
         data_stream: GenericReader,
     ) -> BoxFuture<Result<Vec<u8>, Box<dyn Error + Send>>> {
         self.default_storage().store_stream(data_stream)
-    }
-
-    /// Tries to determine automatically the best [`Storage`] to retrieve data at `addr`
-    /// using [`get_storage_type_based_on_address`](`StoragesWrapper::get_storage_type_based_on_address`).
-    fn get_stream(&self, addr: &[u8]) -> BoxStream<Result<Bytes, Box<dyn Error + Send>>> {
-        self.get_storage_based_on_address(addr).get_stream(addr)
     }
 }
 

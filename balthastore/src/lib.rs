@@ -35,35 +35,43 @@ pub use wrapper::*;
 
 // TODO: That's a lot of boxes everywhere for Storage trait and GenericReader...
 
-/// This trait defines a generic interface for storage mechanisms so they can be used interchangeably.
-pub trait Storage: Sync {
-    /// Stores provided data from the Storage coming from an async stream.
-    /// TODO: blocking io::Read required by
-    fn store_stream(
-        &self,
-        data_stream: GenericReader,
-    ) -> BoxFuture<Result<Vec<u8>, Box<dyn Error + Send>>>;
-    /// Get the requested data from the Storage as a [`futures::Stream`]
-    fn get_stream(&self, addr: &[u8]) -> BoxStream<Result<Bytes, Box<dyn Error + Send>>>;
+/// This trait defines a generic interface for storage classes to fetch content.
+pub trait FetchStorage: Sync {
+    /// Get the requested data from the Storage as a [`futures::Stream`].
+    /// > To be noted that the stream shouldn't eagerly download too much data,
+    /// > so if it is dropped, the connection should be cut and the un-polled data dropped.
+    fn fetch_stream(&self, addr: &[u8]) -> BoxStream<Result<Bytes, Box<dyn Error + Send>>>;
 
-    /// Same as [`Storage::store_stream`] but to provide all the data as once.
-    fn store(&self, data: &[u8]) -> BoxFuture<Result<Vec<u8>, Box<dyn Error + Send>>> {
-        // TODO: ugly? needed to avoid static lifetime on data...
-        // let vec = Vec::from(data);
-        // let mut cursor = io::Cursor::new(vec);
+    /// Returns the size in bytes of the file at given address.
+    fn get_size(&self, addr: &[u8]) -> BoxFuture<Result<u64, Box<dyn Error + Send>>>;
 
-        self.store_stream(data.into())
-    }
-
-    /// Same as [`Storage::get_stream`] but to get all the data as once.
-    fn get<'a>(&'a self, addr: &'a [u8]) -> BoxFuture<'a, Result<Bytes, Box<dyn Error + Send>>> {
+    /// Same as [`Storage::fetch_stream`] but to fetch all the data as once.
+    /// To prevent the memory being filled by a oversized file,
+    /// when more than `max_bytes` bytes have been downloaded, the connection should
+    /// be stopped.
+    fn fetch<'a>(
+        &'a self,
+        addr: &'a [u8],
+        max_bytes: u64,
+    ) -> BoxFuture<'a, Result<Bytes, Box<dyn Error + Send>>> {
         // TODO: not very efficient ?
         async move {
-            let mut tmp = Vec::new();
-            let mut stream = self.get_stream(addr);
+            let file_size = max_bytes; // self.get_size(addr).await?;
+            let mut downloaded_size: u64 = 0;
+            // TODO: file_size or max_bytes ?
+            let mut tmp = Vec::with_capacity(file_size as usize);
+            let mut stream = self.fetch_stream(addr);
             while let Some(chunk_res) = stream.next().await {
                 match chunk_res {
-                    Ok(chunk) => tmp.extend_from_slice(&chunk[..]),
+                    Ok(chunk) => {
+                        tmp.extend_from_slice(&chunk[..]);
+                        // If we downloaded too much data, stop and return what has been
+                        // downloaded up to now.
+                        downloaded_size += chunk.len() as u64;
+                        if downloaded_size > max_bytes {
+                            break;
+                        }
+                    }
                     Err(error) => return Err(error),
                 }
             }
@@ -73,16 +81,24 @@ pub trait Storage: Sync {
     }
 }
 
-impl<T: Storage> Storage for &T {
+/// This trait defines a storage which allow receiving data.
+/// As it's useless storing if you can't fetch, a StoreStorage should also
+/// implement FetchStorage, and the address returned by a store operation
+/// should return the exact same data when passed to fetch.
+pub trait StoreStorage: FetchStorage {
+    /// Stores provided data from the Storage coming from an async stream.
+    /// TODO: blocking io::Read required by IPFS
     fn store_stream(
         &self,
         data_stream: GenericReader,
-    ) -> BoxFuture<Result<Vec<u8>, Box<dyn Error + Send>>> {
-        (*self).store_stream(data_stream)
-    }
+    ) -> BoxFuture<Result<Vec<u8>, Box<dyn Error + Send>>>;
+    /// Same as [`Storage::store_stream`] but to provide all the data as once.
+    fn store(&self, data: &[u8]) -> BoxFuture<Result<Vec<u8>, Box<dyn Error + Send>>> {
+        // TODO: ugly? needed to avoid static lifetime on data...
+        // let vec = Vec::from(data);
+        // let mut cursor = io::Cursor::new(vec);
 
-    fn get_stream(&self, addr: &[u8]) -> BoxStream<Result<Bytes, Box<dyn Error + Send>>> {
-        (*self).get_stream(addr)
+        self.store_stream(data.into())
     }
 }
 

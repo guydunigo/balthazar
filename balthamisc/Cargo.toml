@@ -7,11 +7,11 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-tokio = { version = "0.2.15", features = ["sync"] }
+tokio = { version = "0.2.16", features = ["sync"] }
 futures = "0.3.4"
 parity-multiaddr = "0.8.0"
 multihash = "0.10.1"
 multibase = "0.8.0"
 ethereum-types = "^0.8"
-serde = "1.0.105"
-serde_derive = "1.0.105"
+serde = "1.0.106"
+serde_derive = "1.0.106"

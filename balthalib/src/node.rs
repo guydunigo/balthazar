@@ -28,7 +28,7 @@ use proto::{
     NodeType, TaskStatus,
 };
 use run::{Runner, WasmRunner};
-use store::{Storage, StoragesWrapper};
+use store::{FetchStorage, StoragesWrapper};
 
 use super::{BalthazarConfig, Error};
 
@@ -227,7 +227,7 @@ impl Balthazar {
         // TODO: concurrent ?
         let channel_fut = rx.for_each(|e| balth.clone().handle_event(e));
 
-        join!(/*chain_fut, */swarm_fut, channel_fut);
+        join!(/*chain_fut, */ swarm_fut, channel_fut);
 
         Ok(())
     }
@@ -333,7 +333,13 @@ impl Balthazar {
                         format!("will get program `{}`...", string_job_addr),
                     )
                     .await;
-                    match storage.get(&task.job_addr[0][..]).await {
+                    match storage
+                        .fetch(
+                            &task.job_addr[0][..],
+                            storage.get_size(&task.job_addr[0][..]).await.unwrap(),
+                        )
+                        .await
+                    {
                         Ok(wasm) => {
                             self.spawn_log(
                                 LogKind::Worker,
