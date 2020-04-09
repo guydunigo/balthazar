@@ -18,7 +18,7 @@ use tokio::{runtime::Runtime, sync::RwLock};
 
 use chain::{Chain, JobsEvent};
 use misc::{
-    job::{JobId, TaskId},
+    job::{DefaultHash, JobId, ProgramKind, TaskId},
     multihash::{Keccak256, Multihash},
     WorkerSpecs,
 };
@@ -265,13 +265,18 @@ impl Balthazar {
         match (self.config.node_type(), event) {
             (NodeType::Manager, net::EventOut::WorkerNew(peer_id)) => {
                 if let Some((wasm, args)) = self.config.wasm() {
+                    let storage = StoragesWrapper::default();
+                    let program_data = storage.fetch(&wasm[..], 1_000_000).await.unwrap();
+                    let program_hash = DefaultHash::digest(&program_data[..]).into_bytes();
                     let tasks = args
                         .iter()
                         .cloned()
                         .enumerate()
                         .map(|(i, argument)| TaskExecute {
                             task_id: Keccak256::digest(&i.to_be_bytes()[..]).into_bytes(),
-                            job_addr: vec![wasm.clone()],
+                            program_addresses: vec![wasm.clone()],
+                            program_hash: program_hash.clone(),
+                            program_kind: ProgramKind::Wasm0m1n0.into(),
                             argument,
                             timeout: 100,
                             max_network_usage: 100,
@@ -325,32 +330,36 @@ impl Balthazar {
                     ))
                     .await;
                     let storage = StoragesWrapper::default();
-                    let string_job_addr = String::from_utf8_lossy(&task.job_addr[0][..]);
+                    let string_program_address =
+                        String::from_utf8_lossy(&task.program_addresses[0][..]);
                     let string_argument = String::from_utf8_lossy(&task.argument[..]);
 
                     self.spawn_log(
                         LogKind::Worker,
-                        format!("will get program `{}`...", string_job_addr),
+                        format!("will get program `{}`...", string_program_address),
                     )
                     .await;
                     match storage
                         .fetch(
-                            &task.job_addr[0][..],
-                            storage.get_size(&task.job_addr[0][..]).await.unwrap(),
+                            &task.program_addresses[0][..],
+                            storage
+                                .get_size(&task.program_addresses[0][..])
+                                .await
+                                .unwrap(),
                         )
                         .await
                     {
                         Ok(wasm) => {
                             self.spawn_log(
                                 LogKind::Worker,
-                                format!("received program `{}`.", string_job_addr),
+                                format!("received program `{}`.", string_program_address),
                             )
                             .await;
                             self.spawn_log(
                                 LogKind::Worker,
                                 format!(
                                     "spawning wasm executor for `{}` with argument `{}`...",
-                                    string_job_addr, string_argument,
+                                    string_program_address, string_argument,
                                 ),
                             )
                             .await;
@@ -361,7 +370,7 @@ impl Balthazar {
                                     SystemTime::now()
                                         .duration_since(UNIX_EPOCH)
                                         .unwrap()
-                                        .as_secs() as i64,
+                                        .as_secs(),
                                 ),
                             ))
                             .await;
@@ -372,7 +381,7 @@ impl Balthazar {
                                         LogKind::Worker,
                                         format!(
                                             "task result for `{}` with `{}`: `{:?}`",
-                                            string_job_addr,
+                                            string_program_address,
                                             string_argument,
                                             String::from_utf8_lossy(&result[..])
                                         ),
@@ -387,14 +396,14 @@ impl Balthazar {
                                 Err(error) => {
                                     self.send_msg_to_behaviour(net::EventIn::TaskStatus(
                                         task_id.clone(),
-                                        TaskStatus::Error(TaskErrorKind::Running),
+                                        TaskStatus::Error(TaskErrorKind::Runtime),
                                     ))
                                     .await;
                                     self.spawn_log(
                                         LogKind::Worker,
                                         format!(
                                             "task error for `{}` with `{}`: `{:?}`",
-                                            string_job_addr, string_argument, error
+                                            string_program_address, string_argument, error
                                         ),
                                     )
                                     .await;
@@ -411,7 +420,7 @@ impl Balthazar {
                                 LogKind::Worker,
                                 format!(
                                     "error while fetching `{}`: `{:?}`",
-                                    string_job_addr, error
+                                    string_program_address, error
                                 ),
                             )
                             .await;

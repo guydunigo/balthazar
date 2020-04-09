@@ -281,7 +281,7 @@ pub fn node_type_answer(
                     .config
                     .is_manager_authorized(Some(&peer.peer_id), &peer.addrs_as_vec()[..])
             {
-                Some(data.specs)
+                Some(data.specs.clone())
             } else {
                 None
             }

@@ -1,7 +1,5 @@
 syntax = "proto3";
 
-// See protocol.md for specification and description.
-
 package worker;
 
 // Test
@@ -17,9 +15,11 @@ enum NodeType {
  WORKER = 1;
 }
 
+// In the format `[TYPE]_[MAJOR]m[MINOR]n[PATCH]`, because when converting to type,
+// it renames it to `Wasm010` otherwise.
 enum ProgramKind {
- WASM_0_1_0 = 0;
- DOCKER_0_1_0 = 10;
+ WASM_0m1n0 = 0;
+ // DOCKER_0m1n0 = 10;
 }
 
 enum TaskErrorKind {
@@ -54,7 +54,7 @@ message ManagerRequest {
  repeated ProgramKind supported_program_kinds = 6;
 }
 message ManagerAnswer {
- bool answer = 1;
+ bool accepted = 1;
 }
 
 message ManagerBye {}

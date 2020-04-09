@@ -188,11 +188,12 @@ where
                 user_data,
             } => {
                 let msg = worker::ManagerRequest {
+                    worker_price: worker_specs.worker_price(),
+                    network_price: worker_specs.network_price(),
                     cpu_count: worker_specs.cpu_count(),
                     memory: worker_specs.memory(),
                     network_speed: worker_specs.network_speed(),
-                    worker_price: worker_specs.worker_price(),
-                    network_price: worker_specs.network_price(),
+                    supported_program_kinds: worker_specs.supported_program_kinds_proto(),
                 }
                 .into();
                 inject_new_request_event(&mut self.substreams, user_data, msg)
@@ -495,18 +496,23 @@ fn process_request<TUserData>(
                 }))
             }
             WorkerMsg::ManagerRequest(worker::ManagerRequest {
+                worker_price,
+                network_price,
                 cpu_count,
                 memory,
                 network_speed,
-                worker_price,
-                network_price,
+                supported_program_kinds,
             }) => Some(Ok(EventOut::ManagerRequest {
                 worker_specs: WorkerSpecs::new(
+                    worker_price,
+                    network_price,
                     cpu_count,
                     memory,
                     network_speed,
-                    worker_price,
-                    network_price,
+                    supported_program_kinds
+                        .iter()
+                        .filter_map(|i| worker::ProgramKind::from_i32(*i))
+                        .collect(),
                 ),
                 request_id: RequestId::new(connec_unique_id),
             })),

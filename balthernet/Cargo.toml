@@ -14,6 +14,6 @@ void = "1.0.2"
 tokio = { version = "0.2.16", features = ["sync"] }
 
 [dependencies.libp2p]
-version = "0.17.0"
+version = "0.18.0"
 default-features = false
 features = ["dns", "kad", "mdns", "ping", "secio", "tcp", "mplex", "yamux", "websocket"]

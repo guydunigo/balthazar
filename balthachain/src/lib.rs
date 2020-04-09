@@ -1,8 +1,7 @@
 extern crate balthamisc as misc;
+extern crate balthaproto as proto;
 extern crate ethabi;
 extern crate futures;
-extern crate serde;
-extern crate serde_json;
 extern crate web3;
 
 mod config;
@@ -10,12 +9,11 @@ pub use config::{Address, ChainConfig};
 use ethabi::Event;
 use futures::{compat::Compat01As03, executor::block_on, future, Stream, StreamExt};
 use misc::{
-    job::{BestMethod, Job, JobId, ProgramKind, TaskId, UnknownValue, HASH_SIZE},
+    job::{BestMethod, Job, JobId, OtherData, ProgramKind, TaskId, UnknownValue, HASH_SIZE},
     multiaddr,
-    multiformats::{encode_multibase_multihash_string, try_decode_multibase_multihash_string},
     multihash::{self, Multihash},
 };
-use serde::{Deserialize, Serialize};
+use proto::{DecodeError, EncodeError, Message};
 use std::{
     convert::{TryFrom, TryInto},
     fmt,
@@ -51,7 +49,9 @@ pub enum Error {
     BestMethodParse(UnknownValue<u64>),
     NotEnoughMoneyInLocalAccount,
     NotEnoughMoneyInPending,
-    DataParseError(serde_json::Error),
+    OtherDataEncodeError(EncodeError),
+    OtherDataDecodeError(DecodeError),
+    OtherDataDecodeEnumError,
     CouldntDecodeMultihash(misc::multiformats::Error),
     JobNotComplete, // TODO: ? (Job),
 }
@@ -92,9 +92,15 @@ impl From<multihash::DecodeOwnedError> for Error {
     }
 }
 
-impl From<serde_json::Error> for Error {
-    fn from(e: serde_json::Error) -> Self {
-        Error::DataParseError(e)
+impl From<DecodeError> for Error {
+    fn from(e: DecodeError) -> Self {
+        Error::OtherDataDecodeError(e)
+    }
+}
+
+impl From<EncodeError> for Error {
+    fn from(e: EncodeError) -> Self {
+        Error::OtherDataEncodeError(e)
     }
 }
 
@@ -552,18 +558,6 @@ impl fmt::Display for JobsEventKind {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-struct JobData {
-    program_kind: ProgramKind,
-    addresses: Vec<String>,
-    program_hash: String,
-    best_method: BestMethod,
-    min_cpu_count: u64,
-    min_memory: u64,
-    min_network_speed: u64,
-    is_program_pure: bool,
-}
-
 #[derive(Debug)]
 pub struct Chain<'a> {
     eloop: EventLoopHandle,
@@ -751,7 +745,7 @@ impl<'a> Chain<'a> {
         let addr = self.local_address()?;
 
         match job.program_kind {
-            ProgramKind::Wasm => {
+            ProgramKind::Wasm0m1n0 => {
                 let stream = self
                     .jobs_subscribe_to_event_kind(JobsEventKind::JobNew)
                     .await?;
@@ -785,21 +779,12 @@ impl<'a> Chain<'a> {
                 );
                 Compat01As03::new(fut).await?;
 
-                // TODO: serialize other data.
-                let data = JobData {
-                    program_kind: job.program_kind,
-                    addresses: job.addresses.clone(),
-                    program_hash: encode_multibase_multihash_string(&job.program_hash),
-                    best_method: job.best_method,
-                    min_cpu_count: job.min_cpu_count,
-                    min_memory: job.min_memory,
-                    min_network_speed: job.min_network_speed,
-                    is_program_pure: job.is_program_pure,
-                };
-
+                let other_data = job.other_data();
+                let mut encoded_data = Vec::with_capacity(other_data.encoded_len());
+                other_data.encode(&mut encoded_data)?;
                 let fut = jobs.call_with_confirmations(
                     "set_data_draft",
-                    (nonce, serde_json::to_string(&data)?),
+                    (nonce, encoded_data),
                     addr,
                     Default::default(),
                     0,
@@ -856,8 +841,8 @@ impl<'a> Chain<'a> {
             Default::default(),
             None,
         );
-        let data: String = Compat01As03::new(fut).await?;
-        let data: JobData = serde_json::from_str(&data[..])?;
+        let data: Vec<u8> = Compat01As03::new(fut).await?;
+        let data = OtherData::decode(&data[..])?;
 
         let fut = jobs.query(
             "get_worker_parameters",
@@ -888,15 +873,17 @@ impl<'a> Chain<'a> {
         let arguments: Vec<Vec<u8>> = Compat01As03::new(fut).await?;
 
         let mut job = Job::new(
-            data.program_kind,
-            data.addresses,
-            try_decode_multibase_multihash_string(&data.program_hash)?,
+            ProgramKind::from_i32(data.program_kind).ok_or(Error::OtherDataDecodeEnumError)?,
+            data.program_addresses,
+            Multihash::from_bytes(data.program_hash)?,
             arguments,
             sender,
         );
         job.set_timeout(timeout);
         job.set_max_failures(max_failures);
-        job.set_best_method(data.best_method);
+        job.set_best_method(
+            BestMethod::from_i32(data.best_method).ok_or(Error::OtherDataDecodeEnumError)?,
+        );
         job.set_max_worker_price(max_worker_price);
         job.set_min_cpu_count(data.min_cpu_count);
         job.set_min_memory(data.min_memory);
@@ -924,8 +911,8 @@ impl<'a> Chain<'a> {
         let (timeout, max_failures, redundancy): (u64, u64, u64) = Compat01As03::new(fut).await?;
 
         let fut = jobs.query("get_data_draft", nonce, addr, Default::default(), None);
-        let data: String = Compat01As03::new(fut).await?;
-        let data: JobData = serde_json::from_str(&data[..])?;
+        let data: Vec<u8> = Compat01As03::new(fut).await?;
+        let data = OtherData::decode(&data[..])?;
 
         let fut = jobs.query(
             "get_worker_parameters_draft",
@@ -941,15 +928,17 @@ impl<'a> Chain<'a> {
         let arguments: Vec<Vec<u8>> = Compat01As03::new(fut).await?;
 
         let mut job = Job::new(
-            data.program_kind,
-            data.addresses,
-            try_decode_multibase_multihash_string(&data.program_hash)?,
+            ProgramKind::from_i32(data.program_kind).ok_or(Error::OtherDataDecodeEnumError)?,
+            data.program_addresses,
+            Multihash::from_bytes(data.program_hash)?,
             arguments,
             addr,
         );
         job.set_timeout(timeout);
         job.set_max_failures(max_failures);
-        job.set_best_method(data.best_method);
+        job.set_best_method(
+            BestMethod::from_i32(data.best_method).ok_or(Error::OtherDataDecodeEnumError)?,
+        );
         job.set_max_worker_price(max_worker_price);
         job.set_min_cpu_count(data.min_cpu_count);
         job.set_min_memory(data.min_memory);

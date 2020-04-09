@@ -52,7 +52,7 @@ pub fn get_swarm<'a>(
     let (net_behaviour, tx) = BalthBehavioursWrapper::new(
         config.node_type_configuration().clone().map_worker(|w| {
             if let Some(specs) = worker_specs {
-               (w, *specs)
+               (w, specs.clone())
             } else {
                 panic!("No worker specs were provided, but the NetConfig provided contains worker config info.");
             }

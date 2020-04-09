@@ -1,3 +1,4 @@
+extern crate balthaproto as proto;
 extern crate multibase;
 pub extern crate multihash;
 pub extern crate parity_multiaddr as multiaddr;

@@ -19,7 +19,6 @@ use lib::{
     BalthazarConfig, RunMode,
 };
 use std::{
-    convert::TryInto,
     fs::read,
     io,
     io::{stdin, Read},
@@ -212,7 +211,7 @@ pub enum ChainJobsSub {
         arguments: Vec<String>,
         timeout: u64,
         max_failures: u64,
-        best_method: u64,
+        best_method: BestMethod,
         max_worker_price: u64,
         min_cpu_count: u64,
         min_memory: u64,
@@ -304,13 +303,13 @@ impl Into<chain::RunMode> for ChainSub {
                 redundancy,
                 is_program_pure,
             }) => chain::RunMode::JobsNewDraft {
-                program_kind: ProgramKind::Wasm,
+                program_kind: ProgramKind::Wasm0m1n0,
                 addresses,
                 program_hash,
                 arguments: arguments.iter().map(|s| s.clone().into_bytes()).collect(),
                 timeout,
                 max_failures,
-                best_method: best_method.try_into().unwrap(),
+                best_method: best_method.into(),
                 max_worker_price,
                 min_cpu_count,
                 min_memory,
@@ -509,30 +508,23 @@ impl std::convert::TryInto<(RunMode, BalthazarConfig)> for BalthazarArgs {
     }
 }
 
-/*
 arg_enum! {
-    #[derive(PartialEq, Debug)]
-    pub enum NodeTypeArg {
-        Worker,
-        W,
-        Manager,
-        M,
+    #[derive(PartialEq, Debug, Clone, Copy)]
+    pub enum BestMethod {
+        Cost,
+        Performance,
     }
 }
 
-impl Into<NodeType> for NodeTypeArg {
-    fn into(self) -> NodeType {
+use lib::misc::job::BestMethod as JobBestMethod;
+impl Into<JobBestMethod> for BestMethod {
+    fn into(self) -> JobBestMethod {
         match self {
-            NodeTypeArg::Worker | NodeTypeArg::W => NodeType::Worker,
-            NodeTypeArg::Manager | NodeTypeArg::M => NodeType::Manager,
+            BestMethod::Cost => JobBestMethod::Cost,
+            BestMethod::Performance => JobBestMethod::Performance,
         }
     }
 }
-
-fn try_parse_node_type(s: &str) -> Result<NodeType, String> {
-    NodeTypeArg::from_str(s).map(|a| a.into())
-}
-*/
 
 arg_enum! {
     #[derive(PartialEq, Debug)]

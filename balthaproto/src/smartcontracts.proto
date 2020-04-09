@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+// Data that needs to be serialized in the smart-contracts
+
+import "worker.proto";
+
+package smartcontracts;
+
+// Method to choose which offer is the best to execute a task.
+enum BestMethod {
+ // Choose the cheapest peer's offer.
+ COST = 0;
+ // Choose the offer with the most performant worker.
+ PERFORMANCE = 1;
+}
+
+message OtherData {
+  worker.ProgramKind program_kind = 1;
+  repeated string program_addresses = 2;
+  bytes program_hash = 3;
+  BestMethod best_method = 4;
+  uint64 min_cpu_count = 5;
+  uint64 min_memory = 6;
+  uint64 min_network_speed = 7;
+  bool is_program_pure = 8;
+}

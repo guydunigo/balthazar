@@ -1,13 +1,15 @@
 //! Classes for reperenting a job and its subtasks.
 extern crate ethereum_types;
-extern crate serde_derive;
 
 use super::multiformats::{
     encode_multibase_multihash_string, try_decode_multibase_multihash_string, Error,
 };
 use ethereum_types::Address;
 use multihash::{wrap, Keccak256, Multihash};
-use serde_derive::{Deserialize, Serialize};
+pub use proto::{
+    smartcontracts::{BestMethod, OtherData},
+    worker::ProgramKind,
+};
 use std::{
     convert::{TryFrom, TryInto},
     fmt,
@@ -146,83 +148,6 @@ impl<T: fmt::Display> fmt::Display for UnknownValue<T> {
 
 impl<T: fmt::Debug + fmt::Display> std::error::Error for UnknownValue<T> {}
 
-const BEST_METHOD_COST: u64 = 0;
-const BEST_METHOD_PERFORMANCE: u64 = 1;
-/// Method to choose which offer is the best to execute a task.
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BestMethod {
-    /// Choose the cheapest peer's offer.
-    Cost,
-    /// Choose the offer with the most performant worker.
-    Performance,
-}
-
-impl Default for BestMethod {
-    fn default() -> Self {
-        BestMethod::Cost
-    }
-}
-
-impl Into<u64> for BestMethod {
-    fn into(self) -> u64 {
-        match self {
-            BestMethod::Cost => BEST_METHOD_COST,
-            BestMethod::Performance => BEST_METHOD_PERFORMANCE,
-        }
-    }
-}
-
-impl std::convert::TryFrom<u64> for BestMethod {
-    type Error = UnknownValue<u64>;
-
-    fn try_from(v: u64) -> Result<BestMethod, Self::Error> {
-        match v {
-            BEST_METHOD_COST => Ok(BestMethod::Cost),
-            BEST_METHOD_PERFORMANCE => Ok(BestMethod::Performance),
-            _ => Err(UnknownValue(v)),
-        }
-    }
-}
-
-impl fmt::Display for BestMethod {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self)
-    }
-}
-
-const PROGRAM_KIND_WASM: u64 = 0;
-/// Kind of program to execute.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Copy)]
-pub enum ProgramKind {
-    /// Webassembly program
-    Wasm,
-}
-
-impl Into<u64> for ProgramKind {
-    fn into(self) -> u64 {
-        match self {
-            ProgramKind::Wasm => PROGRAM_KIND_WASM,
-        }
-    }
-}
-
-impl std::convert::TryFrom<u64> for ProgramKind {
-    type Error = UnknownValue<u64>;
-
-    fn try_from(v: u64) -> Result<ProgramKind, Self::Error> {
-        match v {
-            PROGRAM_KIND_WASM => Ok(ProgramKind::Wasm),
-            _ => Err(UnknownValue(v)),
-        }
-    }
-}
-
-impl fmt::Display for ProgramKind {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self)
-    }
-}
-
 pub const MIN_TIMEOUT: u64 = 1;
 pub const MIN_CPU_COUNT: u64 = 1;
 pub const MIN_REDUNDANCY: u64 = 1;
@@ -234,7 +159,7 @@ pub const DEFAULT_PURITY: bool = false;
 #[derive(Debug, Clone, PartialEq)]
 pub struct Job {
     pub program_kind: ProgramKind,
-    pub addresses: Vec<String>,
+    pub program_addresses: Vec<String>,
     pub program_hash: Multihash,
     pub arguments: Vec<Vec<u8>>,
 
@@ -266,13 +191,13 @@ impl fmt::Display for Job {
         } else {
             writeln!(f, "Unknown")?;
         }
-        writeln!(f, "Program kind: {}", self.program_kind)?;
+        writeln!(f, "Program kind: {:?}", self.program_kind)?;
         writeln!(
             f,
             "Program hash: {}",
             encode_multibase_multihash_string(&self.program_hash)
         )?;
-        writeln!(f, "Addresses: {:?}", self.addresses)?;
+        writeln!(f, "Addresses: {:?}", self.program_addresses)?;
         writeln!(f, "Arguments: [")?;
         for (i, a) in self.arguments.iter().enumerate() {
             write!(f, "  ")?;
@@ -288,7 +213,7 @@ impl fmt::Display for Job {
         writeln!(f, "Timeout: {}s", self.timeout)?;
         writeln!(f, "Max failures: {}", self.max_failures)?;
         writeln!(f)?;
-        writeln!(f, "Best method: {}", self.best_method)?;
+        writeln!(f, "Best method: {:?}", self.best_method)?;
         writeln!(f, "Max worker price: {} money/s", self.max_worker_price)?;
         writeln!(f, "Min CPU count: {}", self.min_cpu_count)?;
         writeln!(f, "Min memory: {} kilobytes", self.min_memory)?;
@@ -327,14 +252,14 @@ impl fmt::Display for Job {
 impl Job {
     pub fn new(
         program_kind: ProgramKind,
-        addresses: Vec<String>,
+        program_addresses: Vec<String>,
         program_hash: Multihash,
         arguments: Vec<Vec<u8>>,
         sender: Address,
     ) -> Self {
         Job {
             program_kind,
-            addresses,
+            program_addresses,
             program_hash,
             arguments,
             timeout: MIN_TIMEOUT,
@@ -359,8 +284,8 @@ impl Job {
     pub fn set_program_kind(&mut self, new: ProgramKind) {
         self.program_kind = new;
     }
-    pub fn addresses(&self) -> &Vec<String> {
-        &self.addresses
+    pub fn program_addresses(&self) -> &[String] {
+        &self.program_addresses
     }
     pub fn program_hash(&self) -> &Multihash {
         &self.program_hash
@@ -463,9 +388,9 @@ impl Job {
     // TODO: self-described error?
     /// Is job correct and complete to be set as ready on the blockchain?
     /// All values must be defined and above their minimum value
-    /// and `addresses` and `arguments` must be non-empty.
+    /// and `program_addresses` and `arguments` must be non-empty.
     pub fn is_complete(&self) -> bool {
-        !self.addresses.is_empty()
+        !self.program_addresses.is_empty()
             && !self.arguments.is_empty()
             && self.timeout >= MIN_TIMEOUT
             && self.max_worker_price >= MIN_WORKER_PRICE
@@ -489,6 +414,22 @@ impl Job {
             * self.arguments.len() as u64
             * (self.timeout * self.max_worker_price
                 + self.max_network_usage * self.max_network_price)
+    }
+
+    /// This function creates a protobuf message serializing the data which couldn't be
+    /// stored directly in the contract.
+    pub fn other_data(&self) -> OtherData {
+        // TODO: clone or... ?
+        OtherData {
+            program_kind: self.program_kind().into(),
+            program_addresses: Vec::from(self.program_addresses()),
+            program_hash: self.program_hash().to_vec(),
+            best_method: self.best_method().into(),
+            min_cpu_count: self.min_cpu_count(),
+            min_memory: self.min_memory(),
+            min_network_speed: self.min_network_speed(),
+            is_program_pure: self.is_program_pure(),
+        }
     }
 }
 
