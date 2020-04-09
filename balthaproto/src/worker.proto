@@ -9,10 +9,32 @@ service NodeTypeService {
   rpc GetNodeType (NodeTypeRequest) returns (NodeTypeAnswer);
 }
 
+// ------------------------------------
+// Data types
+
 enum NodeType {
  MANAGER = 0;
  WORKER = 1;
 }
+
+enum ProgramKind {
+ WASM_0_1_0 = 0;
+ DOCKER_0_1_0 = 10;
+}
+
+enum TaskErrorKind {
+ SPECIFICATION = 0;
+ TIMEDOUT = 1;
+ DOWNLOAD = 2;
+ RUNTIME = 3;
+ RESULT = 4;
+ ABORTED = 5;
+ UNKNOWN = 6;
+}
+
+// ------------------------------------
+// Messages
+
 message NodeTypeRequest {
  NodeType node_type = 1;
 }
@@ -24,14 +46,15 @@ message NotMine {}
 message Ack {}
 
 message ManagerRequest {
- uint64 cpu_count = 1;
- uint64 memory = 2;
- uint64 network_speed = 3;
- uint64 worker_price = 4;
- uint64 network_price = 5;
+ uint64 worker_price = 1;
+ uint64 network_price = 2;
+ uint64 cpu_count = 3;
+ uint64 memory = 4;
+ uint64 network_speed = 5;
+ repeated ProgramKind supported_program_kinds = 6;
 }
 message ManagerAnswer {
- bool accepted = 1;
+ bool answer = 1;
 }
 
 message ManagerBye {}
@@ -42,22 +65,17 @@ message ManagerPong {}
 message TasksExecute {
  message TaskExecute {
   bytes task_id = 1;
-  repeated bytes job_addr = 2;
-  /*repeated */bytes argument/*s*/ = 3;
-  uint64 timeout = 4;
-  uint64 max_network_usage = 5;
+  repeated bytes program_addresses = 2;
+  bytes program_hash = 3;
+  ProgramKind program_kind = 4;
+  bytes argument = 5;
+  uint64 timeout = 6;
+  uint64 max_network_usage = 7;
  }
 
  repeated TaskExecute tasks = 1;
 }
 
-enum TaskErrorKind {
- TIMEDOUT = 0;
- DOWNLOAD = 1;
- RUNNING = 2;
- ABORTED = 3;
- UNKNOWN = 4;
-}
 message TasksPing {
  repeated bytes task_ids = 1;
 }
@@ -74,7 +92,7 @@ message TaskStatus {
  bytes task_id = 1;
  oneof status_data {
   Null pending = 3;
-  int64 start_time = 4; // Started
+  uint64 start_time = 4; // Started
   TaskErrorKind error = 5;
   bytes result = 6; // Completed
   Null unknown = 7;

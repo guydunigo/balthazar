@@ -5,7 +5,7 @@ use std::fmt;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TaskStatus {
     Pending,
-    Started(i64),
+    Started(u64),
     Error(TaskErrorKind),
     Completed(Vec<u8>),
     Unknown,
@@ -17,12 +17,18 @@ impl fmt::Display for TaskStatus {
             TaskStatus::Pending => write!(f, "Pending"),
             // TODO: parse to real date
             TaskStatus::Started(timestamp) => write!(f, "Started on timestamp {}", timestamp),
+            TaskStatus::Error(TaskErrorKind::Specification) => {
+                write!(f, "Error: Task has a incorrect specifications.")
+            }
             TaskStatus::Error(TaskErrorKind::Timedout) => write!(f, "Error: Task has timed out."),
             TaskStatus::Error(TaskErrorKind::Download) => {
                 write!(f, "Error: Couln't download program.")
             }
-            TaskStatus::Error(TaskErrorKind::Running) => write!(f, "Error during program runtime."),
-            TaskStatus::Error(TaskErrorKind::Aborted) => write!(f, "Program was aborted."),
+            TaskStatus::Error(TaskErrorKind::Runtime) => write!(f, "Error during program runtime."),
+            TaskStatus::Error(TaskErrorKind::Result) => {
+                write!(f, "Error: The result provided is incorrect.")
+            }
+            TaskStatus::Error(TaskErrorKind::Aborted) => write!(f, "Error: Program was aborted."),
             TaskStatus::Error(TaskErrorKind::Unknown) => {
                 write!(f, "An error occured but no description was provided.")
             }
