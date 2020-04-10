@@ -1,0 +1,106 @@
+syntax = "proto3";
+
+import "worker.proto";
+
+package manager;
+
+// ------------------------------------
+// Messages
+
+message ManTaskStatus {
+ bytes task_id = 1;
+ bytes worker = 2;
+ worker.TaskStatus status = 3;
+}
+
+message CallForOffers {
+ bytes task_id = 1;
+}
+message Offer {
+ bytes task_id = 1;
+ bytes workers_manager = 2;
+ bytes worker = 3;
+ bytes payment_address = 4;
+ uint64 worker_price = 5;
+ uint64 network_price = 6;
+ uint64 network_speed = 7;
+ uint64 cpu_count = 8;
+ uint64 memory = 9;
+
+ bytes caller = 10;
+ CallForOffers call = 11;
+}
+
+message PingManagerForTask {
+ bytes task_id = 1;
+ bytes worker = 2;
+ bytes workers_manager = 3;
+}
+message PongManagerForTask {
+ bytes pinger = 1;
+ PingManagerForTask ping_message = 2;
+}
+
+message Proposal {
+ bytes task_id = 1;
+ bytes payment_address = 2;
+ oneof proposal {
+  ProposeNewTask new_task = 3;
+  ProposeFailure failure = 4;
+  ProposeScheduling scheduling = 5;
+  ProposeCheckedRunning checked = 6;
+  ProposeCompleted completed = 7;
+ }
+}
+message ProposeNewTask {}
+message ProposeFailure {
+ uint64 new_nb_failures = 1;
+ oneof kind {
+  ProposeFailureManagerUnavailable man_unavailable = 2;
+  ProposeFailureWorker worker = 3;
+  ProposeFailureIncorrectSpecification specs = 4;
+  ProposeFailureIncorrectResults results = 5;
+ }
+}
+message ProposeFailureManagerUnavailable {
+ // bytes worker = 1;
+ PingManagerForTask unanswered_ping = 2;
+}
+message ProposeFailureWorker {
+ // bytes worker = 1;
+ bytes original_message_sender = 1;
+ ManTaskStatus original_message = 2;
+}
+message ProposeFailureIncorrectSpecification {}
+message ProposeFailureIncorrectResults {
+ repeated bytes completion_signals_senders = 1;
+ repeated ManTaskStatus completion_signals = 2;
+}
+message ProposeScheduling {
+ repeated bytes all_offers_senders = 1;
+ repeated Offer all_offers = 2;
+ repeated Offer selected_offers = 3;
+}
+message ProposeCheckedRunning {
+ bytes worker = 1;
+ bytes manager = 2;
+ PongManagerForTask pong = 3;
+ // TODO: link to PongManagerForTask ?
+}
+message ProposeCompleted {
+ repeated bytes completion_signals_senders = 1;
+ repeated ManTaskStatus completion_signals = 2;
+ ManTaskStatus selected_result = 3;
+}
+
+message ManagerMsgWrapper {
+ // bytes sender = 1;
+ oneof msg {
+  ManTaskStatus status = 2;
+  CallForOffers call_for_offers = 3;
+  Offer offer = 4;
+  PingManagerForTask ping_manager_for_task = 5;
+  PongManagerForTask pong_manager_for_task = 6;
+  Proposal proposal = 7;
+ }
+}
