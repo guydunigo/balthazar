@@ -85,7 +85,6 @@ message ProposeCheckedRunning {
  bytes worker = 1;
  bytes manager = 2;
  PongManagerForTask pong = 3;
- // TODO: link to PongManagerForTask ?
 }
 message ProposeCompleted {
  repeated bytes completion_signals_senders = 1;

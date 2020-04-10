@@ -105,7 +105,9 @@ pub struct ManagerData {
 pub struct WorkerData {
     pub config: WorkerConfig,
     pub specs: WorkerSpecs,
-    pub manager: Option<PeerRc>,
+    /// If this worker is in a worker-manager relationship, this stores a link to the manager and
+    /// the last time we've heard of it.
+    pub manager: Option<(PeerRc, Instant)>,
 }
 
 pub type NodeTypeData = NodeTypeContainer<ManagerData, WorkerData>;
@@ -204,7 +206,7 @@ pub fn break_worker_manager_relationship(
 ) -> Poll<NetworkBehaviourAction<HandlerIn<QueryId>, EventOut>> {
     match node_type_data {
         NodeTypeData::Worker(data) => {
-            if let Some(man) = &data.manager {
+            if let Some((man, _)) = &data.manager {
                 if peer_rc.read().unwrap().peer_id == man.read().unwrap().peer_id {
                     data.manager = None;
                     Poll::Ready(NetworkBehaviourAction::GenerateEvent(EventOut::ManagerBye(
@@ -391,13 +393,13 @@ pub fn manager_answer(
                     Some(&peer_id),
                     &peer_rc.read().unwrap().addrs_as_vec()[..],
                 ) {
-                    data.manager = Some(peer_rc.clone());
+                    data.manager = Some((peer_rc.clone(), Instant::now()));
                     (Some(EventOut::ManagerNew(peer_id)), false)
                 } else {
                     (Some(EventOut::ManagerUnauthorized(peer_id)), true)
                 }
             }
-            (accepted, Some(manager), Some(NodeType::Manager)) => {
+            (accepted, Some((manager, _)), Some(NodeType::Manager)) => {
                 if manager.read().unwrap().peer_id == peer_rc.read().unwrap().peer_id {
                     let user_data = behaviour.next_query_unique_id();
                     behaviour

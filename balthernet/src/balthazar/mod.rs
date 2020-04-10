@@ -35,6 +35,7 @@ use std::{
     pin::Pin,
     sync::{Arc, RwLock},
     task::{Context, Poll},
+    time::{Duration, Instant},
 };
 
 mod events;
@@ -119,7 +120,7 @@ impl BalthBehaviour {
             NodeTypeData::Manager(data) => {
                 data.workers.get(&peer_rc.read().unwrap().peer_id).is_some()
             }
-            NodeTypeData::Worker(data) => data.manager.as_ref().map_or(false, |m| {
+            NodeTypeData::Worker(data) => data.manager.as_ref().map_or(false, |(m, _)| {
                 m.read().unwrap().peer_id == peer_rc.read().unwrap().peer_id
             }),
         }
@@ -328,7 +329,7 @@ impl NetworkBehaviour for BalthBehaviour {
                     request_id,
                 }) => {
                     if let NodeTypeData::Worker(WorkerData {
-                        manager: Some(ref manager),
+                        manager: Some((ref manager, _)),
                         ..
                     }) = self.node_type_data
                     {
@@ -351,7 +352,7 @@ impl NetworkBehaviour for BalthBehaviour {
                 }
                 Some(EventIn::TaskStatus(task_id, status)) => {
                     if let NodeTypeData::Worker(WorkerData {
-                        manager: Some(ref manager),
+                        manager: Some((ref manager, _)),
                         ..
                     }) = self.node_type_data
                     {
