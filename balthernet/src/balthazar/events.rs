@@ -38,12 +38,24 @@ pub enum EventOut {
     Handler(PeerId, HandlerOut<QueryId>),
     /// A new worker is now managed by us.
     WorkerNew(PeerId),
+    /// When in a relationship, on of our workers answered a ping request, so the
+    /// relationship still holds.
+    WorkerPong(PeerId),
+    /// One of our workers hasn't answered a ping request in the set time out.
+    // TODO: just return Bye to abstract the networking to the app ?
+    WorkerTimedOut(PeerId),
     /// When a worker stops being managed by us.
     WorkerBye(PeerId),
     /// A manager has accepted acting as our manager, so we will receive orders from it now on.
     ManagerNew(PeerId),
     /// The manager we requested refused.
     ManagerRefused(PeerId),
+    /// When in a relationship, our manager answered a ping request, so the
+    /// relationship still holds.
+    ManagerPong(PeerId),
+    /// Our manager hasn't answered a ping request in the set time out.
+    // TODO: just return Bye to abstract the networking to the app ?
+    ManagerTimedOut(PeerId),
     /// When the manager stops managing us.
     ManagerBye(PeerId),
     /// A manager accepted managing us, but it isn't authorized.
@@ -98,16 +110,17 @@ pub enum EventOut {
 #[derive(Debug)]
 pub struct ManagerData {
     pub config: ManagerConfig,
-    pub workers: HashMap<PeerId, PeerRc>,
+    pub workers: HashMap<PeerId, (PeerRc, Instant, Instant)>,
 }
 
 #[derive(Debug)]
 pub struct WorkerData {
     pub config: WorkerConfig,
     pub specs: WorkerSpecs,
-    /// If this worker is in a worker-manager relationship, this stores a link to the manager and
-    /// the last time we've heard of it.
-    pub manager: Option<(PeerRc, Instant)>,
+    /// If this worker is in a worker-manager relationship, this stores a link to the manager, the
+    /// instant of the last [`ManagerPing`](`worker::ManagerPing`) sent and
+    /// the last time we've received a [`ManagerPong`](`worker::ManagerPong`) from it.
+    pub manager: Option<(PeerRc, Instant, Instant)>,
 }
 
 pub type NodeTypeData = NodeTypeContainer<ManagerData, WorkerData>;
@@ -198,37 +211,65 @@ where
     }
 }
 
-/// If the two nodes are in a relationship, breaks it, otherwise does nothing.
+/// If the two nodes are in a relationship, breaks it and returns the kind of node we
+/// are, otherwise does nothing and returns [`None`].
 pub fn break_worker_manager_relationship(
     node_type_data: &mut NodeTypeData,
-    peer_rc: PeerRc,
-    peer_id: PeerId,
-) -> Poll<NetworkBehaviourAction<HandlerIn<QueryId>, EventOut>> {
+    peer_id: &PeerId,
+) -> Option<NodeType> {
     match node_type_data {
-        NodeTypeData::Worker(data) => {
-            if let Some((man, _)) = &data.manager {
-                if peer_rc.read().unwrap().peer_id == man.read().unwrap().peer_id {
-                    data.manager = None;
-                    Poll::Ready(NetworkBehaviourAction::GenerateEvent(EventOut::ManagerBye(
-                        peer_id,
-                    )))
+        NodeTypeData::Worker(WorkerData { manager, .. }) => {
+            if let Some((man, _, _)) = manager {
+                if *peer_id == man.read().unwrap().peer_id {
+                    *manager = None;
+                    Some(NodeType::Worker)
                 } else {
-                    Poll::Pending
+                    None
                 }
             } else {
-                Poll::Pending
+                None
             }
         }
-        NodeTypeData::Manager(data) => {
-            if data.workers.remove(&peer_id).is_some() {
-                Poll::Ready(NetworkBehaviourAction::GenerateEvent(EventOut::WorkerBye(
-                    peer_id,
-                )))
+        NodeTypeData::Manager(ManagerData { workers, .. }) => {
+            if workers.remove(peer_id).is_some() {
+                Some(NodeType::Manager)
             } else {
-                Poll::Pending
+                None
             }
         }
     }
+}
+
+/// If [`BalthBehaviour::manager_timeout`] has elapsed after last [`ManagerPing`](`proto::worker::ManagerPing`), then we consider the peer as offline,
+/// return [`TimedOut`](`CheckManagerWorkerRelationshipAction::TimedOut`) and the
+/// worker/manager relationship should be broken.
+/// If the last received [`ManagerPong`](`proto::worker::ManagerPong`) message was before [`BalthBehaviour::manager_check_interval`],
+/// we reset the [`last_ping`] to now and return
+/// [`Ping`](`CheckManagerWorkerRelationshipAction::Ping`) and a new [`ManagerPing`](`proto::worker::ManagerPing`) should be sent.
+/// Otherwise, we return [`Continuing`](`CheckManagerWorkerRelationshipAction::Continuing`)
+/// and no further action should be done.
+pub fn check_manager_worker_relationship(
+    last_ping: &mut Instant,
+    last_pong: &Instant,
+    manager_check_interval: Duration,
+    manager_timeout: Duration,
+) -> CheckManagerWorkerRelationshipAction {
+    if (Instant::now() - *last_ping) >= manager_timeout {
+        CheckManagerWorkerRelationshipAction::TimedOut
+    } else if (*last_pong - *last_ping) >= Duration::default() // 0, we received an answer to the last pong
+                && Instant::now() - *last_pong > manager_check_interval
+    {
+        *last_ping = Instant::now();
+        CheckManagerWorkerRelationshipAction::Ping
+    } else {
+        CheckManagerWorkerRelationshipAction::Continuing
+    }
+}
+
+pub enum CheckManagerWorkerRelationshipAction {
+    TimedOut,
+    Ping,
+    Continuing,
 }
 
 /// A node has advertised its node type via [`worker::NodeTypeRequest`].
@@ -309,14 +350,20 @@ pub fn node_type_answer(
     }
 }
 
-// TODO: function alias ?
 /// We received a [`worker::NotMine`].
 pub fn not_mine(
     node_type_data: &mut NodeTypeData,
-    peer_rc: PeerRc,
     peer_id: PeerId,
 ) -> Poll<NetworkBehaviourAction<HandlerIn<QueryId>, EventOut>> {
-    break_worker_manager_relationship(node_type_data, peer_rc, peer_id)
+    match break_worker_manager_relationship(node_type_data, &peer_id) {
+        Some(NodeType::Worker) => Poll::Ready(NetworkBehaviourAction::GenerateEvent(
+            EventOut::ManagerBye(peer_id),
+        )),
+        Some(NodeType::Manager) => Poll::Ready(NetworkBehaviourAction::GenerateEvent(
+            EventOut::WorkerBye(peer_id),
+        )),
+        None => Poll::Pending,
+    }
 }
 
 /// We received a [`worker::ManagerRequest`].
@@ -335,7 +382,10 @@ pub fn manager_request(
         {
             // TODO: what should be done if some specs are already known ?
             *specs_opt = Some(worker_specs);
-            data.workers.insert(peer_id.clone(), peer_rc.clone());
+            data.workers.insert(
+                peer_id.clone(),
+                (peer_rc.clone(), Instant::now(), Instant::now()),
+            );
             behaviour.inject_generate_event(EventOut::WorkerNew(peer_id));
             HandlerIn::ManagerAnswer {
                 accepted: true,
@@ -393,17 +443,19 @@ pub fn manager_answer(
                     Some(&peer_id),
                     &peer_rc.read().unwrap().addrs_as_vec()[..],
                 ) {
-                    data.manager = Some((peer_rc.clone(), Instant::now()));
+                    data.manager = Some((peer_rc.clone(), Instant::now(), Instant::now()));
                     (Some(EventOut::ManagerNew(peer_id)), false)
                 } else {
                     (Some(EventOut::ManagerUnauthorized(peer_id)), true)
                 }
             }
-            (accepted, Some((manager, _)), Some(NodeType::Manager)) => {
+            (accepted, Some((manager, _, _)), Some(NodeType::Manager)) => {
                 if manager.read().unwrap().peer_id == peer_rc.read().unwrap().peer_id {
                     let user_data = behaviour.next_query_unique_id();
-                    behaviour
-                        .inject_send_to_peer_event(peer_id, HandlerIn::ManagerPing { user_data });
+                    behaviour.inject_send_to_peer_or_dial_event(
+                        peer_id,
+                        HandlerIn::ManagerPing { user_data },
+                    );
                     (None, false)
                 } else {
                     (Some(EventOut::ManagerAlreadyHasOne(peer_id)), accepted)
@@ -461,13 +513,16 @@ pub fn manager_answer(
 /// We received a [`worker::ManagerBye`].
 pub fn manager_bye(
     behaviour: &mut BalthBehaviour,
-    peer_rc: PeerRc,
     peer_id: PeerId,
     request_id: RequestId,
 ) -> HandlerIn<QueryId> {
-    let evt = break_worker_manager_relationship(&mut behaviour.node_type_data, peer_rc, peer_id);
-    if let Poll::Ready(evt) = evt {
-        behaviour.inject_behaviour_action(evt);
+    let node_type = break_worker_manager_relationship(&mut behaviour.node_type_data, &peer_id);
+    if let Some(node_type) = node_type {
+        let evt = match node_type {
+            NodeType::Worker => EventOut::ManagerBye(peer_id),
+            NodeType::Manager => EventOut::WorkerBye(peer_id),
+        };
+        behaviour.inject_generate_event(evt);
     }
 
     HandlerIn::Ack { request_id }
@@ -476,6 +531,46 @@ pub fn manager_bye(
 /// We received a [`worker::ManagerPing`].
 pub fn manager_ping(request_id: RequestId) -> HandlerIn<QueryId> {
     HandlerIn::ManagerPong { request_id }
+}
+
+// TODO: use ping as well to reset interval?
+/// We received a [`worker::ManagerPong`].
+pub fn manager_pong(
+    behaviour: &mut BalthBehaviour,
+    peer_id: PeerId,
+    user_data: QueryId,
+) -> Poll<NetworkBehaviourAction<HandlerIn<QueryId>, EventOut>> {
+    let evt = match &mut behaviour.node_type_data {
+        // TODO: two gets?
+        NodeTypeData::Manager(ManagerData { workers, .. })
+            if workers
+                .get(&peer_id)
+                .map(|(peer_rc, last_ping, list_pong)| {
+                    if peer_rc.read().unwrap().peer_id == peer_id {
+                        Some((peer_rc, last_ping, list_pong))
+                    } else {
+                        None
+                    }
+                })
+                .flatten()
+                .is_some() =>
+        {
+            let (_, _, ref mut last_pong) = workers.get_mut(&peer_id).expect("Checked earlier.");
+            *last_pong = Instant::now();
+
+            EventOut::WorkerPong(peer_id)
+        }
+        NodeTypeData::Worker(WorkerData {
+            manager: Some((manager_rc, _, last_pong)),
+            ..
+        }) if manager_rc.read().unwrap().peer_id == peer_id => {
+            *last_pong = Instant::now();
+            EventOut::ManagerPong(peer_id)
+        }
+        _ => EventOut::NotMine(peer_id, HandlerOut::ManagerPong { user_data }),
+    };
+
+    Poll::Ready(NetworkBehaviourAction::GenerateEvent(evt))
 }
 
 /// We received a [`worker::TasksExecute`].

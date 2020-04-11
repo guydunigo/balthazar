@@ -214,7 +214,7 @@ where
                 inject_new_request_event(&mut self.substreams, user_data, msg)
             }
             EventIn::ManagerPong { request_id } => {
-                let msg = worker::ManagerPing {}.into();
+                let msg = worker::ManagerPong {}.into();
                 inject_answer_event_to_peer_request(&mut self.substreams, request_id, msg)
             }
             EventIn::TasksExecute { tasks, user_data } => {
@@ -444,6 +444,9 @@ pub enum EventOut<TUserData> {
     ManagerPing {
         request_id: RequestId,
     },
+    ManagerPong {
+        user_data: TUserData,
+    },
     TasksExecute {
         tasks: Vec<worker::TaskExecute>,
         request_id: RequestId,
@@ -609,7 +612,7 @@ fn process_answer<TUserData>(
                 Some(EventOut::ManagerAnswer { accepted, user_data })
             }
             // TODO: forward it ? so networkBehaviour can save last time...
-            WorkerMsg::ManagerPong(worker::ManagerPong { }) => None,
+            WorkerMsg::ManagerPong(worker::ManagerPong {}) => Some(EventOut::ManagerPong { user_data }),
             WorkerMsg::TasksPong(worker::TasksPong { mut statuses }) => {
                 let statuses: Vec<_> = statuses.drain(..)
                     .filter_map(|s| if let Ok(task_id) = TaskId::from_bytes(s.task_id) { Some((task_id,s.status_data.into())) } else { None }).collect();

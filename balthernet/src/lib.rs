@@ -57,6 +57,8 @@ pub fn get_swarm<'a>(
                 panic!("No worker specs were provided, but the NetConfig provided contains worker config info.");
             }
         }),
+        *config.manager_check_interval(),
+        *config.manager_timeout(),
         keypair.public(),
     );
 

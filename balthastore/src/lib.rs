@@ -2,8 +2,8 @@
 //! interchangeably and transparently.
 //!
 //!
-//! See for instance the [`Storage`] trait used to create a uniform way to manipulate
-//! different storage mechanisms.
+//! See for instance the [`FetchStorage`] and [`StoreStorage`] traits used to create
+//! a uniform way to manipulate different storage mechanisms.
 //!
 //!
 //! This crate provides a wrapper structure to use the different Storages in a transparent way, see
@@ -45,7 +45,7 @@ pub trait FetchStorage: Sync {
     /// Returns the size in bytes of the file at given address.
     fn get_size(&self, addr: &[u8]) -> BoxFuture<Result<u64, Box<dyn Error + Send>>>;
 
-    /// Same as [`Storage::fetch_stream`] but to fetch all the data as once.
+    /// Same as [`FetchStorage::fetch_stream`] but to fetch all the data as once.
     /// To prevent the memory being filled by a oversized file,
     /// when more than `max_bytes` bytes have been downloaded, the connection should
     /// be stopped.
@@ -92,7 +92,7 @@ pub trait StoreStorage: FetchStorage {
         &self,
         data_stream: GenericReader,
     ) -> BoxFuture<Result<Vec<u8>, Box<dyn Error + Send>>>;
-    /// Same as [`Storage::store_stream`] but to provide all the data as once.
+    /// Same as [`StoreStorage::store_stream`] but to provide all the data as once.
     fn store(&self, data: &[u8]) -> BoxFuture<Result<Vec<u8>, Box<dyn Error + Send>>> {
         // TODO: ugly? needed to avoid static lifetime on data...
         // let vec = Vec::from(data);

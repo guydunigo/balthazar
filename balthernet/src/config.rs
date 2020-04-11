@@ -1,5 +1,6 @@
 use libp2p::{core::multiaddr::Protocol, Multiaddr, PeerId};
 use proto::{NodeType, NodeTypeContainer};
+use std::time::Duration;
 
 pub const DEFAULT_LISTENING_ADDRESS: &str = "/ip4/0.0.0.0/tcp/5003";
 
@@ -76,6 +77,17 @@ pub struct NetConfig {
     // TODO: good idea to have duplicate node type ?
     /// Configuration relative to node type.
     node_type_configuration: NodeTypeContainer<ManagerConfig, WorkerConfig>,
+    /// Duration after the last [`ManagerPong`](`proto::worker::ManagerPong`) to send the next [`ManagerPing`](`proto::worker::ManagerPing`) to our manager/worker if we are in a
+    /// relationship.
+    /// This helps check the manager/worker is still up and running and able to
+    /// manage/be managed by us.
+    /// The interval is reset after each successful [`ManagerPong`](`proto::worker::ManagerPong`) message
+    /// received.
+    manager_check_interval: Duration,
+    /// Maximum interval to wait after a [`ManagerPing`](`proto::worker::ManagerPong`) to receive
+    /// a [`ManagerPong`](`proto::worker::ManagerPong`) from the worker's manager (if we are in a
+    /// relationship).
+    manager_timeout: Duration,
 }
 
 impl Default for NetConfig {
@@ -88,6 +100,8 @@ impl Default for NetConfig {
             ),
             bootstrap_peers: Vec::new(),
             node_type_configuration: NodeType::default().into(),
+            manager_check_interval: Duration::from_secs(15),
+            manager_timeout: Duration::from_secs(10),
         }
     }
 }
@@ -107,7 +121,7 @@ impl NetConfig {
         self.listen_addr = new;
     }
 
-    pub fn bootstrap_peers(&self) -> &Vec<Multiaddr> {
+    pub fn bootstrap_peers(&self) -> &[Multiaddr] {
         &self.bootstrap_peers
     }
     pub fn bootstrap_peers_mut(&mut self) -> &mut Vec<Multiaddr> {
@@ -121,6 +135,20 @@ impl NetConfig {
         &mut self,
     ) -> &mut NodeTypeContainer<ManagerConfig, WorkerConfig> {
         &mut self.node_type_configuration
+    }
+
+    pub fn manager_check_interval(&self) -> &Duration {
+        &self.manager_check_interval
+    }
+    pub fn set_manager_check_interval(&mut self, new: Duration) {
+        self.manager_check_interval = new;
+    }
+
+    pub fn manager_timeout(&self) -> &Duration {
+        &self.manager_timeout
+    }
+    pub fn set_manager_timeout(&mut self, new: Duration) {
+        self.manager_timeout = new;
     }
 }
 

@@ -18,6 +18,7 @@ use proto::NodeTypeContainer;
 use std::{
     collections::VecDeque,
     task::{Context, Poll},
+    time::Duration,
 };
 
 use super::{
@@ -44,11 +45,14 @@ impl BalthBehavioursWrapper {
     /// to communicate with it from the exterior of the Swarm.
     pub fn new(
         node_type_conf: NodeTypeContainer<ManagerConfig, (WorkerConfig, WorkerSpecs)>,
+        manager_check_interval: Duration,
+        manager_timeout: Duration,
         pub_key: PublicKey,
     ) -> (Self, Sender<balthazar::EventIn>) {
         let local_peer_id = pub_key.into_peer_id();
         let store = MemoryStore::new(local_peer_id.clone());
-        let (balthbehaviour, tx) = BalthBehaviour::new(node_type_conf);
+        let (balthbehaviour, tx) =
+            BalthBehaviour::new(node_type_conf, manager_check_interval, manager_timeout);
 
         (
             BalthBehavioursWrapper {

@@ -79,13 +79,20 @@ pub struct BalthBehaviour {
     peers: HashMap<PeerId, PeerRc>,
     events: VecDeque<InternalEvent<QueryId>>,
     next_query_unique_id: QueryId,
+    /// See [`NetConfig::manager_check_interval`](`super::NetConfig::manager_check_interval`) for more information.
+    manager_check_interval: Duration,
+    /// See [`NetConfig::manager_timeout`](`super::NetConfig::manager_timeout`) for more information.
+    manager_timeout: Duration,
 }
 
 impl BalthBehaviour {
     /// Creates a new [`BalthBehaviour`] and returns a [`Sender`] channel to communicate with it from
     /// the exterior of the Swarm.
     pub fn new(
+        // TODO: refererences?
         node_type_conf: NodeTypeContainer<ManagerConfig, (WorkerConfig, WorkerSpecs)>,
+        manager_check_interval: Duration,
+        manager_timeout: Duration,
     ) -> (Self, Sender<EventIn>) {
         let (tx, inbound_rx) = channel(CHANNEL_SIZE);
 
@@ -108,6 +115,8 @@ impl BalthBehaviour {
                 peers: HashMap::new(),
                 events: VecDeque::new(),
                 next_query_unique_id: 0,
+                manager_check_interval,
+                manager_timeout,
             },
             tx,
         )
@@ -120,7 +129,7 @@ impl BalthBehaviour {
             NodeTypeData::Manager(data) => {
                 data.workers.get(&peer_rc.read().unwrap().peer_id).is_some()
             }
-            NodeTypeData::Worker(data) => data.manager.as_ref().map_or(false, |(m, _)| {
+            NodeTypeData::Worker(data) => data.manager.as_ref().map_or(false, |(m, _, _)| {
                 m.read().unwrap().peer_id == peer_rc.read().unwrap().peer_id
             }),
         }
@@ -150,15 +159,18 @@ impl BalthBehaviour {
             ));
     }
 
-    fn inject_send_to_peer_event(&mut self, peer_id: PeerId, event: HandlerIn<QueryId>) {
+    fn inject_network_behaviour_action(
+        &mut self,
+        evt: NetworkBehaviourAction<HandlerIn<QueryId>, EventOut>,
+    ) {
         self.events
-            .push_front(InternalEvent::NetworkBehaviourAction(
-                NetworkBehaviourAction::NotifyHandler {
-                    handler: NotifyHandler::Any,
-                    peer_id,
-                    event,
-                },
-            ));
+            .push_front(InternalEvent::NetworkBehaviourAction(evt));
+    }
+
+    /// See [`send_to_peer_or_dial`] for information about internal functionning.
+    fn inject_send_to_peer_or_dial_event(&mut self, peer_id: PeerId, event: HandlerIn<QueryId>) {
+        let action = self.send_to_peer_or_dial(peer_id, event);
+        self.inject_network_behaviour_action(action);
     }
 
     fn inject_behaviour_action(
@@ -176,26 +188,28 @@ impl BalthBehaviour {
             .clone()
     }
 
-    fn send_message_or_dial(
+    /// If the peer is connected, the message is pushed to a handler right away,
+    /// otherwise it will be stored on hold and a dialing request will be made.
+    fn send_to_peer_or_dial(
         &mut self,
         peer_id: PeerId,
         event: HandlerIn<QueryId>,
-    ) -> Poll<NetworkBehaviourAction<HandlerIn<QueryId>, EventOut>> {
+    ) -> NetworkBehaviourAction<HandlerIn<QueryId>, EventOut> {
         let peer = self.get_peer_or_insert(&peer_id);
         let mut peer = peer.write().unwrap();
 
         if peer.connected {
-            Poll::Ready(NetworkBehaviourAction::NotifyHandler {
+            NetworkBehaviourAction::NotifyHandler {
                 handler: NotifyHandler::Any,
                 peer_id,
                 event,
-            })
+            }
         } else {
             peer.pending_messages.push(event);
-            Poll::Ready(NetworkBehaviourAction::DialPeer {
+            NetworkBehaviourAction::DialPeer {
                 peer_id,
                 condition: DialPeerCondition::Disconnected,
-            })
+            }
         }
     }
 
@@ -292,11 +306,79 @@ impl NetworkBehaviour for BalthBehaviour {
 
     // TODO: break this function into one or several external functions for clearer parsing ?
     // If yes, update the module doc.
+    // TODO: too many PeerId clone and such ?
     fn poll(
         &mut self,
         cx: &mut Context,
         _params: &mut impl PollParameters
 ) -> Poll<NetworkBehaviourAction<<<Self::ProtocolsHandler as IntoProtocolsHandler>::Handler as ProtocolsHandler>::InEvent, Self::OutEvent>>{
+        {
+            use CheckManagerWorkerRelationshipAction::*;
+            let manager_check_interval = self.manager_check_interval;
+            let manager_timeout = self.manager_timeout;
+            let mut states = match &mut self.node_type_data {
+                NodeTypeData::Manager(ManagerData { workers, .. }) => workers
+                    .iter_mut()
+                    .filter_map(|(peer_id, (_, last_ping, last_pong))| {
+                        match check_manager_worker_relationship(
+                            last_ping,
+                            last_pong,
+                            manager_check_interval,
+                            manager_timeout,
+                        ) {
+                            Continuing => None,
+                            state => Some((peer_id.clone(), state)),
+                        }
+                    })
+                    .collect(),
+                NodeTypeData::Worker(WorkerData {
+                    manager: Some((manager_rc, last_ping, last_pong)),
+                    ..
+                }) => {
+                    let manager_rc = manager_rc.clone();
+                    let peer_id = manager_rc.read().unwrap().peer_id.clone();
+                    let state = check_manager_worker_relationship(
+                        last_ping,
+                        last_pong,
+                        manager_check_interval,
+                        manager_timeout,
+                    );
+                    vec![(peer_id, state)]
+                }
+                // Find a manager here...
+                _ => Vec::new(),
+            };
+            // TODO: cost of adding all here to the list instead of directly returning ?
+            for (peer_id, state) in states.drain(..) {
+                match state {
+                    TimedOut => {
+                        let user_data = self.next_query_unique_id();
+                        self.inject_send_to_peer_or_dial_event(
+                            peer_id.clone(),
+                            HandlerIn::ManagerBye { user_data },
+                        );
+
+                        let evt = match break_worker_manager_relationship(&mut self.node_type_data, &peer_id) {
+                            Some(NodeType::Manager) => EventOut::WorkerTimedOut(peer_id),
+                            Some(NodeType::Worker) => EventOut::ManagerTimedOut(peer_id),
+                            None => unreachable!("We shouldn't be here if we weren't in a worker/manager relationship."),
+                        };
+                        eprintln!("timedout");
+                        self.inject_generate_event(evt);
+                    }
+                    Ping => {
+                        let user_data = self.next_query_unique_id();
+                        eprintln!("ping");
+                        self.inject_send_to_peer_or_dial_event(
+                            peer_id,
+                            HandlerIn::ManagerPing { user_data },
+                        );
+                    }
+                    Continuing => (),
+                }
+            }
+        }
+
         // Reads the inbound channel to handle events:
         while let Poll::Ready(event_opt) = Stream::poll_next(Pin::new(&mut self.inbound_rx), cx) {
             let action = match event_opt {
@@ -315,23 +397,23 @@ impl NetworkBehaviour for BalthBehaviour {
                         tasks,
                         user_data: self.next_query_unique_id(),
                     };
-                    self.send_message_or_dial(peer_id, event)
+                    Poll::Ready(self.send_to_peer_or_dial(peer_id, event))
                 }
                 Some(EventIn::TasksPing(peer_id, task_ids)) => {
                     let event = HandlerIn::TasksPing {
                         task_ids,
                         user_data: self.next_query_unique_id(),
                     };
-                    self.send_message_or_dial(peer_id, event)
+                    Poll::Ready(self.send_to_peer_or_dial(peer_id, event))
                 }
                 Some(EventIn::TasksPong {
                     statuses,
                     request_id,
                 }) => {
                     if let NodeTypeData::Worker(WorkerData {
-                        manager: Some((ref manager, _)),
+                        manager: Some((manager, _, _)),
                         ..
-                    }) = self.node_type_data
+                    }) = &self.node_type_data
                     {
                         Poll::Ready(NetworkBehaviourAction::NotifyHandler {
                             handler: NotifyHandler::Any,
@@ -352,9 +434,9 @@ impl NetworkBehaviour for BalthBehaviour {
                 }
                 Some(EventIn::TaskStatus(task_id, status)) => {
                     if let NodeTypeData::Worker(WorkerData {
-                        manager: Some((ref manager, _)),
+                        manager: Some((manager, _, _)),
                         ..
-                    }) = self.node_type_data
+                    }) = &self.node_type_data
                     {
                         let peer_id = manager.clone().read().unwrap().peer_id.clone();
                         let event = HandlerIn::TaskStatus {
@@ -362,7 +444,7 @@ impl NetworkBehaviour for BalthBehaviour {
                             status,
                             user_data: self.next_query_unique_id(),
                         };
-                        self.send_message_or_dial(peer_id, event)
+                        Poll::Ready(self.send_to_peer_or_dial(peer_id, event))
                     } else {
                         Poll::Ready(NetworkBehaviourAction::GenerateEvent(EventOut::NoManager(
                             EventIn::TaskStatus(task_id, status),
@@ -371,7 +453,7 @@ impl NetworkBehaviour for BalthBehaviour {
                 }
                 Some(EventIn::GetWorkers(oneshot)) => {
                     let w = if let NodeTypeData::Manager(data) = &self.node_type_data {
-                        Some(data.workers.values().cloned().collect())
+                        Some(data.workers.values().map(|(w, _, _)| w).cloned().collect())
                     } else {
                         None
                     };
@@ -386,7 +468,7 @@ impl NetworkBehaviour for BalthBehaviour {
                 None => unimplemented!("Channel was closed"),
             };
 
-            if let Poll::Ready(_) = action {
+            if action.is_ready() {
                 return action;
             }
         }
@@ -411,7 +493,7 @@ impl NetworkBehaviour for BalthBehaviour {
                     }
                 }
                 InternalEvent::SendMessage(peer_id, event) => {
-                    self.send_message_or_dial(peer_id, event)
+                    Poll::Ready(self.send_to_peer_or_dial(peer_id, event))
                 }
                 // TODO: separate function for handling Handlers events
                 // TODO: better match `answers` to `requests`?
@@ -469,7 +551,7 @@ fn handler_event(
         HandlerOut::NodeTypeAnswer { node_type, .. } => {
             node_type_answer(behaviour, peer_rc, peer_id, node_type)
         }
-        HandlerOut::NotMine { .. } => not_mine(&mut behaviour.node_type_data, peer_rc, peer_id),
+        HandlerOut::NotMine { .. } => not_mine(&mut behaviour.node_type_data, peer_id),
         HandlerOut::ManagerRequest {
             worker_specs,
             request_id,
@@ -481,10 +563,9 @@ fn handler_event(
             accepted,
             user_data,
         } => manager_answer(behaviour, peer_rc, peer_id, accepted, user_data),
-        HandlerOut::ManagerBye { request_id } => wrap_answer(
-            peer_id.clone(),
-            manager_bye(behaviour, peer_rc, peer_id, request_id),
-        ),
+        HandlerOut::ManagerBye { request_id } => {
+            wrap_answer(peer_id.clone(), manager_bye(behaviour, peer_id, request_id))
+        }
         HandlerOut::ManagerPing { request_id } => {
             let id_clone = request_id.clone_dangerous();
             needs_relationship_with(
@@ -498,6 +579,7 @@ fn handler_event(
                 },
             )
         }
+        HandlerOut::ManagerPong { user_data } => manager_pong(behaviour, peer_id, user_data),
         HandlerOut::TasksExecute { tasks, request_id } => {
             let id_clone = request_id.clone_dangerous();
             needs_relationship_with(
@@ -586,8 +668,8 @@ fn handler_event(
             Poll::Pending
         } /*
           _ => {
-              behaviour.inject_generate_event(EventOut::Handler(peer_id, event));
-              Poll::Pending
+          behaviour.inject_generate_event(EventOut::Handler(peer_id, event));
+          Poll::Pending
           }
           */
     }
