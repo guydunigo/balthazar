@@ -210,7 +210,7 @@ dependencies = [
  "balthurner",
  "balthwasm",
  "futures 0.3.4",
- "tokio 0.2.16",
+ "tokio 0.2.17",
 ]
 
 [[package]]
@@ -223,7 +223,7 @@ dependencies = [
  "multibase",
  "multihash",
  "parity-multiaddr 0.8.0",
- "tokio 0.2.16",
+ "tokio 0.2.17",
 ]
 
 [[package]]
@@ -248,7 +248,7 @@ dependencies = [
  "http 0.2.1",
  "ipfs-api",
  "parity-multiaddr 0.8.0",
- "tokio 0.2.16",
+ "tokio 0.2.17",
 ]
 
 [[package]]
@@ -259,7 +259,7 @@ dependencies = [
  "balthaproto",
  "futures 0.3.4",
  "libp2p",
- "tokio 0.2.16",
+ "tokio 0.2.17",
  "void",
 ]
 
@@ -480,7 +480,7 @@ checksum = "4785bdd1c96b2a846b2bd7cc02e86b6b3dbf14e7e53446c4f54c92a361040822"
 [[package]]
 name = "clap"
 version = "3.0.0-beta.1"
-source = "git+https://github.com/clap-rs/clap/#89a47640c618731f725781b0f1c52b5cc60ab974"
+source = "git+https://github.com/clap-rs/clap/#1e6d366d58fda2e7f83bc631480ab25ba236fdd7"
 dependencies = [
  "ansi_term",
  "atty",
@@ -497,7 +497,7 @@ dependencies = [
 [[package]]
 name = "clap_derive"
 version = "3.0.0-beta.1"
-source = "git+https://github.com/clap-rs/clap/#89a47640c618731f725781b0f1c52b5cc60ab974"
+source = "git+https://github.com/clap-rs/clap/#1e6d366d58fda2e7f83bc631480ab25ba236fdd7"
 dependencies = [
  "heck",
  "proc-macro-error",
@@ -1261,7 +1261,7 @@ dependencies = [
  "indexmap",
  "log 0.4.8",
  "slab 0.4.2",
- "tokio 0.2.16",
+ "tokio 0.2.17",
  "tokio-util 0.3.1",
 ]
 
@@ -1428,7 +1428,7 @@ dependencies = [
  "net2",
  "pin-project",
  "time",
- "tokio 0.2.16",
+ "tokio 0.2.17",
  "tower-service",
  "want 0.3.0",
 ]
@@ -1468,7 +1468,7 @@ dependencies = [
  "bytes 0.5.4",
  "hyper 0.13.4",
  "native-tls",
- "tokio 0.2.16",
+ "tokio 0.2.17",
  "tokio-tls 0.3.0",
 ]
 
@@ -1567,7 +1567,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_urlencoded",
- "tokio 0.2.16",
+ "tokio 0.2.17",
  "tokio-util 0.2.0",
  "walkdir",
 ]
@@ -1681,7 +1681,7 @@ dependencies = [
  "libp2p-yamux",
  "multihash",
  "parity-multiaddr 0.8.0",
- "parking_lot 0.10.0",
+ "parking_lot 0.10.2",
  "pin-project",
  "smallvec 1.3.0",
  "wasm-timer",
@@ -1706,7 +1706,7 @@ dependencies = [
  "multihash",
  "multistream-select",
  "parity-multiaddr 0.8.0",
- "parking_lot 0.10.0",
+ "parking_lot 0.10.2",
  "pin-project",
  "prost",
  "prost-build",
@@ -1803,7 +1803,7 @@ dependencies = [
  "futures_codec 0.3.4",
  "libp2p-core",
  "log 0.4.8",
- "parking_lot 0.10.0",
+ "parking_lot 0.10.2",
  "unsigned-varint",
 ]
 
@@ -1911,7 +1911,7 @@ checksum = "02f91aea50f6571e0bc6c058dc0e9b270afd41ec28dd94e9e4bf607e78b9ab87"
 dependencies = [
  "futures 0.3.4",
  "libp2p-core",
- "parking_lot 0.10.0",
+ "parking_lot 0.10.2",
  "thiserror",
  "yamux",
 ]
@@ -1946,9 +1946,9 @@ dependencies = [
 
 [[package]]
 name = "lock_api"
-version = "0.3.3"
+version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "79b2de95ecb4691949fea4716ca53cdbcfccb2c612e19644a8bad05edcf9f47b"
+checksum = "c4da24a77a3d8a6d4862d95f72e6fdb9c09a643ecdb402d754004a557f2bec75"
 dependencies = [
  "scopeguard",
 ]
@@ -2337,12 +2337,12 @@ dependencies = [
 
 [[package]]
 name = "parking_lot"
-version = "0.10.0"
+version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "92e98c49ab0b7ce5b222f2cc9193fc4efe11c6d0bd4f648e374684a6857b1cfc"
+checksum = "d3a704eb390aafdc107b0e392f56a82b668e3a71366993b5340f5833fd62505e"
 dependencies = [
  "lock_api",
- "parking_lot_core 0.7.0",
+ "parking_lot_core 0.7.1",
 ]
 
 [[package]]
@@ -2362,9 +2362,9 @@ dependencies = [
 
 [[package]]
 name = "parking_lot_core"
-version = "0.7.0"
+version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7582838484df45743c8434fbff785e8edf260c28748353d44bc0da32e0ceabf1"
+checksum = "0e136c1904604defe99ce5fd71a28d473fa60a12255d511aa78a9ddf11237aeb"
 dependencies = [
  "cfg-if",
  "cloudabi",
@@ -3184,18 +3184,18 @@ dependencies = [
 
 [[package]]
 name = "thiserror"
-version = "1.0.14"
+version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f0570dc61221295909abdb95c739f2e74325e14293b2026b0a7e195091ec54ae"
+checksum = "54b3d3d2ff68104100ab257bb6bb0cb26c901abe4bd4ba15961f3bf867924012"
 dependencies = [
  "thiserror-impl",
 ]
 
 [[package]]
 name = "thiserror-impl"
-version = "1.0.14"
+version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "227362df41d566be41a28f64401e07a043157c21c14b9785a0d8e256f940a8fd"
+checksum = "ca972988113b7715266f91250ddb98070d033c62a011fa0fcc57434a649310dd"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3248,9 +3248,9 @@ dependencies = [
 
 [[package]]
 name = "tokio"
-version = "0.2.16"
+version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ee5a0dd887e37d37390c13ff8ac830f992307fe30a1fff0ab8427af67211ba28"
+checksum = "39fb9142eb6e9cc37f4f29144e62618440b149a138eee01a7bbe9b9226aaf17c"
 dependencies = [
  "bytes 0.5.4",
  "fnv",
@@ -3464,7 +3464,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7bde02a3a5291395f59b06ec6945a3077602fac2b07eeeaf0dee2122f3619828"
 dependencies = [
  "native-tls",
- "tokio 0.2.16",
+ "tokio 0.2.17",
 ]
 
 [[package]]
@@ -3528,7 +3528,7 @@ dependencies = [
  "futures-sink",
  "log 0.4.8",
  "pin-project-lite",
- "tokio 0.2.16",
+ "tokio 0.2.17",
 ]
 
 [[package]]
@@ -3542,7 +3542,7 @@ dependencies = [
  "futures-sink",
  "log 0.4.8",
  "pin-project-lite",
- "tokio 0.2.16",
+ "tokio 0.2.17",
 ]
 
 [[package]]
@@ -3914,7 +3914,7 @@ dependencies = [
  "libc",
  "nix",
  "page_size",
- "parking_lot 0.10.0",
+ "parking_lot 0.10.2",
  "rustc_version",
  "serde",
  "serde-bench",
@@ -3971,7 +3971,7 @@ dependencies = [
  "jsonrpc-core",
  "log 0.4.8",
  "native-tls",
- "parking_lot 0.10.0",
+ "parking_lot 0.10.2",
  "rustc-hex",
  "serde",
  "serde_json",
@@ -4104,7 +4104,7 @@ dependencies = [
  "futures 0.3.4",
  "log 0.4.8",
  "nohash-hasher",
- "parking_lot 0.10.0",
+ "parking_lot 0.10.2",
  "rand 0.7.3",
  "static_assertions",
 ]

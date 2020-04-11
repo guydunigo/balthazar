@@ -264,6 +264,12 @@ impl Balthazar {
     async fn handle_swarm_event(self, event: net::EventOut) {
         match (self.config.node_type(), event) {
             (NodeType::Manager, net::EventOut::WorkerNew(peer_id)) => {
+                spawn_log(
+                    self.tx.clone(),
+                    LogKind::Swarm,
+                    format!("event: {:?}", net::EventOut::WorkerNew(peer_id.clone())),
+                )
+                .await;
                 if let Some((wasm, args)) = self.config.wasm() {
                     let storage = StoragesWrapper::default();
                     let program_data = storage.fetch(&wasm[..], 1_000_000).await.unwrap();

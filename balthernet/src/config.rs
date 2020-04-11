@@ -77,16 +77,17 @@ pub struct NetConfig {
     // TODO: good idea to have duplicate node type ?
     /// Configuration relative to node type.
     node_type_configuration: NodeTypeContainer<ManagerConfig, WorkerConfig>,
-    /// Duration after the last [`ManagerPong`](`proto::worker::ManagerPong`) to send the next [`ManagerPing`](`proto::worker::ManagerPing`) to our manager/worker if we are in a
-    /// relationship.
+    /// Duration after the last [`ManagerPong`](`proto::worker::ManagerPong`) to send
+    /// the next [`ManagerPing`](`proto::worker::ManagerPing`) to our manager/worker
+    /// if we are in a relationship.
     /// This helps check the manager/worker is still up and running and able to
     /// manage/be managed by us.
     /// The interval is reset after each successful [`ManagerPong`](`proto::worker::ManagerPong`) message
     /// received.
     manager_check_interval: Duration,
-    /// Maximum interval to wait after a [`ManagerPing`](`proto::worker::ManagerPong`) to receive
-    /// a [`ManagerPong`](`proto::worker::ManagerPong`) from the worker's manager (if we are in a
-    /// relationship).
+    /// Maximum interval to wait after a [`ManagerPing`](`proto::worker::ManagerPong`)
+    /// to receive a [`ManagerPong`](`proto::worker::ManagerPong`) from the worker's
+    /// manager (if we are in a relationship).
     manager_timeout: Duration,
 }
 

@@ -254,10 +254,12 @@ pub fn check_manager_worker_relationship(
     manager_check_interval: Duration,
     manager_timeout: Duration,
 ) -> CheckManagerWorkerRelationshipAction {
-    if (Instant::now() - *last_ping) >= manager_timeout {
+    if *last_pong < *last_ping // 0, we haven't received any answer to the last ping
+        && Instant::now() >= *last_ping + manager_timeout
+    {
         CheckManagerWorkerRelationshipAction::TimedOut
-    } else if (*last_pong - *last_ping) >= Duration::default() // 0, we received an answer to the last pong
-                && Instant::now() - *last_pong > manager_check_interval
+    } else if *last_pong >= *last_ping // 0, we received an answer to the last ping
+                && Instant::now() > *last_pong + manager_check_interval
     {
         *last_ping = Instant::now();
         CheckManagerWorkerRelationshipAction::Ping
@@ -444,6 +446,9 @@ pub fn manager_answer(
                     &peer_rc.read().unwrap().addrs_as_vec()[..],
                 ) {
                     data.manager = Some((peer_rc.clone(), Instant::now(), Instant::now()));
+                    behaviour
+                        .delays
+                        .insert((), behaviour.manager_check_interval);
                     (Some(EventOut::ManagerNew(peer_id)), false)
                 } else {
                     (Some(EventOut::ManagerUnauthorized(peer_id)), true)
@@ -565,6 +570,9 @@ pub fn manager_pong(
             ..
         }) if manager_rc.read().unwrap().peer_id == peer_id => {
             *last_pong = Instant::now();
+            behaviour
+                .delays
+                .insert((), behaviour.manager_check_interval);
             EventOut::ManagerPong(peer_id)
         }
         _ => EventOut::NotMine(peer_id, HandlerOut::ManagerPong { user_data }),

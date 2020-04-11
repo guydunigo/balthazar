@@ -50,7 +50,7 @@ pub enum Subcommand {
         /// If not defined, will accept any manager.
         /// (e.g. `/ip4/10.0.0.1/tcp/5003`, `/p2p/[PEER_ID]`, `/ip4/10.0.0.1/tcp/5003/p2p/[PEER_ID]`,
         /// ...)
-        #[clap(short, long, requires("worker"), number_of_values(1))]
+        #[clap(short, long, number_of_values(1))]
         authorized_managers: Vec<Libp2pMultiaddr>,
     },
     /// Starts as a manager node.
@@ -381,13 +381,7 @@ pub struct BalthazarArgs {
     disable_listen: bool,
     /// Set a address to listen on, default : `/ip4/0.0.0.0/tcp/5003`.
     // TODO: extract value from const
-    #[clap(
-        name = "listen",
-        short,
-        long,
-        conflicts_with("disable_listen"),
-        group("Network")
-    )]
+    #[clap(name = "listen", short, long, conflicts_with("disable-listen"))]
     listen_addr: Option<Libp2pMultiaddr>,
     /// Peer to connect to when started (e.g. `/ip4/0.0.0.0/tcp/5003`).
     #[clap(name = "peer", short, long, number_of_values(1))]

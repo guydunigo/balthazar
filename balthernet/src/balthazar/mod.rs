@@ -37,6 +37,7 @@ use std::{
     task::{Context, Poll},
     time::{Duration, Instant},
 };
+use tokio::time::DelayQueue;
 
 mod events;
 use events::*;
@@ -83,6 +84,7 @@ pub struct BalthBehaviour {
     manager_check_interval: Duration,
     /// See [`NetConfig::manager_timeout`](`super::NetConfig::manager_timeout`) for more information.
     manager_timeout: Duration,
+    delays: DelayQueue<()>,
 }
 
 impl BalthBehaviour {
@@ -117,6 +119,7 @@ impl BalthBehaviour {
                 next_query_unique_id: 0,
                 manager_check_interval,
                 manager_timeout,
+                delays: DelayQueue::new(),
             },
             tx,
         )
@@ -313,6 +316,11 @@ impl NetworkBehaviour for BalthBehaviour {
         _params: &mut impl PollParameters
 ) -> Poll<NetworkBehaviourAction<<<Self::ProtocolsHandler as IntoProtocolsHandler>::Handler as ProtocolsHandler>::InEvent, Self::OutEvent>>{
         {
+            if let Poll::Ready(Some(_)) = self.delays.poll_expired(cx) {
+                // eprintln!("Wake up Neo...");
+            }
+        }
+        {
             use CheckManagerWorkerRelationshipAction::*;
             let manager_check_interval = self.manager_check_interval;
             let manager_timeout = self.manager_timeout;
@@ -363,12 +371,11 @@ impl NetworkBehaviour for BalthBehaviour {
                             Some(NodeType::Worker) => EventOut::ManagerTimedOut(peer_id),
                             None => unreachable!("We shouldn't be here if we weren't in a worker/manager relationship."),
                         };
-                        eprintln!("timedout");
                         self.inject_generate_event(evt);
                     }
                     Ping => {
                         let user_data = self.next_query_unique_id();
-                        eprintln!("ping");
+                        self.delays.insert((), self.manager_timeout);
                         self.inject_send_to_peer_or_dial_event(
                             peer_id,
                             HandlerIn::ManagerPing { user_data },
