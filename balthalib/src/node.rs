@@ -434,6 +434,11 @@ impl Balthazar {
                     }
                 }
             }
+            // Muting those from the logs
+            (_, net::EventOut::PeerConnected(_))
+            | (_, net::EventOut::PeerDisconnected(_))
+            | (_, net::EventOut::WorkerPong(_))
+            | (_, net::EventOut::ManagerPong(_)) => (),
             (_, event) => {
                 spawn_log(
                     self.tx.clone(),
