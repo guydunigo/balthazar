@@ -241,7 +241,7 @@ impl Balthazar {
         match event {
             Event::Swarm(e) => self.handle_swarm_event(e).await,
             Event::ChainJobs(e) => self.handle_chain_event(e).await,
-            Event::Log { .. } => future::ready(eprintln!("{}", event)).await,
+            Event::Log { .. } => eprintln!("{}", event),
             _ => unimplemented!(),
         }
     }

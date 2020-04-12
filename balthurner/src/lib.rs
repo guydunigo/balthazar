@@ -5,74 +5,193 @@ extern crate futures;
 
 use futures::future::{BoxFuture, FutureExt};
 use misc::{spawn_thread_async, SpawnThreadError};
-use std::fmt;
+use std::{error::Error, fmt};
 
 use std::time::Instant;
 
+/*
 pub mod wasm;
-pub use wasm::WasmRunner;
+pub use wasm::WasmExecutor;
+*/
 
+/// Errors which can be returned by an executor.
 #[derive(Debug)]
-pub enum RunnerError<E> {
+pub enum ExecutorError<E> {
     /// Timeout has been reached.
     TimedOut,
-    /// The command `test` was run but the program doesn't support tests.
-    // TODO: relevant ? should we enforce all programs to include tests ?
-    NoTests,
     /// Error specific to the executor technology.
-    InternalError(E),
-    SpawnThreadError(SpawnThreadError),
+    ExecutorError(E),
+    /// The program returned an error code.
+    RuntimeError(i64),
+    /// The program ended unexpectedly.
+    ProgramCrash,
+    /// The program was killed by the outside of the executor.
+    Aborted,
+    // SpawnThreadError(SpawnThreadError),
 }
 
-impl<E: fmt::Debug> fmt::Display for RunnerError<E> {
+impl<E: fmt::Display> fmt::Display for ExecutorError<E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self)
+        match self {
+            ExecutorError::TimedOut => write!(f, "The program has timed out."),
+            ExecutorError::ExecutorError(err) => {
+                write!(f, "The executor has encountered a problem: {}.", err)
+            }
+            ExecutorError::RuntimeError(code) => write!(
+                f,
+                "The program has encountered a problem and returned the error code: {}.",
+                code
+            ),
+            ExecutorError::ProgramCrash => write!(f, "The program has crashed."),
+            ExecutorError::Aborted => write!(f, "The program was aborted."),
+        }
     }
 }
 
-impl<E: fmt::Debug> std::error::Error for RunnerError<E> {}
+impl<E: Error> Error for ExecutorError<E> {}
 
-impl<E> From<E> for RunnerError<E> {
+impl<E> From<E> for ExecutorError<E> {
     fn from(e: E) -> Self {
-        RunnerError::InternalError(e)
+        ExecutorError::ExecutorError(e)
     }
 }
 
-pub type RunnerResult<T, E> = Result<T, RunnerError<E>>;
+/// Result returned by an executor.
+pub type ExecutorResult<T, E> = Result<T, ExecutorError<E>>;
 
-// TODO: ability to cache Runner for performance ?
-pub trait Runner: Send + Sync {
-    /// Error type returned if there was a problem running the task.
-    type Error: std::error::Error + Send + 'static;
-
-    /// Run the task with the given arguments.
-    /// `program` can be the actual program or its address.
-    ///
-    /// If the program doesn't complete before `timeout` seconds, returns `Err(RunnerError::TimedOut)`.
-    fn run(program: &[u8], arguments: &[u8]) -> RunnerResult<Vec<u8>, Self::Error>;
-
-    /// Run the tests if they are included in the program.
-    /// Checks if the result seem valid given the arguments.
-    /// If the program doesn't complete before `timeout` seconds, returns `Err(RunnerError::TimedOut)`.
-    /// If the program doesn't support tests, returns `Err(RunnerError::NoTests)`.
-    fn test(program: &[u8], arguments: &[u8], result: &[u8]) -> RunnerResult<bool, Self::Error>;
-
+// TODO: should a handle implement Drop to kill the task when the handle is dropped ?
+/// Object created when executing a task and used to manage it (kill, get result, ...).
+pub trait TaskHandle<'a> {
     /*
-    /// Abord the execution of a program.
-    fn abord(&self);
+    // TODO: have task id stored in the handle to find them back ?
+    // - This would mean taking them as args
+    // - This would depends the executor on ids...
+    // - Function to get a new handle for the task or something directly in the executor?
+    /// Get the task id of the running task.
+    fn task_id(&self) -> &TaskId;
     */
 
+    /// Kill the running task, when called the [`result`] future should return
+    /// [`ExecutorError::Aborted`].
+    // TODO: result if killing failed ?
+    // TODO: consume self ?
+    // TODO: what happens when called twice ?
+    fn kill(&mut self) -> BoxFuture<'a, ()>;
+}
+
+// TODO: ability to cache Executor and data for performance ?
+// TODO: lifetime and memory freeing ?
+/// Structure to control an executor technology.
+pub trait Executor<'a> {
+    /// Error type returned if there was a problem running the task.
+    type Error: Error + Send + 'static;
+
+    /// [`TaskHandle`] used for tasks.
+    type Handle: TaskHandle<'a>;
+
+    /// Checks if the executor can be used and is responding.
+    /// Useful when it uses an external service the node doesn't directly control
+    /// (such as **Docker**).
+    fn is_available(&mut self) -> BoxFuture<'a, bool>;
+
+    /// Downloads the program to be passed to the executor.
+    /// It can only return an address or identifier if the executor provides a storage
+    /// or caching mechanism of its own.
+    // TODO: actual error type
+    fn download_program(&mut self, address: &[u8], max_size: u64)
+        -> BoxFuture<Result<Vec<u8>, ()>>;
+
+    /// Run the task with the given arguments.
+    /// `program` must be the result of [`download_program`].
+    ///
+    /// See [`ExecutorError`] for the different errors returned.
+    fn run(
+        &mut self,
+        program: &[u8],
+        argument: &[u8],
+        timeout: u64,
+        max_network_usage: u64,
+    ) -> (
+        BoxFuture<'a, ExecutorResult<Vec<u8>, Self::Error>>,
+        Self::Handle,
+    );
+
+    /// Run the tests of the program, and return the index of a correct one.
+    /// Any other value is considered as an error.
+    /// `program` must be the result of [`download_program`].
+    ///
+    /// See [`ExecutorError`] for the different errors returned.
+    fn test(
+        &mut self,
+        program: &[u8],
+        argument: &[u8],
+        results: &[&[u8]],
+        timeout: u64,
+    ) -> (
+        BoxFuture<'a, ExecutorResult<i64, Self::Error>>,
+        Self::Handle,
+    );
+
+    /// Tries to kill all running tasks, the future resolves when all tasks of the
+    /// executor are killed or an error if it has failed to kill at least one.
+    // TODO: result if killing failed ?
+    // TODO: list of successfully killed or unsuccessfully killed ?
+    fn kill_all(&mut self) -> BoxFuture<Result<(), ()>>;
+
+    /// Sets the CPU count that the executor can use.
+    ///
+    /// > **Note:** This is not guaranteed to affect already running tasks.
+    // TODO: return value with actual chosen value or something ?
+    fn set_cpu_count(count: u64);
+
+    /// Sets the maximum memory in kilobytes that the executor can use.
+    ///
+    /// > **Note:** This is not guaranteed to affect already running tasks.
+    // TODO: return value with actual chosen value or something ?
+    fn set_max_memory(size: u64);
+
+    /// Sets the maximum network speed in kilobits/seconds that the executor can use.
+    ///
+    /// > **Note:** This is not guaranteed to affect already running tasks.
+    // TODO: return value with actual chosen value or something ?
+    fn set_max_network_speed(speed: u64);
+
+    /// Executes [`run`] outside an async executor.
+    fn run_sync(
+        &mut self,
+        program: &[u8],
+        argument: &[u8],
+        timeout: u64,
+        max_network_usage: u64,
+    ) -> ExecutorResult<Vec<u8>, Self::Error> {
+        let (result_fut, _) = self.run(program, argument, timeout, max_network_usage);
+        futures::executor::block_on(result_fut)
+    }
+
+    /// Executes [`test`] outside an async executor.
+    fn test_sync(
+        &mut self,
+        program: &[u8],
+        argument: &[u8],
+        results: &[&[u8]],
+        timeout: u64,
+    ) -> ExecutorResult<i64, Self::Error> {
+        let (result_fut, _) = self.test(program, argument, results, timeout);
+        futures::executor::block_on(result_fut)
+    }
+
+    /*
     /// Run on another thread asynchronously.
     fn run_async<'a>(
         program: &'a [u8],
         arguments: &'a [u8],
-    ) -> BoxFuture<'a, RunnerResult<Vec<u8>, Self::Error>> {
+    ) -> BoxFuture<'a, ExecutorResult<Vec<u8>, Self::Error>> {
         // TODO: Find a way to not copy the whole data (pass ref or pointer) ?
         let program = Vec::from(program);
         let arguments = Vec::from(arguments);
 
         async move {
-            let result = spawn_thread_async(move || -> RunnerResult<Vec<u8>, Self::Error> {
+            let result = spawn_thread_async(move || -> ExecutorResult<Vec<u8>, Self::Error> {
                 Self::run(&program[..], &arguments[..])
             })
             .await;
@@ -81,7 +200,7 @@ pub trait Runner: Send + Sync {
                 Ok(Ok(val)) => Ok(val),
                 Ok(Err(e)) => Err(e),
 
-                Err(e) => Err(RunnerError::SpawnThreadError(e)),
+                Err(e) => Err(ExecutorError::SpawnThreadError(e)),
             }
         }
         .boxed()
@@ -92,14 +211,14 @@ pub trait Runner: Send + Sync {
         program: &'a [u8],
         arguments: &'a [u8],
         result: &'a [u8],
-    ) -> BoxFuture<'a, RunnerResult<bool, Self::Error>> {
+    ) -> BoxFuture<'a, ExecutorResult<bool, Self::Error>> {
         // TODO: Find a way to not copy the whole data (pass ref or pointer) ?
         let program = Vec::from(program);
         let arguments = Vec::from(arguments);
         let result = Vec::from(result);
 
         async move {
-            let result = spawn_thread_async(move || -> RunnerResult<bool, Self::Error> {
+            let result = spawn_thread_async(move || -> ExecutorResult<bool, Self::Error> {
                 Self::test(&program[..], &arguments[..], &result[..])
             })
             .await;
@@ -108,20 +227,27 @@ pub trait Runner: Send + Sync {
                 Ok(Ok(val)) => Ok(val),
                 Ok(Err(e)) => Err(e),
 
-                Err(e) => Err(RunnerError::SpawnThreadError(e)),
+                Err(e) => Err(ExecutorError::SpawnThreadError(e)),
             }
         }
         .boxed()
     }
+    */
 }
 
-pub fn run(wasm_program: Vec<u8>, args: Vec<u8>, nb_times: usize) -> RunnerResult<(), wasm::Error> {
+/*
+pub fn run(
+    wasm_program: Vec<u8>,
+    args: Vec<u8>,
+    nb_times: usize,
+) -> ExecutorResult<(), wasm::Error> {
     let inst_read = Instant::now();
     let nb_times = if nb_times == 0 { 1 } else { nb_times };
+    let exec = WasmExecutor::new();
 
-    let result = WasmRunner::run(&wasm_program[..], &args[..])?;
+    let result = exec::run_sync(&wasm_program[..], &args[..])?;
     for _ in 0..(nb_times - 1) {
-        WasmRunner::run(&wasm_program[..], &args[..])?;
+        exec::run_sync(&wasm_program[..], &args[..])?;
     }
     let inst_res = Instant::now();
 
@@ -138,6 +264,7 @@ pub fn run(wasm_program: Vec<u8>, args: Vec<u8>, nb_times: usize) -> RunnerResul
 
     Ok(())
 }
+*/
 
 #[cfg(test)]
 mod tests {}
