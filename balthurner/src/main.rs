@@ -1,10 +1,10 @@
 extern crate balthurner;
 extern crate wasmer_runtime;
 
-use balthurner::{wasm, RunnerResult};
+use balthurner::{wasm, ExecutorResult};
 use std::{env, fs::read};
 
-fn main() -> RunnerResult<(), wasm::Error> {
+fn main() -> ExecutorResult<(), wasm::Error> {
     let file_name = env::args().nth(1).expect("No wasm file provided.");
     let args = env::args().nth(2).expect("No arguments provided.");
     let nb_times = env::args()

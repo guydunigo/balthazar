@@ -57,7 +57,7 @@ pub type ExecutorResult<T, E> = Result<T, ExecutorError<E>>;
 
 // TODO: should a handle implement Drop to kill the task when the handle is dropped ?
 /// Object created when executing a task and used to manage it (kill, get result, ...).
-pub trait TaskHandle<'a> {
+pub trait Handle {
     /*
     // TODO: have task id stored in the handle to find them back ?
     // - This would mean taking them as args
@@ -72,30 +72,36 @@ pub trait TaskHandle<'a> {
     // TODO: result if killing failed ?
     // TODO: consume self ?
     // TODO: what happens when called twice ?
-    fn kill(&mut self) -> BoxFuture<'a, ()>;
+    fn kill(&mut self) -> BoxFuture<()>;
 }
 
 // TODO: ability to cache Executor and data for performance ?
 // TODO: lifetime and memory freeing ?
+// TODO: version number
 /// Structure to control an executor technology.
-pub trait Executor<'a> {
+#[allow(clippy::type_complexity)]
+pub trait Executor {
+    // TODO: Boxed Error...
     /// Error type returned if there was a problem running the task.
     type Error: Error + Send + 'static;
 
-    /// [`TaskHandle`] used for tasks.
-    type Handle: TaskHandle<'a>;
+    /// [`Handle`] used for tasks.
+    type Handle: Handle;
 
     /// Checks if the executor can be used and is responding.
     /// Useful when it uses an external service the node doesn't directly control
     /// (such as **Docker**).
-    fn is_available(&mut self) -> BoxFuture<'a, bool>;
+    fn is_available(&mut self) -> BoxFuture<bool>;
 
     /// Downloads the program to be passed to the executor.
     /// It can only return an address or identifier if the executor provides a storage
     /// or caching mechanism of its own.
     // TODO: actual error type
-    fn download_program(&mut self, address: &[u8], max_size: u64)
-        -> BoxFuture<Result<Vec<u8>, ()>>;
+    fn download_program<'a>(
+        &'a mut self,
+        address: &'a [u8],
+        max_size: u64,
+    ) -> BoxFuture<'a, Result<Vec<u8>, ()>>;
 
     /// Run the task with the given arguments.
     /// `program` must be the result of [`download_program`].
@@ -108,7 +114,7 @@ pub trait Executor<'a> {
         timeout: u64,
         max_network_usage: u64,
     ) -> (
-        BoxFuture<'a, ExecutorResult<Vec<u8>, Self::Error>>,
+        BoxFuture<ExecutorResult<Vec<u8>, Self::Error>>,
         Self::Handle,
     );
 
@@ -121,12 +127,9 @@ pub trait Executor<'a> {
         &mut self,
         program: &[u8],
         argument: &[u8],
-        results: &[&[u8]],
+        results: &[Vec<u8>],
         timeout: u64,
-    ) -> (
-        BoxFuture<'a, ExecutorResult<i64, Self::Error>>,
-        Self::Handle,
-    );
+    ) -> (BoxFuture<ExecutorResult<i64, Self::Error>>, Self::Handle);
 
     /// Tries to kill all running tasks, the future resolves when all tasks of the
     /// executor are killed or an error if it has failed to kill at least one.
@@ -169,7 +172,7 @@ pub trait Executor<'a> {
         &mut self,
         program: &[u8],
         argument: &[u8],
-        results: &[&[u8]],
+        results: &[Vec<u8>],
         timeout: u64,
     ) -> ExecutorResult<i64, Self::Error> {
         let (result_fut, _) = self.test(program, argument, results, timeout);
@@ -184,13 +187,15 @@ pub fn run(
 ) -> ExecutorResult<(), wasm::Error> {
     let inst_read = Instant::now();
     let nb_times = if nb_times == 0 { 1 } else { nb_times };
-    let exec = WasmExecutor::new();
+    let mut exec = WasmExecutor::default();
 
-    let result = exec::run_sync(&wasm_program[..], &args[..])?;
+    // TODO: executes one time too much ?
+    let result = exec.run_sync(&wasm_program[..], &args[..], 10, 0)?;
     for _ in 0..(nb_times - 1) {
-        exec::run_sync(&wasm_program[..], &args[..])?;
+        exec.run_sync(&wasm_program[..], &args[..], 10, 0)?;
     }
     let inst_res = Instant::now();
+    // TODO: test ?
 
     println!(
         "{:?} gives {:?}",
