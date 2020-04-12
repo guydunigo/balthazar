@@ -3,16 +3,13 @@ extern crate wasmer_runtime;
 extern crate balthamisc as misc;
 extern crate futures;
 
-use futures::future::{BoxFuture, FutureExt};
-use misc::{spawn_thread_async, SpawnThreadError};
+use futures::future::BoxFuture;
 use std::{error::Error, fmt};
 
 use std::time::Instant;
 
-/*
 pub mod wasm;
 pub use wasm::WasmExecutor;
-*/
 
 /// Errors which can be returned by an executor.
 #[derive(Debug)]
@@ -27,7 +24,6 @@ pub enum ExecutorError<E> {
     ProgramCrash,
     /// The program was killed by the outside of the executor.
     Aborted,
-    // SpawnThreadError(SpawnThreadError),
 }
 
 impl<E: fmt::Display> fmt::Display for ExecutorError<E> {
@@ -179,63 +175,8 @@ pub trait Executor<'a> {
         let (result_fut, _) = self.test(program, argument, results, timeout);
         futures::executor::block_on(result_fut)
     }
-
-    /*
-    /// Run on another thread asynchronously.
-    fn run_async<'a>(
-        program: &'a [u8],
-        arguments: &'a [u8],
-    ) -> BoxFuture<'a, ExecutorResult<Vec<u8>, Self::Error>> {
-        // TODO: Find a way to not copy the whole data (pass ref or pointer) ?
-        let program = Vec::from(program);
-        let arguments = Vec::from(arguments);
-
-        async move {
-            let result = spawn_thread_async(move || -> ExecutorResult<Vec<u8>, Self::Error> {
-                Self::run(&program[..], &arguments[..])
-            })
-            .await;
-
-            match result {
-                Ok(Ok(val)) => Ok(val),
-                Ok(Err(e)) => Err(e),
-
-                Err(e) => Err(ExecutorError::SpawnThreadError(e)),
-            }
-        }
-        .boxed()
-    }
-
-    /// Test value on another thread asynchronously.
-    fn test_async<'a>(
-        program: &'a [u8],
-        arguments: &'a [u8],
-        result: &'a [u8],
-    ) -> BoxFuture<'a, ExecutorResult<bool, Self::Error>> {
-        // TODO: Find a way to not copy the whole data (pass ref or pointer) ?
-        let program = Vec::from(program);
-        let arguments = Vec::from(arguments);
-        let result = Vec::from(result);
-
-        async move {
-            let result = spawn_thread_async(move || -> ExecutorResult<bool, Self::Error> {
-                Self::test(&program[..], &arguments[..], &result[..])
-            })
-            .await;
-
-            match result {
-                Ok(Ok(val)) => Ok(val),
-                Ok(Err(e)) => Err(e),
-
-                Err(e) => Err(ExecutorError::SpawnThreadError(e)),
-            }
-        }
-        .boxed()
-    }
-    */
 }
 
-/*
 pub fn run(
     wasm_program: Vec<u8>,
     args: Vec<u8>,
@@ -264,7 +205,6 @@ pub fn run(
 
     Ok(())
 }
-*/
 
 #[cfg(test)]
 mod tests {}

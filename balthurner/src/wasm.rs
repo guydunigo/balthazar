@@ -1,10 +1,12 @@
+use futures::future::FutureExt;
+use misc::{spawn_thread_async, SpawnThreadError};
 use std::{
     fmt,
     sync::{Arc, RwLock},
 };
 use wasmer_runtime::{imports, instantiate, Array, Ctx, Func, Instance, WasmPtr};
 
-use super::{Runner, RunnerError, RunnerResult};
+use super::{Executor, ExecutorError, ExecutorResult};
 pub use wasmer_runtime::error;
 
 #[derive(Debug)]
@@ -15,6 +17,8 @@ pub enum Error {
     RuntimeError(host_abi::WasmResult),
     /// The *mutex* data passed to the machine is poisonned (see [`RwLock`]).
     PoisonError,
+    /// Error when spawning the separate thread for the executor, see [`SpawnThreadError`].
+    SpawnThreadError(SpawnThreadError),
 }
 
 impl fmt::Display for Error {
@@ -31,10 +35,10 @@ impl<E: Into<error::Error>> From<E> for Error {
     }
 }
 
-impl<E: Into<error::Error>> From<E> for RunnerError<Error> {
+impl<E: Into<error::Error>> From<E> for ExecutorError<Error> {
     fn from(err: E) -> Self {
         let err: Error = err.into().into();
-        RunnerError::InternalError(err)
+        ExecutorError::ExecutorError(err)
     }
 }
 
@@ -142,9 +146,9 @@ mod host_abi {
 }
 
 /// Uses Wasmer to run a webassembly program.
-pub struct WasmRunner {}
+pub struct WasmExecutor {}
 
-impl WasmRunner {
+impl WasmExecutor {
     fn get_instance(
         wasm: &[u8],
         args: &[u8],
@@ -181,10 +185,64 @@ impl WasmRunner {
     }
 }
 
-impl Runner for WasmRunner {
+impl Executor for WasmExecutor {
+    /*
+    /// Run on another thread asynchronously.
+    fn run_async<'a>(
+        program: &'a [u8],
+        arguments: &'a [u8],
+    ) -> BoxFuture<'a, ExecutorResult<Vec<u8>, Self::Error>> {
+        // TODO: Find a way to not copy the whole data (pass ref or pointer) ?
+        let program = Vec::from(program);
+        let arguments = Vec::from(arguments);
+
+        async move {
+            let result = spawn_thread_async(move || -> ExecutorResult<Vec<u8>, Self::Error> {
+                Self::run(&program[..], &arguments[..])
+            })
+            .await;
+
+            match result {
+                Ok(Ok(val)) => Ok(val),
+                Ok(Err(e)) => Err(e),
+
+                Err(e) => Err(ExecutorError::SpawnThreadError(e)),
+            }
+        }
+        .boxed()
+    }
+
+    /// Test value on another thread asynchronously.
+    fn test_async<'a>(
+        program: &'a [u8],
+        arguments: &'a [u8],
+        result: &'a [u8],
+    ) -> BoxFuture<'a, ExecutorResult<bool, Self::Error>> {
+        // TODO: Find a way to not copy the whole data (pass ref or pointer) ?
+        let program = Vec::from(program);
+        let arguments = Vec::from(arguments);
+        let result = Vec::from(result);
+
+        async move {
+            let result = spawn_thread_async(move || -> ExecutorResult<bool, Self::Error> {
+                Self::test(&program[..], &arguments[..], &result[..])
+            })
+            .await;
+
+            match result {
+                Ok(Ok(val)) => Ok(val),
+                Ok(Err(e)) => Err(e),
+
+                Err(e) => Err(ExecutorError::SpawnThreadError(e)),
+            }
+        }
+        .boxed()
+    }
+    */
+
     type Error = Error;
 
-    fn run(program: &[u8], arguments: &[u8]) -> RunnerResult<Vec<u8>, Self::Error> {
+    fn run(program: &[u8], arguments: &[u8]) -> ExecutorResult<Vec<u8>, Self::Error> {
         let encoded_res = Arc::new(RwLock::new(Vec::new()));
         let instance = Self::get_instance(program, arguments, encoded_res.clone())?;
         let run = Self::get_run_fn(&instance)?;
@@ -196,7 +254,7 @@ impl Runner for WasmRunner {
         }
     }
 
-    fn test(program: &[u8], arguments: &[u8], result: &[u8]) -> RunnerResult<bool, Self::Error> {
+    fn test(program: &[u8], arguments: &[u8], result: &[u8]) -> ExecutorResult<bool, Self::Error> {
         let result = Arc::new(RwLock::new(Vec::from(result)));
 
         let instance = Self::get_instance(program, arguments, result)?;
@@ -221,12 +279,12 @@ mod tests {
     const TEST_FILE: &str = "test_files/test.wasm";
 
     #[test]
-    fn it_executes_correctly_test_file() -> RunnerResult<(), Error> {
+    fn it_executes_correctly_test_file() -> ExecutorResult<(), Error> {
         let wasm =
             fs::read(TEST_FILE).expect(&format!("Could not read test file `{}`", TEST_FILE)[..]);
         let args = b"3";
 
-        let result = WasmRunner::run(&wasm[..], args)?;
+        let result = WasmExecutor::run(&wasm[..], args)?;
 
         assert_eq!(result, b"6");
 
@@ -234,12 +292,12 @@ mod tests {
     }
 
     #[test]
-    fn it_executes_correctly_test_file_asynchronously() -> RunnerResult<(), Error> {
+    fn it_executes_correctly_test_file_asynchronously() -> ExecutorResult<(), Error> {
         let wasm =
             fs::read(TEST_FILE).expect(&format!("Could not read test file `{}`", TEST_FILE)[..]);
         let args = b"3";
 
-        let future = WasmRunner::run_async(&wasm[..], args);
+        let future = WasmExecutor::run_async(&wasm[..], args);
 
         let res = block_on(future)?;
 
