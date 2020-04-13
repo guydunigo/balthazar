@@ -16,8 +16,6 @@ contract Jobs {
     }
     event CounterHasNewValue(uint128 new_counter);
 
-    // enum ProgramKind { Wasm }
-    // enum BestMethod { Cost, Performance }
     enum TaskState {
         Incomplete,
         Completed,
@@ -57,13 +55,16 @@ contract Jobs {
     struct Task {
         bytes32 job_id;
         uint128 argument_id;
+        uint256 actual_cost;
         TaskState state;
         address[] managers_addresses;
 
         bytes result;
+        /*
         address[] workers_addresses;
         uint64[] worker_prices;
         uint64[] network_prices;
+        */
 
         TaskErrorKind reason;
 
@@ -131,6 +132,19 @@ contract Jobs {
             }
         }
         revert("Not found.");
+    }
+
+    function pay_managers(Task storage task) internal {
+        require(task.managers_addresses.length > 0/*, no managers set*/);
+        Job storage job = jobs[task.job_id];
+
+        for (uint64 i ; i < task.managers_addresses.length; i++) {
+            users[task.managers_addresses[i]].pending_money += job.management_price;
+            emit PendingMoneyChanged(task.managers_addresses[i], users[task.managers_addresses[i]].pending_money);
+        }
+        uint256 management_price = job.management_price * task.managers_addresses.length;
+        users[job.sender].locked_money -= management_price;
+        task.actual_cost += management_price;
     }
 
     // ------------------------------------
@@ -391,12 +405,15 @@ contract Jobs {
             require(tasks[task_id].non_null == false, "task collision");
             tasks[task_id] = Task(job_id,
                                    i,
+                                   0,
                                    TaskState.Incomplete,
                                    new address[](0),
                                    new bytes(0),
+                                   /*
                                    new address[](0),
                                    new uint64[](0),
                                    new uint64[](0),
+                                   */
                                    TaskErrorKind.Unknown,
                                    true);
             emit TaskPending(task_id);
@@ -422,39 +439,57 @@ contract Jobs {
 
     function set_failed(bytes32 task_id, TaskErrorKind reason) public {
         require(msg.sender == oracle/*, "only the oracle can do that"*/);
-        require(tasks[task_id].non_null/*, "unknown task"*/);
-        require(tasks[task_id].state == TaskState.Incomplete/*, "task already complete or failed"*/);
+        Task storage task = tasks[task_id];
+        require(task.non_null/*, "unknown task"*/);
+        require(task.state == TaskState.Incomplete/*, "task already complete or failed"*/);
 
-        tasks[task_id].state = TaskState.DefinetelyFailed;
-        tasks[task_id].reason = reason;
-
-        // TODO: pay managers...
-        // TODO: check last task and emit signal?
+        task.state = TaskState.DefinetelyFailed;
+        task.reason = reason;
+        pay_managers(task);
+        // TODO: reimburse sender
 
         emit TaskDefinetelyFailed(task_id, reason);
+        if (is_job_completed(task.job_id)) {
+            emit JobCompleted(task.job_id);
+        }
     }
 
     function set_completed(bytes32 task_id, bytes memory result, address[] memory workers_addresses, uint64[] memory worker_prices, uint64[] memory network_prices) public {
         require(msg.sender == oracle/*, "only the oracle can do that"*/);
         // TODO: really check everything or trust oracle ?
-        require(tasks[task_id].non_null/*, "unknown task"*/);
-        require(tasks[task_id].state == TaskState.Incomplete/*, "task already complete or failed"*/);
-        require(tasks[task_id].result.length == 0/*, "already completed task"*/);
+        Task storage task = tasks[task_id];
+        require(task.non_null/*, "unknown task"*/);
+        require(task.state == TaskState.Incomplete/*, "task already complete or failed"*/);
+        require(task.result.length == 0/*, "already completed task"*/);
         require(result.length > 0/*, "empty result"*/);
         require(workers_addresses.length == worker_prices.length && workers_addresses.length == network_prices.length/*, "not same sizes"*/);
-        require(workers_addresses.length == jobs[tasks[task_id].job_id].redundancy/*, "incorrect length"*/);
+        require(workers_addresses.length == jobs[task.job_id].redundancy/*, "incorrect length"*/);
 
-        tasks[task_id].state = TaskState.Completed;
-        tasks[task_id].result = result;
-        // TODO: poind of storing those ? just pay them now and forget ?
-        tasks[task_id].workers_addresses = workers_addresses;
-        tasks[task_id].worker_prices = worker_prices;
-        tasks[task_id].network_prices = network_prices;
+        task.state = TaskState.Completed;
+        task.result = result;
+        /*
+        task.workers_addresses = workers_addresses;
+        task.worker_prices = worker_prices;
+        task.network_prices = network_prices;
+        */
 
-        // TODO: pay workers and managers...
-        // TODO: check last task and emit signal?
+        // TODO: directly refund the caller ?
+
+        for (uint64 i ; i < workers_addresses.length ; i++) {
+            uint actual_cost = worker_prices[i] * jobs[task.job_id].timeout
+               + network_prices[i] * jobs[task.job_id].max_network_usage;
+
+            users[workers_addresses[i]].pending_money += actual_cost;
+            users[jobs[task.job_id].sender].locked_money -= actual_cost;
+            task.actual_cost += actual_cost;
+            emit PendingMoneyChanged(workers_addresses[i], users[workers_addresses[i]].pending_money);
+        }
+        pay_managers(task);
 
         emit TaskCompleted(task_id, result);
+        if (is_job_completed(task.job_id)) {
+            emit JobCompleted(task.job_id);
+        }
     }
 
     // Reverts if there is no task corresponding to `task_id`.
@@ -478,12 +513,10 @@ contract Jobs {
 
     // Accepts the results, pays the workers and unlock the remaining money for the sender
     // to recover.
+    /*
     function validate_results(bytes32 job_id) public {
-        require(jobs[job_id].non_null, "unknown job");
-        require(msg.sender == jobs[job_id].sender, "not sender");
-        require(is_job_completed(job_id), "incomplete job");
-
         uint total_amount;
+        uint max_price = calc_max_price(jobs[job_id]);
 
         for (uint128 i ; i < jobs[job_id].arguments.length ; i++) {
             Task storage task = tasks[calc_task_id(job_id, i, jobs[job_id].arguments[i])];
@@ -495,25 +528,11 @@ contract Jobs {
                 emit PendingMoneyChanged(task.workers_addresses[j], users[task.workers_addresses[j]].pending_money);
             }
         }
-        uint max_price = calc_max_price(jobs[job_id]);
         users[msg.sender].locked_money -= max_price;
         users[msg.sender].pending_money += max_price - total_amount;
         emit PendingMoneyChanged(msg.sender, users[msg.sender].pending_money);
-
-        /*
-        bytes32[] storage pending_jobs = users[msg.sender].pending_jobs;
-        uint i;
-        for (; i < pending_jobs.length ; i++) {
-            if (pending_jobs[i] == job_id) {
-                break;
-            }
-        }
-        if (pending_jobs.length - 1 > i) {
-            pending_jobs[i] = pending_jobs[pending_jobs.length - 1];
-        }
-        pending_jobs.pop();
-        */
     }
+   */
 
     // Reverts if there is no task corresponding to `task_id`.
     function get_task(bytes32 task_id) public view returns (bytes32, uint128, bytes memory) {
@@ -535,4 +554,5 @@ contract Jobs {
     event TaskCompleted(bytes32 task_id, bytes result);
     event TaskDefinetelyFailed(bytes32 task_id, TaskErrorKind reason);
     event PendingMoneyChanged(address account, uint new_val);
+    event JobCompleted(bytes32 job_id);
 }
