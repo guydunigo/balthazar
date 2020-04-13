@@ -2,6 +2,7 @@ pragma solidity >=0.4.21 <0.7.0;
 pragma experimental ABIEncoderV2;
 
 contract Jobs {
+    /*
     uint128 public counter;
 
     function set_counter(uint128 new_val) public {
@@ -15,12 +16,14 @@ contract Jobs {
         emit CounterHasNewValue(counter);
     }
     event CounterHasNewValue(uint128 new_counter);
+    */
 
     enum TaskState {
         Incomplete,
         Completed,
         DefinetelyFailed
     }
+
     enum TaskErrorKind {
         IncorrectSpecification,
         TimedOut,
@@ -55,7 +58,6 @@ contract Jobs {
     struct Task {
         bytes32 job_id;
         uint128 argument_id;
-        uint256 actual_cost;
         TaskState state;
         address[] managers_addresses;
 
@@ -88,18 +90,25 @@ contract Jobs {
     // TODO: ability to set this address ?
     address oracle;
 
-    constructor(address oracle_address) public {
-        oracle = oracle_address;
+    constructor(/*address oracle_address*/) public {
+        // oracle = oracle_address;
+        oracle = msg.sender;
     }
 
     // ------------------------------------
     // Job and tasks tool functions
 
-    function calc_max_price(Job storage job) internal view returns (uint) {
+    function calc_max_price_per_task(Job storage job) internal view returns (uint) {
         return (job.timeout * job.max_worker_price
         + job.max_network_usage * job.max_network_price)
-        * job.redundancy * job.arguments.length;
-        // TODO: complete with manager payment
+        * job.redundancy
+        + job.management_price
+        * (job.redundancy + job.max_failures)
+        * (4 + job.timeout / job.min_checking_interval);
+    }
+
+    function calc_max_price(Job storage job) internal view returns (uint) {
+        return calc_max_price_per_task(job) * job.arguments.length;
     }
 
     function calc_job_id(address sender, uint128 nonce) internal pure returns (bytes32) {
@@ -114,12 +123,13 @@ contract Jobs {
         // TODO: check if correct and add manager...
         return job.arguments.length > 0 &&
 
-            job.timeout > 0 &&
-            job.max_failures > 0 &&
+            job.timeout > 9 &&
 
             job.max_worker_price > 0 &&
             job.max_network_price > 0 &&
             job.redundancy > 0 &&
+            job.min_checking_interval > 14 &&
+            job.management_price > 0 &&
 
             users[msg.sender].pending_money >= calc_max_price(job);
     }
@@ -142,9 +152,23 @@ contract Jobs {
             users[task.managers_addresses[i]].pending_money += job.management_price;
             emit PendingMoneyChanged(task.managers_addresses[i], users[task.managers_addresses[i]].pending_money);
         }
+
         uint256 management_price = job.management_price * task.managers_addresses.length;
         users[job.sender].locked_money -= management_price;
-        task.actual_cost += management_price;
+        users[job.sender].pending_money += calc_max_price_per_task(job) - management_price;
+    }
+
+    // Reverts if there is no job corresponding to `job_id`.
+    function is_job_completed(bytes32 job_id) public view returns (bool result) {
+        require(jobs[job_id].non_null/*, "unknown job"*/);
+
+        result = true;
+        for (uint128 i ; i < jobs[job_id].arguments.length ; i++) {
+            if (tasks[calc_task_id(job_id, i, jobs[job_id].arguments[i])].state == TaskState.Incomplete) {
+                result = false;
+                break;
+            }
+        }
     }
 
     // ------------------------------------
@@ -397,15 +421,11 @@ contract Jobs {
         delete_draft(find_draft_program(nonce));
         job = jobs[job_id];
 
-        // users[msg.sender].pending_jobs.push(job_id);
-        // emit JobPending(job_id);
-
         for (uint128 i; i < job.arguments.length ; i++) {
             bytes32 task_id = calc_task_id(job_id, i, job.arguments[i]);
             require(tasks[task_id].non_null == false, "task collision");
             tasks[task_id] = Task(job_id,
                                    i,
-                                   0,
                                    TaskState.Incomplete,
                                    new address[](0),
                                    new bytes(0),
@@ -426,13 +446,13 @@ contract Jobs {
     }
 
     // ------------------------------------
-    // Function that require proper consensus.
+    // Functions which require proper consensus.
 
     function set_managers(bytes32 task_id, address[] memory addresses) public {
         require(tasks[task_id].non_null/*, "unknown task"*/);
         require(msg.sender == oracle/*, "only the oracle can do that"*/);
         require(tasks[task_id].state == TaskState.Incomplete/*, "task already complete or failed"*/);
-        // TODO: check against the maximum number of managers possible?
+        require(addresses.length <= 4 + jobs[tasks[task_id].job_id].timeout - jobs[tasks[task_id].job_id].min_checking_interval/*, too many managers registered*/);
 
         tasks[task_id].managers_addresses = addresses;
     }
@@ -446,7 +466,6 @@ contract Jobs {
         task.state = TaskState.DefinetelyFailed;
         task.reason = reason;
         pay_managers(task);
-        // TODO: reimburse sender
 
         emit TaskDefinetelyFailed(task_id, reason);
         if (is_job_completed(task.job_id)) {
@@ -473,18 +492,21 @@ contract Jobs {
         task.network_prices = network_prices;
         */
 
-        // TODO: directly refund the caller ?
-
+        Job storage job = jobs[task.job_id];
+        uint total_actual_cost = 0;
         for (uint64 i ; i < workers_addresses.length ; i++) {
-            uint actual_cost = worker_prices[i] * jobs[task.job_id].timeout
-               + network_prices[i] * jobs[task.job_id].max_network_usage;
+            uint actual_cost = worker_prices[i] * job.timeout
+               + network_prices[i] * job.max_network_usage;
 
             users[workers_addresses[i]].pending_money += actual_cost;
-            users[jobs[task.job_id].sender].locked_money -= actual_cost;
-            task.actual_cost += actual_cost;
+            total_actual_cost += actual_cost;
             emit PendingMoneyChanged(workers_addresses[i], users[workers_addresses[i]].pending_money);
         }
+        users[job.sender].locked_money -= total_actual_cost;
+        users[job.sender].pending_money += calc_max_price_per_task(job) - total_actual_cost;
         pay_managers(task);
+
+        emit PendingMoneyChanged(job.sender, users[job.sender].pending_money);
 
         emit TaskCompleted(task_id, result);
         if (is_job_completed(task.job_id)) {
@@ -493,48 +515,14 @@ contract Jobs {
     }
 
     // Reverts if there is no task corresponding to `task_id`.
+    // TODO:
     function get_result(bytes32 task_id) public view returns (bytes memory) {
         require(tasks[task_id].non_null/*, "unknown task"*/);
         return tasks[task_id].result;
     }
 
-    // Reverts if there is no job corresponding to `job_id`.
-    function is_job_completed(bytes32 job_id) public view returns (bool result) {
-        require(jobs[job_id].non_null/*, "unknown job"*/);
-
-        result = true;
-        for (uint128 i ; i < jobs[job_id].arguments.length ; i++) {
-            if (tasks[calc_task_id(job_id, i, jobs[job_id].arguments[i])].state == TaskState.Incomplete) {
-                result = false;
-                break;
-            }
-        }
-    }
-
-    // Accepts the results, pays the workers and unlock the remaining money for the sender
-    // to recover.
-    /*
-    function validate_results(bytes32 job_id) public {
-        uint total_amount;
-        uint max_price = calc_max_price(jobs[job_id]);
-
-        for (uint128 i ; i < jobs[job_id].arguments.length ; i++) {
-            Task storage task = tasks[calc_task_id(job_id, i, jobs[job_id].arguments[i])];
-            for (uint64 j ; j < task.workers_addresses.length ; j++) {
-                uint amount = task.worker_prices[j] * jobs[job_id].timeout
-                   + task.network_prices[j] * jobs[job_id].max_network_usage;
-                users[task.workers_addresses[j]].pending_money += amount;
-                total_amount += amount;
-                emit PendingMoneyChanged(task.workers_addresses[j], users[task.workers_addresses[j]].pending_money);
-            }
-        }
-        users[msg.sender].locked_money -= max_price;
-        users[msg.sender].pending_money += max_price - total_amount;
-        emit PendingMoneyChanged(msg.sender, users[msg.sender].pending_money);
-    }
-   */
-
     // Reverts if there is no task corresponding to `task_id`.
+    // TODO:
     function get_task(bytes32 task_id) public view returns (bytes32, uint128, bytes memory) {
         Task storage task = tasks[task_id];
         require(task.non_null/*, "unknown task"*/);
@@ -549,7 +537,6 @@ contract Jobs {
     // Events
 
     event JobNew(address sender, uint128 nonce);
-    // event JobPending(bytes32 job_id);
     event TaskPending(bytes32 task_id);
     event TaskCompleted(bytes32 task_id, bytes result);
     event TaskDefinetelyFailed(bytes32 task_id, TaskErrorKind reason);
