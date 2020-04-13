@@ -319,7 +319,7 @@ impl Balthazar {
                     self.tx.clone(),
                     LogKind::Manager,
                     format!(
-                        "Task status from peer `{}` for task `{}`: `{:?}`",
+                        "Task status from peer `{}` for task `{}`: {}",
                         peer_id, task_id, status
                     ),
                 )

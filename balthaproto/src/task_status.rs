@@ -32,8 +32,9 @@ impl fmt::Display for TaskStatus {
             TaskStatus::Error(TaskErrorKind::Unknown) => {
                 write!(f, "An error occured but no description was provided.")
             }
-            // TODO: better display of result ?
-            TaskStatus::Completed(_) => write!(f, "Completed"),
+            TaskStatus::Completed(r) => {
+                write!(f, "Completed with result `{}`", String::from_utf8_lossy(r))
+            }
             TaskStatus::Unknown => write!(f, "Unknown"),
         }
     }

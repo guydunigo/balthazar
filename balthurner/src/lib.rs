@@ -24,6 +24,10 @@ pub enum ExecutorError<E> {
     ProgramCrash,
     /// The program was killed by the outside of the executor.
     Aborted,
+    /*
+    /// The tests returned an index which doesn't correspond to any result.
+    TestFailed(i64),
+    */
 }
 
 impl<E: fmt::Display> fmt::Display for ExecutorError<E> {
@@ -40,6 +44,13 @@ impl<E: fmt::Display> fmt::Display for ExecutorError<E> {
             ),
             ExecutorError::ProgramCrash => write!(f, "The program has crashed."),
             ExecutorError::Aborted => write!(f, "The program was aborted."),
+            /*
+            ExecutorError::TestFailed(i) => write!(
+                f,
+                "The tests returned an index which doesn't correspond to any result: {}",
+                i
+            ),
+            */
         }
     }
 }
