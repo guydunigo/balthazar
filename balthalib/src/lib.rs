@@ -24,7 +24,7 @@ pub enum Error {
     KeyPairReadFileError(io::Error),
     KeyPairDecodingError(DecodingError),
     StorageCreationError(store::StoragesWrapperCreationError),
-    RunnerError(run::RunnerError<run::wasm::Error>),
+    ExecutorError(run::ExecutorError<run::wasm::Error>),
     ChainError(chain::Error),
     NativeError(i64),
     MiscError(formats::Error),
@@ -46,9 +46,9 @@ impl From<store::StoragesWrapperCreationError> for Error {
     }
 }
 
-impl From<run::RunnerError<run::wasm::Error>> for Error {
-    fn from(src: run::RunnerError<run::wasm::Error>) -> Self {
-        Error::RunnerError(src)
+impl From<run::ExecutorError<run::wasm::Error>> for Error {
+    fn from(src: run::ExecutorError<run::wasm::Error>) -> Self {
+        Error::ExecutorError(src)
     }
 }
 
@@ -75,7 +75,7 @@ pub fn run(mode: RunMode, config: BalthazarConfig) -> Result<(), Error> {
         RunMode::Node => node::run(config)?,
         RunMode::Blockchain(mode) => chain::run(&mode, config.chain())?,
         RunMode::Storage => {}
-        RunMode::Runner(wasm_file_path, args, nb_times) => {
+        RunMode::Executor(wasm_file_path, args, nb_times) => {
             run::run(wasm_file_path, args, nb_times)?
         }
         RunMode::Native(args, nb_times) => {

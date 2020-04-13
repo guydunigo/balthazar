@@ -27,7 +27,7 @@ use proto::{
     worker::{TaskErrorKind, TaskExecute},
     NodeType, TaskStatus,
 };
-use run::{Runner, WasmRunner};
+use run::{Executor, WasmExecutor};
 use store::{FetchStorage, StoragesWrapper};
 
 use super::{BalthazarConfig, Error};
@@ -381,7 +381,16 @@ impl Balthazar {
                             ))
                             .await;
 
-                            match WasmRunner::run_async(&wasm[..], &task.argument[..]).await {
+                            match WasmExecutor::default()
+                                .run(
+                                    &wasm[..],
+                                    &task.argument[..],
+                                    task.timeout,
+                                    task.max_network_usage,
+                                )
+                                .0
+                                .await
+                            {
                                 Ok(result) => {
                                     self.spawn_log(
                                         LogKind::Worker,

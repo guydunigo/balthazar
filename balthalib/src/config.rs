@@ -16,7 +16,7 @@ pub enum RunMode {
     /// Interract with the storages directly.
     Storage,
     /// Run programs and test them.
-    Runner(Vec<u8>, Vec<u8>, usize),
+    Executor(Vec<u8>, Vec<u8>, usize),
     /// Run balthwasm program natively.
     Native(Vec<u8>, usize),
     /// Misc tools.

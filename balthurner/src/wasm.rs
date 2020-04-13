@@ -71,9 +71,9 @@ mod host_abi {
 
     /*
     /// For now, if the value returned by the test function is:
-    /// - `< 0` : an error occured
-    /// - `= 0` : incorrect result
-    /// - `> 0` : correct result
+    /// - `< 0` : an error occured or incorrect results
+    /// - `>= 0` and `< results.len()` : correct results
+    /// - `> results.len()` : incorrect results
     pub fn is_test_correct(result: WasmResult) -> bool {
         result > 0
     }

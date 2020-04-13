@@ -182,24 +182,23 @@ pub trait Executor {
 
 pub fn run(
     wasm_program: Vec<u8>,
-    args: Vec<u8>,
+    arg: Vec<u8>,
     nb_times: usize,
 ) -> ExecutorResult<(), wasm::Error> {
     let inst_read = Instant::now();
     let nb_times = if nb_times == 0 { 1 } else { nb_times };
     let mut exec = WasmExecutor::default();
 
-    // TODO: executes one time too much ?
-    let result = exec.run_sync(&wasm_program[..], &args[..], 10, 0)?;
+    let result = exec.run_sync(&wasm_program[..], &arg[..], 10, 0)?;
+    // TODO: store all results
     for _ in 0..(nb_times - 1) {
-        exec.run_sync(&wasm_program[..], &args[..], 10, 0)?;
+        exec.run_sync(&wasm_program[..], &arg[..], 10, 0)?;
     }
     let inst_res = Instant::now();
-    // TODO: test ?
 
     println!(
         "{:?} gives {:?}",
-        String::from_utf8_lossy(&args[..]),
+        String::from_utf8_lossy(&arg[..]),
         String::from_utf8_lossy(&result[..])
     );
     println!(
@@ -207,6 +206,10 @@ pub fn run(
         (inst_res - inst_read).as_millis(),
         (inst_res - inst_read).as_millis() / (nb_times as u128),
     );
+
+    print!("Testing...");
+    let test_result = exec.test_sync(&wasm_program[..], &arg[..], &vec![result][..], 10)?;
+    println!(" {}", test_result);
 
     Ok(())
 }

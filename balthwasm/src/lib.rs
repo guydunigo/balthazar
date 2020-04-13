@@ -38,21 +38,28 @@ pub fn my_run(argument: Vec<u8>) -> LocalResult<Vec<u8>> {
 pub fn my_test(argument: Vec<u8>) -> LocalResult<i64> {
     for i in 0..get_results_len()? {
         let result = get_result(i as u32)?;
-
-        let result = String::from_utf8_lossy(&result[1..result.len() - 1]);
-        let mut elems_iter = result.split(',');
-        let counter: usize = if let Some(counter) = elems_iter.next() {
-            counter.parse().map_err(|_| abi::RESULT_ERROR)?
-        } else {
-            return Err(abi::RESULT_ERROR);
-        };
-        let hash = elems_iter.next().ok_or(abi::RESULT_ERROR)?;
-
-        if hash_counter(counter) == hash && contains_pattern(&argument[..], hash) {
-            return Ok(i as i64);
+        if test_result(&argument[..], result)?.is_some() {
+            return Ok(i);
         }
     }
-    Err(abi::RESULT_TEST_NONE)
+    Err(abi::RESULT_ERROR)
+}
+
+pub fn test_result(argument: &[u8], result: Vec<u8>) -> LocalResult<Option<()>> {
+    let result = String::from_utf8_lossy(&result[1..result.len() - 1]);
+    let mut elems_iter = result.split(',');
+    let counter: usize = if let Some(counter) = elems_iter.next() {
+        counter.parse().map_err(|_| abi::RESULT_ERROR)?
+    } else {
+        return Err(abi::RESULT_ERROR);
+    };
+    let hash = elems_iter.next().ok_or(abi::RESULT_ERROR)?;
+
+    if hash_counter(counter) == hash && contains_pattern(argument, hash) {
+        Ok(Some(()))
+    } else {
+        Ok(None)
+    }
 }
 
 /*

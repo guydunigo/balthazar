@@ -8,14 +8,20 @@ pub type LocalResult<T> = Result<T, WasmResult>;
 
 const RESULT_OK: WasmResult = 0;
 pub const RESULT_ERROR: WasmResult = -1;
-/// No correct result was found when running a test.
-pub const RESULT_TEST_NONE: WasmResult = 0;
 
-fn wasm_to_result(res: WasmResult) -> Result<WasmResult, WasmResult> {
+fn wasm_to_result(res: WasmResult) -> LocalResult<WasmResult> {
     if res < 0 {
         Err(res)
     } else {
         Ok(res)
+    }
+}
+
+fn result_to_wasm(res: LocalResult<WasmResult>) -> WasmResult {
+    match res {
+        Ok(res) if res >= 0 => res,
+        Err(res) if res < 0 => res,
+        _ => RESULT_ERROR,
     }
 }
 
@@ -108,7 +114,7 @@ pub fn run() -> WasmResult {
 pub fn test() -> WasmResult {
     if let Ok(argument_bytes) = get_argument() {
         // We don't pass results directly in case only the first one is needed.
-        return my_test(argument_bytes);
+        return result_to_wasm(my_test(argument_bytes));
     }
     RESULT_ERROR
 }

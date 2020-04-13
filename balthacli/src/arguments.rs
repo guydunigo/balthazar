@@ -67,7 +67,7 @@ pub enum Subcommand {
     /// Interract with the storages directly.
     Storage,
     /// Run wasm programs.
-    Runner {
+    Executor {
         /// Provide a wasm program that will be passed to workers.
         wasm_file_path: PathBuf,
         /// Arguments to pass to the program.
@@ -94,11 +94,11 @@ impl std::convert::TryInto<RunMode> for Subcommand {
             Subcommand::Worker { .. } | Subcommand::Manager { .. } => RunMode::Node,
             Subcommand::Chain(mode) => RunMode::Blockchain(mode.into()),
             Subcommand::Storage => RunMode::Storage,
-            Subcommand::Runner {
+            Subcommand::Executor {
                 wasm_file_path,
                 args,
                 nb_times,
-            } => RunMode::Runner(
+            } => RunMode::Executor(
                 read(wasm_file_path).map_err(ParseArgsError::WasmProgramFileReadError)?,
                 args.clone().into_bytes(),
                 nb_times.unwrap_or(1),
@@ -540,7 +540,7 @@ fn try_parse_default_storage(s: &str) -> Result<StorageType, String> {
 }
 
 fn try_parse_workers(s: &str) -> Result<(Address, u64, u64), String> {
-    let mut iter = s.split(",");
+    let mut iter = s.split(',');
     let address = iter
         .next()
         .ok_or_else(|| "no worker".to_string())?
