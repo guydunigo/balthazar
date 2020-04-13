@@ -16,8 +16,22 @@ contract Jobs {
     }
     event CounterHasNewValue(uint128 new_counter);
 
-    enum ProgramKind { Wasm }
-    enum BestMethod { Cost, Performance }
+    // enum ProgramKind { Wasm }
+    // enum BestMethod { Cost, Performance }
+    enum TaskState {
+        Incomplete,
+        Completed,
+        DefinetelyFailed
+    }
+    enum TaskErrorKind {
+        IncorrectSpecification,
+        TimedOut,
+        DownloadError,
+        Runtime,
+        IncorrectResult,// ,
+        // Aborted,
+        Unknown
+    }
 
     struct Job {
         bytes[] arguments;
@@ -25,11 +39,14 @@ contract Jobs {
         uint64 max_worker_price;
         uint64 max_network_usage;
         uint64 max_network_price;
-        uint64 redundancy;
 
+        uint64 redundancy;
         uint64 max_failures;
 
-        string data;
+        uint64 min_checking_interval;
+        uint64 management_price;
+
+        bytes data;
 
         address sender;
         uint128 nonce;
@@ -40,16 +57,22 @@ contract Jobs {
     struct Task {
         bytes32 job_id;
         uint128 argument_id;
+        TaskState state;
+        address[] managers_addresses;
+
         bytes result;
-        address[] workers;
+        address[] workers_addresses;
         uint64[] worker_prices;
         uint64[] network_prices;
+
+        TaskErrorKind reason;
 
         bool non_null;
     }
 
     struct User {
-        bytes32[] pending_jobs;
+        // don't need to store that, just go through all nonces so all jobs for this user...
+        // bytes32[] pending_jobs;
         // bytes32[] completed_jobs;
         Job[] draft_jobs;
         uint128 next_nonce;
@@ -61,6 +84,13 @@ contract Jobs {
     mapping(bytes32 => Task) tasks;
     mapping(address => User) users;
 
+    // TODO: ability to set this address ?
+    address oracle;
+
+    constructor(address oracle_address) public {
+        oracle = oracle_address;
+    }
+
     // ------------------------------------
     // Job and tasks tool functions
 
@@ -68,6 +98,7 @@ contract Jobs {
         return (job.timeout * job.max_worker_price
         + job.max_network_usage * job.max_network_price)
         * job.redundancy * job.arguments.length;
+        // TODO: complete with manager payment
     }
 
     function calc_job_id(address sender, uint128 nonce) internal pure returns (bytes32) {
@@ -79,6 +110,7 @@ contract Jobs {
     }
 
     function is_draft_ready(Job storage job) internal view returns (bool) {
+        // TODO: check if correct and add manager...
         return job.arguments.length > 0 &&
 
             job.timeout > 0 &&
@@ -91,6 +123,7 @@ contract Jobs {
             users[msg.sender].pending_money >= calc_max_price(job);
     }
 
+    // TODO: useful? or directly store drafts to usual jobs...
     function find_draft_program(uint128 nonce) internal view returns (uint) {
         for (uint i ; i < users[msg.sender].draft_jobs.length ; i++) {
             if (users[msg.sender].draft_jobs[i].nonce == nonce) {
@@ -108,14 +141,18 @@ contract Jobs {
         users[msg.sender].next_nonce++;
     }
 
+    /*
     function get_pending_jobs() public view returns (bytes32[] memory) {
         return users[msg.sender].pending_jobs;
     }
+    */
+
     /*
     function get_completed_jobs() public view returns (bytes32[] memory) {
         return users[msg.sender].completed_jobs;
     }
     */
+
     function get_draft_jobs() public view returns (uint128[] memory list) {
         Job[] storage draft_jobs = users[msg.sender].draft_jobs;
         list = new uint128[](draft_jobs.length);
@@ -154,7 +191,9 @@ contract Jobs {
             1,
             1,
             0,
-            new string(0),
+            1, // TODO: minimum value
+            1, // TODO: minimum value
+            new bytes(0),
             msg.sender,
             nonce,
             true
@@ -180,15 +219,15 @@ contract Jobs {
     function set_parameters_draft(
         uint128 nonce,
         uint64 timeout,
-        uint64 max_failures,
-        uint64 redundancy// ,
+        uint64 redundancy,
+        uint64 max_failures//,
     ) public {
         require(timeout > 0 && redundancy > 0/*, "invalid data"*/);
         Job storage j = users[msg.sender].draft_jobs[find_draft_program(nonce)];
 
         j.timeout = timeout;
-        j.max_failures = max_failures;
         j.redundancy = redundancy;
+        j.max_failures = max_failures;
     }
     // Reverts if there is no job corresponding to `job_id`.
     function get_parameters(bytes32 job_id) public view returns (
@@ -199,19 +238,19 @@ contract Jobs {
         require(jobs[job_id].non_null/*, "unknown job"*/);
         return (
             jobs[job_id].timeout,
-            jobs[job_id].max_failures,
-            jobs[job_id].redundancy
+            jobs[job_id].redundancy,
+            jobs[job_id].max_failures
         );
     }
 
-    function get_data_draft(uint128 nonce) public view returns (string memory) {
+    function get_data_draft(uint128 nonce) public view returns (bytes memory) {
         return users[msg.sender].draft_jobs[find_draft_program(nonce)].data;
     }
-    function set_data_draft(uint128 nonce, string memory val) public {
+    function set_data_draft(uint128 nonce, bytes memory val) public {
         users[msg.sender].draft_jobs[find_draft_program(nonce)].data = val;
     }
     // Reverts if there is no job corresponding to `job_id`.
-    function get_data(bytes32 job_id) public view returns (string memory) {
+    function get_data(bytes32 job_id) public view returns (bytes memory) {
         require(jobs[job_id].non_null/*, "unknown job"*/);
         return jobs[job_id].data;
     }
@@ -272,6 +311,42 @@ contract Jobs {
         );
     }
 
+    function get_manager_parameters_draft(uint128 nonce) public view returns (
+        uint64,
+        uint64
+    ) {
+        Job storage j = users[msg.sender].draft_jobs[find_draft_program(nonce)];
+
+        return (
+            j.min_checking_interval,
+            j.management_price
+        );
+    }
+    // Reverts if `min_checking_interval` or `management_price` is null.
+    function set_manager_parameters_draft(
+        uint128 nonce,
+        uint64 min_checking_interval,
+        uint64 management_price
+    ) public {
+        require(min_checking_interval > 0 && management_price > 0/*, "invalid data"*/);
+        Job storage j = users[msg.sender].draft_jobs[find_draft_program(nonce)];
+
+        j.min_checking_interval = min_checking_interval;
+        j.management_price = management_price;
+    }
+    // Reverts if there is no job corresponding to `job_id`.
+    function get_manager_parameters(bytes32 job_id) public view returns (
+        uint64,
+        uint64
+    ) {
+        require(jobs[job_id].non_null/*, "unknown job"*/);
+
+        return (
+            jobs[job_id].min_checking_interval,
+            jobs[job_id].management_price
+        );
+    }
+
     // Reverts if there is no job corresponding to `job_id`.
     function get_sender_nonce(bytes32 job_id) public view returns (address, uint128) {
         require(jobs[job_id].non_null/*, "unknown job"*/);
@@ -298,28 +373,31 @@ contract Jobs {
 
     function ready(uint128 nonce) public {
         Job storage job = users[msg.sender].draft_jobs[find_draft_program(nonce)];
-        require(is_draft_ready(job), "conditions unmet");
+        require(is_draft_ready(job)/*, "conditions unmet"*/);
 
         bytes32 job_id = calc_job_id(job.sender, job.nonce);
-        require(jobs[job_id].non_null == false, "job collision");
+        require(jobs[job_id].non_null == false/*, "job collision"*/);
 
         // TODO: a lot of copies ? Directly store the job in jobs from the beginning?
         jobs[job_id] = job;
         delete_draft(find_draft_program(nonce));
         job = jobs[job_id];
 
-        users[msg.sender].pending_jobs.push(job_id);
-        emit JobPending(job_id);
+        // users[msg.sender].pending_jobs.push(job_id);
+        // emit JobPending(job_id);
 
         for (uint128 i; i < job.arguments.length ; i++) {
             bytes32 task_id = calc_task_id(job_id, i, job.arguments[i]);
             require(tasks[task_id].non_null == false, "task collision");
             tasks[task_id] = Task(job_id,
                                    i,
+                                   TaskState.Incomplete,
+                                   new address[](0),
                                    new bytes(0),
                                    new address[](0),
                                    new uint64[](0),
                                    new uint64[](0),
+                                   TaskErrorKind.Unknown,
                                    true);
             emit TaskPending(task_id);
         }
@@ -333,18 +411,50 @@ contract Jobs {
     // ------------------------------------
     // Function that require proper consensus.
 
-    function set_result(bytes32 task_id, bytes memory result, address[] memory workers, uint64[] memory worker_prices, uint64[] memory network_prices) public {
-        require(tasks[task_id].non_null, "unknown task");
-        require(tasks[task_id].result.length == 0, "already completed task");
-        require(result.length > 0, "empty result");
-        require(workers.length == worker_prices.length && workers.length == network_prices.length, "not same sizes");
-        require(workers.length == jobs[tasks[task_id].job_id].redundancy, "incorrect length");
+    function set_managers(bytes32 task_id, address[] memory addresses) public {
+        require(tasks[task_id].non_null/*, "unknown task"*/);
+        require(msg.sender == oracle/*, "only the oracle can do that"*/);
+        require(tasks[task_id].state == TaskState.Incomplete/*, "task already complete or failed"*/);
+        // TODO: check against the maximum number of managers possible?
 
+        tasks[task_id].managers_addresses = addresses;
+    }
+
+    function set_failed(bytes32 task_id, TaskErrorKind reason) public {
+        require(msg.sender == oracle/*, "only the oracle can do that"*/);
+        require(tasks[task_id].non_null/*, "unknown task"*/);
+        require(tasks[task_id].state == TaskState.Incomplete/*, "task already complete or failed"*/);
+
+        tasks[task_id].state = TaskState.DefinetelyFailed;
+        tasks[task_id].reason = reason;
+
+        // TODO: pay managers...
+        // TODO: check last task and emit signal?
+
+        emit TaskDefinetelyFailed(task_id, reason);
+    }
+
+    function set_completed(bytes32 task_id, bytes memory result, address[] memory workers_addresses, uint64[] memory worker_prices, uint64[] memory network_prices) public {
+        require(msg.sender == oracle/*, "only the oracle can do that"*/);
+        // TODO: really check everything or trust oracle ?
+        require(tasks[task_id].non_null/*, "unknown task"*/);
+        require(tasks[task_id].state == TaskState.Incomplete/*, "task already complete or failed"*/);
+        require(tasks[task_id].result.length == 0/*, "already completed task"*/);
+        require(result.length > 0/*, "empty result"*/);
+        require(workers_addresses.length == worker_prices.length && workers_addresses.length == network_prices.length/*, "not same sizes"*/);
+        require(workers_addresses.length == jobs[tasks[task_id].job_id].redundancy/*, "incorrect length"*/);
+
+        tasks[task_id].state = TaskState.Completed;
         tasks[task_id].result = result;
-        tasks[task_id].workers = workers;
+        // TODO: poind of storing those ? just pay them now and forget ?
+        tasks[task_id].workers_addresses = workers_addresses;
         tasks[task_id].worker_prices = worker_prices;
         tasks[task_id].network_prices = network_prices;
-        emit NewResult(task_id, result);
+
+        // TODO: pay workers and managers...
+        // TODO: check last task and emit signal?
+
+        emit TaskCompleted(task_id, result);
     }
 
     // Reverts if there is no task corresponding to `task_id`.
@@ -359,8 +469,9 @@ contract Jobs {
 
         result = true;
         for (uint128 i ; i < jobs[job_id].arguments.length ; i++) {
-            if (tasks[calc_task_id(job_id, i, jobs[job_id].arguments[i])].result.length == 0) {
+            if (tasks[calc_task_id(job_id, i, jobs[job_id].arguments[i])].state == TaskState.Incomplete) {
                 result = false;
+                break;
             }
         }
     }
@@ -376,12 +487,12 @@ contract Jobs {
 
         for (uint128 i ; i < jobs[job_id].arguments.length ; i++) {
             Task storage task = tasks[calc_task_id(job_id, i, jobs[job_id].arguments[i])];
-            for (uint64 j ; j < task.workers.length ; j++) {
+            for (uint64 j ; j < task.workers_addresses.length ; j++) {
                 uint amount = task.worker_prices[j] * jobs[job_id].timeout
                    + task.network_prices[j] * jobs[job_id].max_network_usage;
-                users[task.workers[j]].pending_money += amount;
+                users[task.workers_addresses[j]].pending_money += amount;
                 total_amount += amount;
-                emit PendingMoneyChanged(task.workers[j], users[task.workers[j]].pending_money);
+                emit PendingMoneyChanged(task.workers_addresses[j], users[task.workers_addresses[j]].pending_money);
             }
         }
         uint max_price = calc_max_price(jobs[job_id]);
@@ -389,6 +500,7 @@ contract Jobs {
         users[msg.sender].pending_money += max_price - total_amount;
         emit PendingMoneyChanged(msg.sender, users[msg.sender].pending_money);
 
+        /*
         bytes32[] storage pending_jobs = users[msg.sender].pending_jobs;
         uint i;
         for (; i < pending_jobs.length ; i++) {
@@ -400,6 +512,7 @@ contract Jobs {
             pending_jobs[i] = pending_jobs[pending_jobs.length - 1];
         }
         pending_jobs.pop();
+        */
     }
 
     // Reverts if there is no task corresponding to `task_id`.
@@ -417,8 +530,9 @@ contract Jobs {
     // Events
 
     event JobNew(address sender, uint128 nonce);
-    event JobPending(bytes32 job_id);
+    // event JobPending(bytes32 job_id);
     event TaskPending(bytes32 task_id);
-    event NewResult(bytes32 task_id, bytes result);
+    event TaskCompleted(bytes32 task_id, bytes result);
+    event TaskDefinetelyFailed(bytes32 task_id, TaskErrorKind reason);
     event PendingMoneyChanged(address account, uint new_val);
 }
