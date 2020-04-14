@@ -229,8 +229,8 @@ contract Jobs {
             1,
             1,
             0,
-            1, // TODO: minimum value
-            1, // TODO: minimum value
+            15,
+            1,
             new bytes(0),
             msg.sender,
             nonce,
@@ -514,15 +514,18 @@ contract Jobs {
         }
     }
 
+    // Returns the state of the task.
+    // If it's Complete, only the result, the last value is relevent.
+    // If it's DefinetelyFailed, only the failure reason, the second value is relevent.
+    // If it's Incomplete, none of the other values mean anything.
     // Reverts if there is no task corresponding to `task_id`.
-    // TODO:
-    function get_result(bytes32 task_id) public view returns (bytes memory) {
-        require(tasks[task_id].non_null/*, "unknown task"*/);
-        return tasks[task_id].result;
+    function get_state(bytes32 task_id) public view returns (TaskState, TaskErrorKind, bytes memory) {
+        Task storage task = tasks[task_id];
+        require(task.non_null/*, "unknown task"*/);
+        return (task.state, task.reason, task.result);
     }
 
     // Reverts if there is no task corresponding to `task_id`.
-    // TODO:
     function get_task(bytes32 task_id) public view returns (bytes32, uint128, bytes memory) {
         Task storage task = tasks[task_id];
         require(task.non_null/*, "unknown task"*/);

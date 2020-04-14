@@ -148,37 +148,44 @@ impl<T: fmt::Display> fmt::Display for UnknownValue<T> {
 
 impl<T: fmt::Debug + fmt::Display> std::error::Error for UnknownValue<T> {}
 
-pub const MIN_TIMEOUT: u64 = 1;
+pub const MIN_TIMEOUT: u64 = 10; // TODO: maybe too big ?
 pub const MIN_CPU_COUNT: u64 = 1;
 pub const MIN_REDUNDANCY: u64 = 1;
 pub const MIN_WORKER_PRICE: u64 = 1;
 pub const MIN_NETWORK_PRICE: u64 = 1;
+pub const MIN_CHECKING_INTERVAL: u64 = 15;
+pub const MIN_MAN_PRICE: u64 = 1;
 pub const DEFAULT_PURITY: bool = false;
 
 /// Description of a Job.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Job {
-    pub program_kind: ProgramKind,
-    pub program_addresses: Vec<String>,
-    pub program_hash: Multihash,
-    pub arguments: Vec<Vec<u8>>,
+    program_kind: ProgramKind,
+    program_addresses: Vec<String>,
+    program_hash: Multihash,
+    arguments: Vec<Vec<u8>>,
 
-    pub timeout: u64,
-    pub max_failures: u64,
-    pub best_method: BestMethod,
-    pub max_worker_price: u64,
-    pub min_cpu_count: u64,
-    pub min_memory: u64,
-    pub max_network_usage: u64,
-    pub max_network_price: u64,
-    pub min_network_speed: u64,
+    timeout: u64,
+    max_worker_price: u64,
+    max_network_usage: u64,
+    max_network_price: u64,
 
-    pub redundancy: u64,
-    pub is_program_pure: bool,
+    min_checking_interval: u64,
+    management_price: u64,
 
-    pub sender: Address,
+    redundancy: u64,
+    max_failures: u64,
+
+    best_method: BestMethod,
+    min_cpu_count: u64,
+    min_memory: u64,
+    min_network_speed: u64,
+
+    is_program_pure: bool,
+
+    sender: Address,
     /// `None` if the job hasn't been sent yet or isn't known.
-    pub nonce: Option<u128>,
+    nonce: Option<u128>,
 }
 
 impl fmt::Display for Job {
@@ -211,25 +218,25 @@ impl fmt::Display for Job {
         writeln!(f, "]")?;
         writeln!(f)?;
         writeln!(f, "Timeout: {}s", self.timeout)?;
-        writeln!(f, "Max failures: {}", self.max_failures)?;
-        writeln!(f)?;
-        writeln!(f, "Best method: {:?}", self.best_method)?;
         writeln!(f, "Max worker price: {} money/s", self.max_worker_price)?;
-        writeln!(f, "Min CPU count: {}", self.min_cpu_count)?;
-        writeln!(f, "Min memory: {} kilobytes", self.min_memory)?;
         writeln!(f, "Max network usage: {} kilobits", self.max_network_usage)?;
         writeln!(
             f,
             "Max network price: {} money/kilobits",
             self.max_network_price
         )?;
+        writeln!(f)?;
+        writeln!(f, "Redundancy: {}", self.redundancy)?;
+        writeln!(f, "Max failures: {}", self.max_failures)?;
+        writeln!(f)?;
+        writeln!(f, "Best method: {:?}", self.best_method)?;
+        writeln!(f, "Min CPU count: {}", self.min_cpu_count)?;
+        writeln!(f, "Min memory: {} kilobytes", self.min_memory)?;
         writeln!(
             f,
             "Min network speed: {} kilobits/s",
             self.min_network_speed
         )?;
-        writeln!(f)?;
-        writeln!(f, "Redundancy: {}", self.redundancy)?;
         writeln!(
             f,
             "Is program pure? {}",
@@ -263,15 +270,17 @@ impl Job {
             program_hash,
             arguments,
             timeout: MIN_TIMEOUT,
-            max_failures: 0,
-            best_method: BestMethod::default(),
             max_worker_price: MIN_WORKER_PRICE,
-            min_cpu_count: MIN_CPU_COUNT,
-            min_memory: 0,
             max_network_usage: 0,
             max_network_price: MIN_NETWORK_PRICE,
-            min_network_speed: 0,
+            min_checking_interval: MIN_CHECKING_INTERVAL,
+            management_price: MIN_MAN_PRICE,
             redundancy: MIN_REDUNDANCY,
+            max_failures: 0,
+            best_method: BestMethod::default(),
+            min_cpu_count: MIN_CPU_COUNT,
+            min_memory: 0,
+            min_network_speed: 0,
             is_program_pure: DEFAULT_PURITY,
             sender,
             nonce: None,
@@ -299,18 +308,6 @@ impl Job {
     pub fn set_timeout(&mut self, new: u64) {
         self.timeout = if new > MIN_TIMEOUT { new } else { MIN_TIMEOUT };
     }
-    pub fn max_failures(&self) -> u64 {
-        self.max_failures
-    }
-    pub fn set_max_failures(&mut self, new: u64) {
-        self.max_failures = new;
-    }
-    pub fn best_method(&self) -> BestMethod {
-        self.best_method
-    }
-    pub fn set_best_method(&mut self, new: BestMethod) {
-        self.best_method = new;
-    }
     pub fn max_worker_price(&self) -> u64 {
         self.max_worker_price
     }
@@ -320,22 +317,6 @@ impl Job {
         } else {
             MIN_WORKER_PRICE
         };
-    }
-    pub fn min_cpu_count(&self) -> u64 {
-        self.min_cpu_count
-    }
-    pub fn set_min_cpu_count(&mut self, new: u64) {
-        self.min_cpu_count = if new > MIN_CPU_COUNT {
-            new
-        } else {
-            MIN_CPU_COUNT
-        };
-    }
-    pub fn min_memory(&self) -> u64 {
-        self.min_memory
-    }
-    pub fn set_min_memory(&mut self, new: u64) {
-        self.min_memory = new;
     }
     pub fn max_network_usage(&self) -> u64 {
         self.max_network_usage
@@ -353,11 +334,25 @@ impl Job {
             MIN_NETWORK_PRICE
         };
     }
-    pub fn min_network_speed(&self) -> u64 {
-        self.min_network_speed
+    pub fn min_checking_interval(&self) -> u64 {
+        self.min_checking_interval
     }
-    pub fn set_min_network_speed(&mut self, new: u64) {
-        self.min_network_speed = new;
+    pub fn set_min_checking_interval(&mut self, new: u64) {
+        self.min_checking_interval = if new > MIN_CHECKING_INTERVAL {
+            new
+        } else {
+            MIN_CHECKING_INTERVAL
+        };
+    }
+    pub fn management_price(&self) -> u64 {
+        self.management_price
+    }
+    pub fn set_management_price(&mut self, new: u64) {
+        self.management_price = if new > MIN_MAN_PRICE {
+            new
+        } else {
+            MIN_MAN_PRICE
+        };
     }
     pub fn redundancy(&self) -> u64 {
         self.redundancy
@@ -368,6 +363,40 @@ impl Job {
         } else {
             MIN_REDUNDANCY
         };
+    }
+    pub fn max_failures(&self) -> u64 {
+        self.max_failures
+    }
+    pub fn set_max_failures(&mut self, new: u64) {
+        self.max_failures = new;
+    }
+    pub fn best_method(&self) -> BestMethod {
+        self.best_method
+    }
+    pub fn set_best_method(&mut self, new: BestMethod) {
+        self.best_method = new;
+    }
+    pub fn min_cpu_count(&self) -> u64 {
+        self.min_cpu_count
+    }
+    pub fn set_min_cpu_count(&mut self, new: u64) {
+        self.min_cpu_count = if new > MIN_CPU_COUNT {
+            new
+        } else {
+            MIN_CPU_COUNT
+        };
+    }
+    pub fn min_memory(&self) -> u64 {
+        self.min_memory
+    }
+    pub fn set_min_memory(&mut self, new: u64) {
+        self.min_memory = new;
+    }
+    pub fn min_network_speed(&self) -> u64 {
+        self.min_network_speed
+    }
+    pub fn set_min_network_speed(&mut self, new: u64) {
+        self.min_network_speed = new;
     }
     pub fn is_program_pure(&self) -> bool {
         self.is_program_pure
@@ -394,9 +423,11 @@ impl Job {
             && !self.arguments.is_empty()
             && self.timeout >= MIN_TIMEOUT
             && self.max_worker_price >= MIN_WORKER_PRICE
-            && self.min_cpu_count >= MIN_CPU_COUNT
             && self.max_network_price >= MIN_NETWORK_PRICE
+            && self.min_checking_interval >= MIN_CHECKING_INTERVAL
+            && self.management_price >= MIN_MAN_PRICE
             && self.redundancy >= MIN_REDUNDANCY
+            && self.min_cpu_count >= MIN_CPU_COUNT
     }
 
     /// Calculate job id of current job if nonce is set.
@@ -410,10 +441,19 @@ impl Job {
 
     /// Calculates the maximum amount of money that can be used by the whole job.
     pub fn calc_max_price(&self) -> u64 {
+        self.arguments.len() as u64 * self.calc_max_price_per_task()
+    }
+
+    /// Calculates the maximum amount of money that can be used for a single task.
+    pub fn calc_max_price_per_task(&self) -> u64 {
+        // Workers:
         self.redundancy
-            * self.arguments.len() as u64
             * (self.timeout * self.max_worker_price
                 + self.max_network_usage * self.max_network_price)
+        // Managers:
+            + self.management_price
+                * (self.redundancy + self.max_failures)
+                * (4 + self.timeout / self.min_checking_interval)
     }
 
     /// This function creates a protobuf message serializing the data which couldn't be

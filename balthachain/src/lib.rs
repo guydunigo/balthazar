@@ -45,8 +45,8 @@ pub enum Error {
     CouldntFindJobNonceEvent,
     MultiaddrParse(multiaddr::Error),
     Multihash(multihash::DecodeOwnedError),
-    ProgramKindParse(UnknownValue<(u64, Option<Multihash>)>),
-    BestMethodParse(UnknownValue<u64>),
+    TaskStateParse(UnknownValue<u64>),
+    TaskErrorKindParse(UnknownValue<u64>),
     NotEnoughMoneyInLocalAccount,
     NotEnoughMoneyInPending,
     OtherDataEncodeError(EncodeError),
@@ -114,9 +114,11 @@ impl fmt::Display for Error {
 pub enum RunMode {
     Block,
     Balance(Option<Address>),
+    /*
     JobsCounterGet,
     JobsCounterSet(u128),
     JobsCounterInc,
+    */
     /// Subscribe to Jobs smart contract given events or if none are provided, all of them.
     JobsSubscribe(Vec<JobsEventKind>),
     /// List all Jobs smart contract events.
@@ -128,15 +130,15 @@ pub enum RunMode {
         program_hash: Multihash,
         arguments: Vec<Vec<u8>>,
         timeout: u64,
-        max_failures: u64,
-        best_method: BestMethod,
         max_worker_price: u64,
-        min_cpu_count: u64,
-        min_memory: u64,
         max_network_usage: u64,
         max_network_price: u64,
-        min_network_speed: u64,
         redundancy: u64,
+        max_failures: u64,
+        min_network_speed: u64,
+        best_method: BestMethod,
+        min_cpu_count: u64,
+        min_memory: u64,
         is_program_pure: bool,
     },
     /// Get an already validated job.
@@ -148,8 +150,11 @@ pub enum RunMode {
     JobsGetDraftJob {
         nonce: u128,
     },
+    /*
     /// Get a list of pending job ids.
+    // TODO
     JobsGetPendingJobs,
+    */
     /// Get a list of pending drafts nonces.
     JobsGetDraftJobs,
     /// Remove a draft job.
@@ -157,17 +162,20 @@ pub enum RunMode {
         nonce: u128,
     },
     /// Query a result if it exists.
+    // TODO
     JobsGetResult {
         task_id: TaskId,
     },
     /// Send a result and workers to the sc.
     /// There must be as many workers as job's `redundancy`.
+    // TODO
     JobsSetResult {
         task_id: TaskId,
         result: Vec<u8>,
         // Workers ethereum address, worker_price, network_price.
         workers: Vec<(Address, u64, u64)>,
     },
+    */
     /// Get money amounts on both locked and pending accounts.
     JobsGetMoney,
     /// Send money to pending account.
@@ -182,11 +190,6 @@ pub enum RunMode {
     /// money, will lock the job and send the tasks for execution.
     JobsReady {
         nonce: u128,
-    },
-    /// When all the tasks have a corresponding result, the owner can set job as validated,
-    /// to pay the workers and unlock the remaning money.
-    JobsValidate {
-        job_id: JobId,
     },
 }
 
