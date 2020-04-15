@@ -52,6 +52,7 @@ contract Jobs {
         address sender;
         uint128 nonce;
 
+        bool is_draft;
         bool non_null;
     }
 
@@ -77,7 +78,7 @@ contract Jobs {
         // don't need to store that, just go through all nonces so all jobs for this user...
         // bytes32[] pending_jobs;
         // bytes32[] completed_jobs;
-        Job[] draft_jobs;
+        // Job[] draft_jobs;
         uint128 next_nonce;
         uint256 locked_money;
         uint256 pending_money;
@@ -134,15 +135,17 @@ contract Jobs {
             users[msg.sender].pending_money >= calc_max_price(job);
     }
 
+    /*
     // TODO: useful? or directly store drafts to usual jobs...
     function find_draft_program(uint128 nonce) internal view returns (uint) {
-        for (uint i ; i < users[msg.sender].draft_jobs.length ; i++) {
-            if (users[msg.sender].draft_jobs[i].nonce == nonce) {
+        for (uint i ; i < users[msg.sender].is_draft_jobs.length ; i++) {
+            if (users[msg.sender].is_draft_jobs[i].nonce == nonce) {
                 return i;
             }
         }
         revert("Not found.");
     }
+    */
 
     function pay_managers(Task storage task) internal {
         require(task.managers_addresses.length > 0/*, no managers set*/);
@@ -174,6 +177,13 @@ contract Jobs {
     // ------------------------------------
     // User functions
 
+    // Defines the next nonce that will be used for a draft meaning there may exist a job
+    // (or at least a draft) for each : `0 <= nonce < next_nonce`.
+    // TODO: restrict to sender ?
+    function get_next_nonce() public view returns (uint128) {
+        return users[msg.sender].next_nonce;
+    }
+
     function next_nonce_and_increase() internal returns (uint128 nonce) {
         nonce = users[msg.sender].next_nonce;
         users[msg.sender].next_nonce++;
@@ -191,16 +201,20 @@ contract Jobs {
     }
     */
 
+    /*
     function get_draft_jobs() public view returns (uint128[] memory list) {
-        Job[] storage draft_jobs = users[msg.sender].draft_jobs;
+        Job[] storage draft_jobs = users[msg.sender].is_draft_jobs;
         list = new uint128[](draft_jobs.length);
         for (uint i; i < draft_jobs.length; i++) {
             list[i] = draft_jobs[i].nonce;
         }
     }
+    */
+    // TODO: restrict to sender ?
     function get_pending_locked_money() public view returns (uint256, uint256) {
         return (users[msg.sender].pending_money, users[msg.sender].locked_money);
     }
+    // TODO: restrict to sender ?
     function send_pending_money() public payable {
         users[msg.sender].pending_money += msg.value;
         emit PendingMoneyChanged(msg.sender, users[msg.sender].pending_money);
@@ -219,9 +233,13 @@ contract Jobs {
     // ------------------------------------
     // Job manipulation functions
 
-    function create_job() public {
-        uint128 nonce = next_nonce_and_increase();
-        users[msg.sender].draft_jobs.push(Job(
+    function create_draft() public {
+        uint128 nonce;
+        do {
+            nonce = next_nonce_and_increase();
+        } while (jobs[calc_job_id(msg.sender, nonce)].non_null);
+
+        jobs[calc_job_id(msg.sender, nonce)] = Job(
             new bytes[](0),
             1,
             1,
@@ -234,38 +252,15 @@ contract Jobs {
             new bytes(0),
             msg.sender,
             nonce,
+            true,
             true
-        ));
+        );
         emit JobNew(msg.sender, nonce);
     }
-
-    function get_parameters_draft(uint128 nonce) public view returns (
-        // ProgramKind,
-        uint64,
-        uint64,
-        uint64
-    ) {
-        Job storage j = users[msg.sender].draft_jobs[find_draft_program(nonce)];
-
-        return (
-            j.timeout,
-            j.max_failures,
-            j.redundancy
-        );
-    }
-    // Reverts if `timeout` or `max_failures` is null.
-    function set_parameters_draft(
-        uint128 nonce,
-        uint64 timeout,
-        uint64 redundancy,
-        uint64 max_failures//,
-    ) public {
-        require(timeout > 0 && redundancy > 0/*, "invalid data"*/);
-        Job storage j = users[msg.sender].draft_jobs[find_draft_program(nonce)];
-
-        j.timeout = timeout;
-        j.redundancy = redundancy;
-        j.max_failures = max_failures;
+    function check_is_our_draft(Job storage job) internal view {
+        require(job.non_null/*, "null job"*/);
+        require(job.sender == msg.sender/*, "job's sender isn't the message's sender"*/);
+        require(job.is_draft/*, "job already locked ready"*/);
     }
     // Reverts if there is no job corresponding to `job_id`.
     function get_parameters(bytes32 job_id) public view returns (
@@ -273,153 +268,143 @@ contract Jobs {
         uint64,
         uint64
     ) {
-        require(jobs[job_id].non_null/*, "unknown job"*/);
+        Job storage job = jobs[job_id];
+        require(job.non_null/*, "unknown job"*/);
         return (
-            jobs[job_id].timeout,
-            jobs[job_id].redundancy,
-            jobs[job_id].max_failures
+            job.timeout,
+            job.redundancy,
+            job.max_failures
         );
     }
+    // Reverts if `timeout` or `max_failures` is null.
+    function set_parameters(
+        bytes32 job_id,
+        uint64 timeout,
+        uint64 redundancy,
+        uint64 max_failures//,
+    ) public {
+        require(timeout > 0 && redundancy > 0/*, "invalid data"*/);
+        Job storage job = jobs[job_id];
+        check_is_our_draft(job);
 
-    function get_data_draft(uint128 nonce) public view returns (bytes memory) {
-        return users[msg.sender].draft_jobs[find_draft_program(nonce)].data;
+        job.timeout = timeout;
+        job.redundancy = redundancy;
+        job.max_failures = max_failures;
     }
-    function set_data_draft(uint128 nonce, bytes memory val) public {
-        users[msg.sender].draft_jobs[find_draft_program(nonce)].data = val;
-    }
+
     // Reverts if there is no job corresponding to `job_id`.
     function get_data(bytes32 job_id) public view returns (bytes memory) {
-        require(jobs[job_id].non_null/*, "unknown job"*/);
-        return jobs[job_id].data;
+        Job storage job = jobs[job_id];
+        require(job.non_null/*, "unknown job"*/);
+        return job.data;
+    }
+    function set_data(bytes32 job_id, bytes memory val) public {
+        Job storage job = jobs[job_id];
+        check_is_our_draft(job);
+
+        job.data = val;
     }
 
-    function get_arguments_draft(uint128 nonce) public view returns (bytes[] memory) {
-        return users[msg.sender].draft_jobs[find_draft_program(nonce)].arguments;
-    }
-    // Reverts if the provided array is empty.
-    function set_arguments_draft(uint128 nonce, bytes[] memory val) public {
-        require(val.length > 0/*, "empty array"*/);
-        users[msg.sender].draft_jobs[find_draft_program(nonce)].arguments = val;
-    }
     // Reverts if there is no job corresponding to `job_id`.
     function get_arguments(bytes32 job_id) public view returns (bytes[] memory) {
-        require(jobs[job_id].non_null/*, "unknown job"*/);
-        return jobs[job_id].arguments;
+        Job storage job = jobs[job_id];
+        require(job.non_null/*, "unknown job"*/);
+        return job.arguments;
+    }
+    // Reverts if the provided array is empty.
+    function set_arguments(bytes32 job_id, bytes[] memory val) public {
+        require(val.length > 0/*, "empty array"*/);
+        Job storage job = jobs[job_id];
+        check_is_our_draft(job);
+
+        job.arguments = val;
     }
 
-    function get_worker_parameters_draft(uint128 nonce) public view returns (
-        uint64,
-        uint64,
-        uint64
-    ) {
-        Job storage j = users[msg.sender].draft_jobs[find_draft_program(nonce)];
-
-        return (
-            j.max_worker_price,
-            j.max_network_usage,
-            j.max_network_price
-        );
-    }
-    // Reverts if `max_worker_price` or `max_network_price` is null.
-    function set_worker_parameters_draft(
-        uint128 nonce,
-        uint64 max_worker_price,
-        uint64 max_network_usage,
-        uint64 max_network_price
-    ) public {
-        require(max_worker_price > 0 && max_network_price > 0/*, "invalid data"*/);
-        Job storage j = users[msg.sender].draft_jobs[find_draft_program(nonce)];
-
-        j.max_worker_price = max_worker_price;
-        j.max_network_usage = max_network_usage;
-        j.max_network_price = max_network_price;
-    }
     // Reverts if there is no job corresponding to `job_id`.
     function get_worker_parameters(bytes32 job_id) public view returns (
         uint64,
         uint64,
         uint64
     ) {
-        require(jobs[job_id].non_null/*, "unknown job"*/);
+        Job storage job = jobs[job_id];
+        require(job.non_null/*, "unknown job"*/);
 
         return (
-            jobs[job_id].max_worker_price,
-            jobs[job_id].max_network_usage,
-            jobs[job_id].max_network_price// ,
+            job.max_worker_price,
+            job.max_network_usage,
+            job.max_network_price// ,
         );
     }
-
-    function get_manager_parameters_draft(uint128 nonce) public view returns (
-        uint64,
-        uint64
-    ) {
-        Job storage j = users[msg.sender].draft_jobs[find_draft_program(nonce)];
-
-        return (
-            j.min_checking_interval,
-            j.management_price
-        );
-    }
-    // Reverts if `min_checking_interval` or `management_price` is null.
-    function set_manager_parameters_draft(
-        uint128 nonce,
-        uint64 min_checking_interval,
-        uint64 management_price
+    // Reverts if `max_worker_price` or `max_network_price` is null.
+    function set_worker_parameters(
+        bytes32 job_id,
+        uint64 max_worker_price,
+        uint64 max_network_usage,
+        uint64 max_network_price
     ) public {
-        require(min_checking_interval > 0 && management_price > 0/*, "invalid data"*/);
-        Job storage j = users[msg.sender].draft_jobs[find_draft_program(nonce)];
+        require(max_worker_price > 0 && max_network_price > 0/*, "invalid data"*/);
+        Job storage job = jobs[job_id];
+        check_is_our_draft(job);
 
-        j.min_checking_interval = min_checking_interval;
-        j.management_price = management_price;
+        job.max_worker_price = max_worker_price;
+        job.max_network_usage = max_network_usage;
+        job.max_network_price = max_network_price;
     }
+
     // Reverts if there is no job corresponding to `job_id`.
     function get_manager_parameters(bytes32 job_id) public view returns (
         uint64,
         uint64
     ) {
-        require(jobs[job_id].non_null/*, "unknown job"*/);
+        Job storage job = jobs[job_id];
+        require(job.non_null/*, "unknown job"*/);
 
         return (
-            jobs[job_id].min_checking_interval,
-            jobs[job_id].management_price
+            job.min_checking_interval,
+            job.management_price
         );
+    }
+    // Reverts if `min_checking_interval` or `management_price` is null.
+    function set_manager_parameters(
+        bytes32 job_id,
+        uint64 min_checking_interval,
+        uint64 management_price
+    ) public {
+        require(min_checking_interval > 0 && management_price > 0/*, "invalid data"*/);
+        Job storage job = jobs[job_id];
+        check_is_our_draft(job);
+
+        job.min_checking_interval = min_checking_interval;
+        job.management_price = management_price;
     }
 
     // Reverts if there is no job corresponding to `job_id`.
     function get_sender_nonce(bytes32 job_id) public view returns (address, uint128) {
-        require(jobs[job_id].non_null/*, "unknown job"*/);
-        return (jobs[job_id].sender, jobs[job_id].nonce);
+        Job storage job = jobs[job_id];
+        require(job.non_null/*, "unknown job"*/);
+        return (job.sender, job.nonce);
+    }
+
+    function is_draft(bytes32 job_id) public view returns (bool) {
+        Job storage job = jobs[job_id];
+        require(job.non_null/*, "unknown job"*/);
+        return job.is_draft;
     }
 
     // Reverts if there is no draft job corresponding to `id`.
-    function delete_draft(uint id) internal returns (Job memory job) {
-        User storage user = users[msg.sender];
-        require(user.draft_jobs.length > id/*, "unknown id"*/);
+    function delete_draft(bytes32 job_id) internal {
+        Job storage job = jobs[job_id];
+        check_is_our_draft(job);
 
-        job = user.draft_jobs[id];
-
-        if (user.draft_jobs.length > id + 1) {
-            user.draft_jobs[id] = user.draft_jobs[user.draft_jobs.length - 1];
-        }
-
-        user.draft_jobs.pop();
+        job.non_null = false; // just in case...
+        delete jobs[job_id];
     }
 
-    function delete_draft_nonce(uint128 nonce) public {
-        delete_draft(find_draft_program(nonce));
-    }
-
-    function ready(uint128 nonce) public {
-        Job storage job = users[msg.sender].draft_jobs[find_draft_program(nonce)];
+    function ready(bytes32 job_id) public {
+        Job storage job = jobs[job_id];
+        check_is_our_draft(job);
         require(is_draft_ready(job)/*, "conditions unmet"*/);
-
-        bytes32 job_id = calc_job_id(job.sender, job.nonce);
-        require(jobs[job_id].non_null == false/*, "job collision"*/);
-
-        // TODO: a lot of copies ? Directly store the job in jobs from the beginning?
-        jobs[job_id] = job;
-        delete_draft(find_draft_program(nonce));
-        job = jobs[job_id];
+        job.is_draft = false;
 
         for (uint128 i; i < job.arguments.length ; i++) {
             bytes32 task_id = calc_task_id(job_id, i, job.arguments[i]);
