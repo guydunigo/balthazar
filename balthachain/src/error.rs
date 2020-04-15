@@ -3,6 +3,7 @@ use proto::{DecodeError, EncodeError};
 use std::fmt;
 use web3::{contract::Error as ContractError, types::Log};
 
+// TODO: inconsistent naming
 #[derive(Debug)]
 pub enum Error {
     MissingLocalAddress,
@@ -11,7 +12,7 @@ pub enum Error {
     Contract(ContractError),
     EthAbi(ethabi::Error),
     UnsupportedProgramKind(ProgramKind),
-    CouldntParseJobsEvent(String),
+    CouldntParseJobsEventName(String),
     CouldntParseJobsEventFromLog(Box<Log>),
     JobsEventDataWrongSize {
         expected: usize,

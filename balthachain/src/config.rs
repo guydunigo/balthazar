@@ -1,4 +1,4 @@
-pub use web3::types::Address;
+use web3::types::Address;
 
 /// Configuration for the Ethereum RPC API.
 #[derive(Clone, Debug)]
