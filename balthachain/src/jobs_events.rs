@@ -1,4 +1,4 @@
-use super::{convert_task_error_kind, Error};
+use super::{try_convert_task_error_kind, Error};
 use misc::job::{JobId, TaskId, HASH_SIZE};
 use proto::worker::TaskErrorKind;
 use std::{
@@ -142,7 +142,7 @@ impl TryFrom<(&ethabi::Contract, Log)> for JobsEvent {
                             .as_u64();
                             return Ok(JobsEvent::TaskDefinetelyFailed {
                                 task_id,
-                                reason: convert_task_error_kind(reason_nb)
+                                reason: try_convert_task_error_kind(reason_nb)
                                     .ok_or(Error::TaskErrorKindParse(reason_nb))?,
                             });
                         } else {

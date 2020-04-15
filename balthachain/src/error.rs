@@ -1,7 +1,10 @@
 use misc::{job::ProgramKind, multiaddr, multihash};
 use proto::{DecodeError, EncodeError};
 use std::fmt;
-use web3::{contract::Error as ContractError, types::Log};
+use web3::{
+    contract::Error as ContractError,
+    types::{Address, Log, U256},
+};
 
 // TODO: inconsistent naming
 #[derive(Debug)]
@@ -26,7 +29,7 @@ pub enum Error {
     Multihash(multihash::DecodeOwnedError),
     TaskStateParse(u64),
     TaskErrorKindParse(u64),
-    NotEnoughMoneyInLocalAccount,
+    NotEnoughMoneyInAccount(Address, U256),
     NotEnoughMoneyInPending,
     OtherDataEncodeError(EncodeError),
     OtherDataDecodeError(DecodeError),

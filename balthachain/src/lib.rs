@@ -10,8 +10,8 @@ mod error;
 pub use error::Error;
 mod config;
 pub use config::ChainConfig;
-mod run;
-pub use run::{run, RunMode};
+// mod run;
+// pub use run::{run, RunMode};
 
 use ethabi::Event;
 use futures::{compat::Compat01As03, future, Stream, StreamExt};
@@ -31,7 +31,7 @@ use web3::{
 /// Converts the integer value returned by the smart-contract into a [`TaskErrorKind`]
 /// enum.
 /// Returns [`None`] if the value is unknown.
-fn convert_task_error_kind(reason_nb: u64) -> Option<TaskErrorKind> {
+fn try_convert_task_error_kind(reason_nb: u64) -> Option<TaskErrorKind> {
     match reason_nb {
         0 => Some(TaskErrorKind::IncorrectSpecification),
         1 => Some(TaskErrorKind::TimedOut),
@@ -39,6 +39,27 @@ fn convert_task_error_kind(reason_nb: u64) -> Option<TaskErrorKind> {
         3 => Some(TaskErrorKind::Runtime),
         4 => Some(TaskErrorKind::IncorrectResult),
         5 => Some(TaskErrorKind::Unknown),
+        _ => None,
+    }
+}
+
+/// State a task can be on the blockchain.
+pub enum JobsTaskState {
+    /// The task can still be executed and all.
+    Incomplete,
+    /// The task was successfuly computed and here is the selected result.
+    /// All involved parties are paid and the sender has been refunded from the
+    /// remaining money for this task.
+    Completed(Vec<u8>),
+    /// The task is definetely failed and won't be scheduled again.
+    DefinetelyFailed(TaskErrorKind),
+}
+
+fn try_convert_tasks_state(state_nb: u64, result: Vec<u8>, reason: TaskErrorKind) -> Option<JobsTaskState> {
+    match state_nb {
+        0 => Some(JobsTaskState::Incomplete),
+        1 => Some(JobsTaskState::Completed(result)),
+        2 => Some(JobsTaskState::DefinetelyFailed(reason)),
         _ => None,
     }
 }
@@ -60,14 +81,16 @@ impl<'a> Chain<'a> {
         }
     }
 
-    pub fn local_address(&self) -> Result<Address, Error> {
+    /// Return the address of the our account on the blockchain.
+    pub fn local_address(&self) -> Result<&Address, Error> {
         if let Some(addr) = self.config.ethereum_address() {
-            Ok(*addr)
+            Ok(addr)
         } else {
             Err(Error::MissingLocalAddress)
         }
     }
 
+    /// Get information about given block.
     pub async fn block(&self, block_id: BlockId) -> Result<Option<Block<types::H256>>, Error> {
         Compat01As03::new(self.web3.eth().block(block_id))
             .await
@@ -81,7 +104,7 @@ impl<'a> Chain<'a> {
             .map_err(Error::Web3)
     }
 
-    /// Get balance if provided account if [`ChainConfig::ethereum_address`] is `Some(_)`.
+    /// Get balance of local account if [`ChainConfig::ethereum_address`] is `Some(_)`.
     pub async fn local_balance(&self) -> Result<types::U256, Error> {
         if let Some(addr) = self.config.ethereum_address() {
             self.balance(*addr).await
@@ -105,7 +128,7 @@ impl<'a> Chain<'a> {
     /// Check the [`ethabi::Contract`] object of the **Jobs** smart-contract for advanced
     /// manipulation.
     /// If [`ChainConfig::contract_jobs`] is `None`, returns `None`.
-    pub fn jobs_ethabi(&self) -> Result<ethabi::Contract, Error> {
+    fn jobs_ethabi(&self) -> Result<ethabi::Contract, Error> {
         if let Some((_, abi)) = self.config.contract_jobs() {
             let c = ethabi::Contract::load(&abi[..])?;
             Ok(c)
@@ -114,6 +137,7 @@ impl<'a> Chain<'a> {
         }
     }
 
+    /*
     pub async fn jobs_counter(&self) -> Result<u128, Error> {
         let jobs = self.jobs()?;
         let addr = self.local_address()?;
@@ -137,24 +161,13 @@ impl<'a> Chain<'a> {
         let fut = jobs.call_with_confirmations("inc_counter", (), addr, Default::default(), 0);
         Ok(Compat01As03::new(fut).await?)
     }
+    */
 
     /// Subscribe to all events on given contract.
     pub async fn jobs_subscribe(
         &self,
     ) -> Result<impl Stream<Item = Result<JobsEvent, Error>>, Error> {
-        let jobs = self.jobs()?;
-        let filter = FilterBuilder::default()
-            .address(vec![jobs.address()])
-            .build();
-
-        let stream_fut = Compat01As03::new(self.web3.eth_subscribe().subscribe_logs(filter));
-        let stream = Compat01As03::new(stream_fut.await?);
-
-        let jobs_ethabi = self.jobs_ethabi()?;
-        Ok(stream.map(move |e| match e {
-            Ok(log) => (&jobs_ethabi, log).try_into(),
-            Err(e) => Err(Error::Web3(e)),
-        }))
+        self.jobs_subscribe_to_events(&[][..]).await
     }
 
     /// Subscribe to given Events objects.
@@ -164,12 +177,6 @@ impl<'a> Chain<'a> {
     ) -> Result<impl Stream<Item = Result<JobsEvent, Error>>, Error> {
         let jobs = self.jobs()?;
         let filter = FilterBuilder::default().address(vec![jobs.address()]);
-
-        /*
-        for evt in events.iter() {
-            filter = filter.topics(Some(vec![evt.signature()]), None, None, None);
-        }
-        */
 
         let filter = filter.topics(
             Some(events.iter().map(|e| e.signature()).collect()),
@@ -202,22 +209,22 @@ impl<'a> Chain<'a> {
         self.jobs_subscribe_to_events(&list[..]).await
     }
 
+    // TODO: useful ?
     /// Subscribe to given event kind.
     pub async fn jobs_subscribe_to_event_kind(
         &self,
         event: JobsEventKind,
     ) -> Result<impl Stream<Item = Result<JobsEvent, Error>>, Error> {
-        let evt = self.jobs_event(event)?;
-        let array: [Event; 1] = [evt];
-
-        self.jobs_subscribe_to_events(&array[..]).await
+        self.jobs_subscribe_to_events(&[self.jobs_event(event)?][..]).await
     }
 
+    /// Get a list of all events from the smart-contract's ABI format.
     pub fn jobs_events(&self) -> Result<Vec<ethabi::Event>, Error> {
         let c = self.jobs_ethabi()?;
         Ok(c.events().cloned().collect())
     }
 
+    /// Get event from the smart-contract's ABI corresponding to given [`JobsEventKind`].
     fn jobs_event(&self, event: JobsEventKind) -> Result<Event, Error> {
         Ok(self
             .jobs_ethabi()?
@@ -225,18 +232,106 @@ impl<'a> Chain<'a> {
             .clone())
     }
 
+    /// Get the amount of money the Jobs SC contains for the local account in
+    /// the pending account and the locked one.
+    pub async fn jobs_get_pending_locked_money_local(&self) -> Result<(types::U256, types::U256), Error> {
+        self.jobs_get_pending_locked_money(self.local_address()?).await
+    }
+
+    /// Get the amount of money the Jobs SC contains in the pending account
+    /// and the locked one.
+    // TODO: not possible from someone else, yet.
+    async fn jobs_get_pending_locked_money(&self, address: &Address) -> Result<(types::U256, types::U256), Error> {
+        let jobs = self.jobs()?;
+
+        let fut = jobs.query(
+            "get_pending_locked_money",
+            (),
+            *address,
+            Default::default(),
+            None,
+        );
+        Ok(Compat01As03::new(fut).await?)
+    }
+
+    ///  Send money to local address's pending account.
+    // TODO: not possible from someone else, yet.
+    async fn jobs_send_pending_money_local(
+        &self,
+        amount: types::U256,
+    ) -> Result<types::TransactionReceipt, Error> {
+        let jobs = self.jobs()?;
+        let addr = self.local_address()?;
+
+        let local = self.local_balance().await?;
+        if local < amount {
+            Err(Error::NotEnoughMoneyInAccount(*addr, local))
+        } else {
+            let fut = jobs.call_with_confirmations(
+                "send_pending_money",
+                (),
+                *addr,
+                Options::with(|o| o.value = Some(amount)),
+                0,
+            );
+            Ok(Compat01As03::new(fut).await?)
+        }
+    }
+
+    /// Recover money from the pending account associated to local address.
+    ///
+    /// > **Note:** Only available for owner of the account.
+    pub async fn jobs_recover_pending_money(
+        &self,
+        amount: types::U256,
+    ) -> Result<types::TransactionReceipt, Error> {
+        let jobs = self.jobs()?;
+        let addr = self.local_address()?;
+
+        let (pending, _) = self.jobs_get_pending_locked_money(addr).await?;
+        if pending < amount {
+            return Err(Error::NotEnoughMoneyInPending);
+        }
+
+        let fut = jobs.call_with_confirmations(
+            "recover_pending_money",
+            amount,
+            *addr,
+            Default::default(),
+            0,
+        );
+        Ok(Compat01As03::new(fut).await?)
+    }
+
+    /// Get next nonce used when a new draft job will be created.
+    /// This means thas every nonce strictly inferior to it may refer to an existing job.
+    pub async fn jobs_get_next_nonce(&self) -> Result<u128, Error> {
+        let jobs = self.jobs()?;
+        let addr = self.local_address()?;
+
+        let fut = jobs.query(
+            "get_next_nonce",
+            (),
+            *addr,
+            Default::default(),
+            None,
+        );
+        Ok(Compat01As03::new(fut).await?)
+    }
+
+    /// Creates a new draft job based on given job, and return it's nonce.
     pub async fn jobs_new_draft(&self, job: &Job) -> Result<u128, Error> {
         let jobs = self.jobs()?;
         let addr = self.local_address()?;
 
-        match job.program_kind {
+        match job.program_kind() {
             ProgramKind::Wasm0m1n0 => {
                 let stream = self
                     .jobs_subscribe_to_event_kind(JobsEventKind::JobNew)
                     .await?;
 
                 let fut =
-                    jobs.call_with_confirmations("create_job", (), addr, Default::default(), 0);
+                    jobs.call_with_confirmations("create_job", (), *addr, Default::default(), 0);
                 Compat01As03::new(fut).await?;
 
                 // TODO: concurrency issues ?
@@ -514,64 +609,6 @@ impl<'a> Chain<'a> {
         Ok(Compat01As03::new(fut).await?)
     }
 
-    pub async fn jobs_get_pending_locked_money(&self) -> Result<(types::U256, types::U256), Error> {
-        let jobs = self.jobs()?;
-        let addr = self.local_address()?;
-
-        let fut = jobs.query(
-            "get_pending_locked_money",
-            (),
-            addr,
-            Default::default(),
-            None,
-        );
-        Ok(Compat01As03::new(fut).await?)
-    }
-
-    pub async fn jobs_send_pending_money(
-        &self,
-        amount: types::U256,
-    ) -> Result<types::TransactionReceipt, Error> {
-        let jobs = self.jobs()?;
-        let addr = self.local_address()?;
-
-        let local = self.local_balance().await?;
-        if local < amount {
-            return Err(Error::NotEnoughMoneyInLocalAccount);
-        }
-
-        let fut = jobs.call_with_confirmations(
-            "send_pending_money",
-            (),
-            addr,
-            Options::with(|o| o.value = Some(amount)),
-            0,
-        );
-        Ok(Compat01As03::new(fut).await?)
-    }
-
-    pub async fn jobs_recover_pending_money(
-        &self,
-        amount: types::U256,
-    ) -> Result<types::TransactionReceipt, Error> {
-        let jobs = self.jobs()?;
-        let addr = self.local_address()?;
-
-        let (pending, _) = self.jobs_get_pending_locked_money().await?;
-        if pending < amount {
-            return Err(Error::NotEnoughMoneyInPending);
-        }
-
-        let fut = jobs.call_with_confirmations(
-            "recover_pending_money",
-            amount,
-            addr,
-            Default::default(),
-            0,
-        );
-        Ok(Compat01As03::new(fut).await?)
-    }
-
     pub async fn jobs_ready(&self, nonce: u128) -> Result<types::TransactionReceipt, Error> {
         let jobs = self.jobs()?;
         let addr = self.local_address()?;
@@ -623,6 +660,12 @@ impl<'a> Chain<'a> {
         Ok((job_id.as_slice().try_into()?, argument_id, argument))
     }
 }
+
+// TODO: get list of drafts
+// TODO: get list of incomplete jobs
+// TODO: get list of all jobs
+// TODO: ...
+// TODO: check if sender is correct
 
 #[cfg(test)]
 mod tests {
