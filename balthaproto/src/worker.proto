@@ -18,16 +18,16 @@ enum NodeType {
 // In the format `[TYPE]_[MAJOR]m[MINOR]n[PATCH]`, because when converting to type,
 // it renames it to `Wasm010` otherwise.
 enum ProgramKind {
- WASM_0m1n0 = 0;
- // DOCKER_0m1n0 = 10;
+ WASM0m1n0 = 0;
+ // DOCKER0m1n0 = 10;
 }
 
 enum TaskErrorKind {
- SPECIFICATION = 0;
- TIMEDOUT = 1;
+ INCORRECT_SPECIFICATION = 0;
+ TIMED_OUT = 1;
  DOWNLOAD = 2;
  RUNTIME = 3;
- RESULT = 4;
+ INCORRECT_RESULT = 4;
  ABORTED = 5;
  UNKNOWN = 6;
 }

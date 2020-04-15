@@ -137,17 +137,6 @@ impl fmt::Display for HashId {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct UnknownValue<T>(T);
-
-impl<T: fmt::Display> fmt::Display for UnknownValue<T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Unknown value: {}", self.0)
-    }
-}
-
-impl<T: fmt::Debug + fmt::Display> std::error::Error for UnknownValue<T> {}
-
 pub const MIN_TIMEOUT: u64 = 10; // TODO: maybe too big ?
 pub const MIN_CPU_COUNT: u64 = 1;
 pub const MIN_REDUNDANCY: u64 = 1;
@@ -183,6 +172,7 @@ pub struct Job {
 
     is_program_pure: bool,
 
+    // TODO: option to avoid the necessity to use BC?
     sender: Address,
     /// `None` if the job hasn't been sent yet or isn't known.
     nonce: Option<u128>,

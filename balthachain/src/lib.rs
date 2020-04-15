@@ -4,16 +4,19 @@ extern crate ethabi;
 extern crate futures;
 extern crate web3;
 
+mod error;
+pub use error::Error;
 mod config;
+mod run;
 pub use config::{Address, ChainConfig};
 use ethabi::Event;
-use futures::{compat::Compat01As03, executor::block_on, future, Stream, StreamExt};
+use futures::{compat::Compat01As03, future, Stream, StreamExt};
 use misc::{
-    job::{BestMethod, Job, JobId, OtherData, ProgramKind, TaskId, UnknownValue, HASH_SIZE},
-    multiaddr,
-    multihash::{self, Multihash},
+    job::{BestMethod, Job, JobId, OtherData, ProgramKind, TaskId, HASH_SIZE},
+    multihash::Multihash,
 };
-use proto::{DecodeError, EncodeError, Message};
+use proto::{worker::TaskErrorKind, Message};
+pub use run::{run, RunMode};
 use std::{
     convert::{TryFrom, TryInto},
     fmt,
@@ -21,388 +24,67 @@ use std::{
 use web3::{
     contract::{Contract, Error as ContractError, Options},
     transports::{EventLoopHandle, WebSocket},
-    types::{self, Block, BlockId, BlockNumber, FilterBuilder, Log},
+    types::{self, Block, BlockId, FilterBuilder, Log},
     Web3,
 };
 
-#[derive(Debug)]
-pub enum Error {
-    MissingLocalAddress,
-    MissingJobsContractData,
-    Web3(web3::Error),
-    Contract(ContractError),
-    EthAbi(ethabi::Error),
-    UnsupportedProgramKind(ProgramKind),
-    CouldntParseJobsEvent(String),
-    CouldntParseJobsEventFromLog(Box<Log>),
-    JobsEventDataWrongSize {
-        expected: usize,
-        got: usize,
-        data: Vec<u8>,
-    },
-    /// When storing a job, an JobNew event is sent with the new nonce for the pending job.
-    /// This error is sent when the event couldn't be found.
-    CouldntFindJobNonceEvent,
-    MultiaddrParse(multiaddr::Error),
-    Multihash(multihash::DecodeOwnedError),
-    TaskStateParse(UnknownValue<u64>),
-    TaskErrorKindParse(UnknownValue<u64>),
-    NotEnoughMoneyInLocalAccount,
-    NotEnoughMoneyInPending,
-    OtherDataEncodeError(EncodeError),
-    OtherDataDecodeError(DecodeError),
-    OtherDataDecodeEnumError,
-    CouldntDecodeMultihash(misc::multiformats::Error),
-    JobNotComplete, // TODO: ? (Job),
-}
-
-impl From<web3::Error> for Error {
-    fn from(e: web3::Error) -> Self {
-        Error::Web3(e)
+/// Converts the integer value returned by the smart-contract into a [`TaskErrorKind`]
+/// enum.
+/// Returns [`None`] if the value is unknown.
+fn convert_task_error_kind(reason_nb: u64) -> Option<TaskErrorKind> {
+    match reason_nb {
+        0 => Some(TaskErrorKind::IncorrectSpecification),
+        1 => Some(TaskErrorKind::TimedOut),
+        2 => Some(TaskErrorKind::Download),
+        3 => Some(TaskErrorKind::Runtime),
+        4 => Some(TaskErrorKind::IncorrectResult),
+        5 => Some(TaskErrorKind::Unknown),
+        _ => None,
     }
-}
-
-impl From<ContractError> for Error {
-    fn from(e: ContractError) -> Self {
-        Error::Contract(e)
-    }
-}
-
-impl From<ethabi::Error> for Error {
-    fn from(e: ethabi::Error) -> Self {
-        Error::EthAbi(e)
-    }
-}
-
-impl From<multiaddr::Error> for Error {
-    fn from(e: multiaddr::Error) -> Self {
-        Error::MultiaddrParse(e)
-    }
-}
-
-impl From<misc::multiformats::Error> for Error {
-    fn from(e: misc::multiformats::Error) -> Self {
-        Error::CouldntDecodeMultihash(e)
-    }
-}
-
-impl From<multihash::DecodeOwnedError> for Error {
-    fn from(e: multihash::DecodeOwnedError) -> Self {
-        Error::Multihash(e)
-    }
-}
-
-impl From<DecodeError> for Error {
-    fn from(e: DecodeError) -> Self {
-        Error::OtherDataDecodeError(e)
-    }
-}
-
-impl From<EncodeError> for Error {
-    fn from(e: EncodeError) -> Self {
-        Error::OtherDataEncodeError(e)
-    }
-}
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self)
-    }
-}
-
-#[derive(Clone, Debug)]
-pub enum RunMode {
-    Block,
-    Balance(Option<Address>),
-    /*
-    JobsCounterGet,
-    JobsCounterSet(u128),
-    JobsCounterInc,
-    */
-    /// Subscribe to Jobs smart contract given events or if none are provided, all of them.
-    JobsSubscribe(Vec<JobsEventKind>),
-    /// List all Jobs smart contract events.
-    JobsEvents,
-    /// Create draft job and return the cost to pay.
-    JobsNewDraft {
-        program_kind: ProgramKind,
-        addresses: Vec<String>,
-        program_hash: Multihash,
-        arguments: Vec<Vec<u8>>,
-        timeout: u64,
-        max_worker_price: u64,
-        max_network_usage: u64,
-        max_network_price: u64,
-        redundancy: u64,
-        max_failures: u64,
-        min_network_speed: u64,
-        best_method: BestMethod,
-        min_cpu_count: u64,
-        min_memory: u64,
-        is_program_pure: bool,
-    },
-    /// Get an already validated job.
-    /// As well as its tasks statuses.
-    JobsGetJob {
-        job_id: JobId,
-    },
-    /// Get a pending draft job information.
-    JobsGetDraftJob {
-        nonce: u128,
-    },
-    /*
-    /// Get a list of pending job ids.
-    // TODO
-    JobsGetPendingJobs,
-    */
-    /// Get a list of pending drafts nonces.
-    JobsGetDraftJobs,
-    /// Remove a draft job.
-    JobsDeleteDraftJob {
-        nonce: u128,
-    },
-    /// Query a result if it exists.
-    // TODO
-    JobsGetResult {
-        task_id: TaskId,
-    },
-    /// Send a result and workers to the sc.
-    /// There must be as many workers as job's `redundancy`.
-    // TODO
-    JobsSetResult {
-        task_id: TaskId,
-        result: Vec<u8>,
-        // Workers ethereum address, worker_price, network_price.
-        workers: Vec<(Address, u64, u64)>,
-    },
-    */
-    /// Get money amounts on both locked and pending accounts.
-    JobsGetMoney,
-    /// Send money to pending account.
-    JobsSendMoney {
-        amount: u128,
-    },
-    /// Recover money from pending account.
-    JobsRecoverMoney {
-        amount: u128,
-    },
-    /// Set a job as ready, if it meets readiness criteria and there's enough pending
-    /// money, will lock the job and send the tasks for execution.
-    JobsReady {
-        nonce: u128,
-    },
-}
-
-pub fn run(mode: &RunMode, config: &ChainConfig) -> Result<(), Error> {
-    block_on(run_async(mode, config))
-}
-
-async fn run_async(mode: &RunMode, config: &ChainConfig) -> Result<(), Error> {
-    let chain = Chain::new(config);
-
-    match mode {
-        RunMode::Block => {
-            let block_id: BlockId = BlockNumber::Latest.into();
-            let val = chain.block(block_id.clone()).await?;
-
-            if let Some(val) = val {
-                println!("Latest block information for `{:?}`:\n{:?}", block_id, val);
-            } else {
-                println!("No block found for `{:?}`", block_id);
-            }
-        }
-        RunMode::Balance(Some(addr)) => {
-            let val = chain.balance(*addr).await?;
-            println!("Balance of `{}` is {}.", addr, val);
-        }
-        RunMode::Balance(None) => {
-            let val = chain.local_balance().await?;
-            println!(
-                "Balance of local address `{}` is {}.",
-                chain.local_address()?,
-                val
-            );
-        }
-        RunMode::JobsCounterGet => {
-            let val = chain.jobs_counter().await?;
-            println!("Value of counter: {}.", val);
-        }
-        RunMode::JobsCounterSet(new) => {
-            chain.jobs_set_counter(*new).await?;
-            println!("Counter set to {}.", new);
-        }
-        RunMode::JobsCounterInc => {
-            chain.jobs_inc_counter().await?;
-            println!("Counter increased.");
-        }
-        RunMode::JobsSubscribe(events) => {
-            if events.is_empty() {
-                let stream = Box::new(chain.jobs_subscribe().await?);
-                stream
-                    .for_each(|e| {
-                        match e {
-                            Ok(evt) => println!("{}", evt),
-                            Err(_) => println!("{:?}", e),
-                        }
-                        future::ready(())
-                    })
-                    .await;
-            } else {
-                let stream = chain.jobs_subscribe_to_event_kinds(&events[..]).await?;
-                stream
-                    .for_each(|e| {
-                        println!("{:?}", e);
-                        future::ready(())
-                    })
-                    .await;
-            }
-        }
-        RunMode::JobsEvents => {
-            for evt in chain.jobs_events()? {
-                println!("{:?}, {}", evt, evt.signature());
-            }
-        }
-        RunMode::JobsNewDraft {
-            program_kind,
-            addresses,
-            program_hash,
-            arguments,
-            timeout,
-            max_failures,
-            best_method,
-            max_worker_price,
-            min_cpu_count,
-            min_memory,
-            max_network_usage,
-            max_network_price,
-            min_network_speed,
-            redundancy,
-            is_program_pure,
-        } => {
-            let mut job = Job::new(
-                *program_kind,
-                addresses.clone(),
-                program_hash.clone(),
-                arguments.clone(),
-                chain.local_address()?,
-            );
-            job.set_timeout(*timeout);
-            job.set_max_failures(*max_failures);
-            job.set_best_method(*best_method);
-            job.set_max_worker_price(*max_worker_price);
-            job.set_min_cpu_count(*min_cpu_count);
-            job.set_min_memory(*min_memory);
-            job.set_max_network_usage(*max_network_usage);
-            job.set_max_network_price(*max_network_price);
-            job.set_min_network_speed(*min_network_speed);
-            job.set_redundancy(*redundancy);
-            job.set_is_program_pure(*is_program_pure);
-            job.set_nonce(None);
-
-            let nonce = chain.jobs_new_draft(&job).await?;
-
-            println!("{}", chain.jobs_get_draft_job(nonce).await?);
-            println!("Draft stored !");
-            println!("You might still need to send the money for it and set it as ready.");
-        }
-        RunMode::JobsGetJob { job_id } => {
-            let job = chain.jobs_get_job(job_id).await?;
-            println!("{}", job);
-        }
-        RunMode::JobsGetDraftJob { nonce } => {
-            let job = chain.jobs_get_draft_job(*nonce).await?;
-            println!("{}", job);
-        }
-        RunMode::JobsGetPendingJobs => {
-            let jobs: Vec<String> = chain
-                .jobs_get_pending_jobs()
-                .await?
-                .iter()
-                .map(|h| format!("{}", h))
-                .collect();
-            println!("{:?}", jobs);
-        }
-        RunMode::JobsGetDraftJobs => {
-            let jobs = chain.jobs_get_draft_jobs().await?;
-            println!("{:?}", jobs);
-        }
-        RunMode::JobsDeleteDraftJob { nonce } => {
-            let job = chain.jobs_get_draft_job(*nonce).await?;
-            println!("{}", job);
-            chain.jobs_delete_draft_job(*nonce).await?;
-            println!("Deleted!");
-        }
-        RunMode::JobsGetResult { task_id } => {
-            let result = chain.jobs_get_result(task_id).await?;
-            println!(
-                "Result of task `{}`:\n{}",
-                task_id,
-                String::from_utf8_lossy(&result[..])
-            );
-        }
-        RunMode::JobsSetResult {
-            task_id,
-            result,
-            workers,
-        } => {
-            chain.jobs_set_result(task_id, result, &workers[..]).await?;
-            println!("Result of task `{}` stored.", task_id,);
-        }
-        RunMode::JobsGetMoney => {
-            let (pending, locked) = chain.jobs_get_pending_locked_money().await?;
-            println!(
-                "Pending money: {} money.\nLocked money: {} money.",
-                pending, locked
-            );
-        }
-        RunMode::JobsSendMoney { amount } => {
-            chain.jobs_send_pending_money((*amount).into()).await?;
-            println!("{} money sent.", amount);
-        }
-        RunMode::JobsRecoverMoney { amount } => {
-            chain.jobs_recover_pending_money((*amount).into()).await?;
-            println!("{} money recovered.", amount);
-        }
-        RunMode::JobsReady { nonce } => {
-            let job = chain.jobs_get_draft_job(*nonce).await?;
-            println!("{}", job);
-            chain.jobs_ready(*nonce).await?;
-            println!("{} set as ready for work.", nonce);
-        }
-        RunMode::JobsValidate { job_id } => {
-            let job = chain.jobs_get_job(job_id).await?;
-            println!("{}", job);
-            chain.jobs_validate_results(job_id).await?;
-            println!("{} validated, workers paid, and money available.", job_id);
-        }
-    }
-
-    Ok(())
 }
 
 #[derive(Debug, Clone)]
 pub enum JobsEvent {
-    CounterHasNewValue(u128),
-    JobNew { sender: Address, nonce: u128 },
-    JobPending { job_id: JobId },
-    TaskPending { task_id: TaskId },
-    NewResult { task_id: TaskId, result: Vec<u8> },
-    PendingMoneyChanged { account: Address, new_val: u128 },
+    // CounterHasNewValue(u128),
+    JobNew {
+        sender: Address,
+        nonce: u128,
+    },
+    TaskPending {
+        task_id: TaskId,
+    },
+    TaskCompleted {
+        task_id: TaskId,
+        result: Vec<u8>,
+    },
+    TaskDefinetelyFailed {
+        task_id: TaskId,
+        reason: TaskErrorKind,
+    },
+    PendingMoneyChanged {
+        account: Address,
+        new_val: u128,
+    },
+    JobCompleted {
+        job_id: JobId,
+    },
 }
 
 impl fmt::Display for JobsEvent {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            JobsEvent::JobPending { job_id } => write!(fmt, "JobPending {{ job_id: {} }}", job_id,),
             JobsEvent::TaskPending { task_id } => {
                 write!(fmt, "TaskPending {{ task_id: {} }}", task_id,)
             }
-            JobsEvent::NewResult { task_id, result } => write!(
+            JobsEvent::TaskCompleted { task_id, result } => write!(
                 fmt,
-                "NewResult {{ task_id: {}, result: {} }}",
+                "TaskCompleted {{ task_id: {}, result: {} }}",
                 task_id,
                 String::from_utf8_lossy(&result[..])
             ),
+            JobsEvent::JobCompleted { job_id } => {
+                write!(fmt, "JobCompleted {{ job_id: {} }}", job_id,)
+            }
             _ => write!(fmt, "{:?}", self),
         }
     }
@@ -418,6 +100,7 @@ impl TryFrom<(&ethabi::Contract, Log)> for JobsEvent {
         for t in log.topics.iter() {
             if let Some(evt) = contract.events().find(|e| e.signature() == *t) {
                 match JobsEventKind::try_from(&evt.name[..])? {
+                    /*
                     JobsEventKind::CounterHasNewValue => {
                         let len = log.data.0.len();
                         if len == 32 {
@@ -433,6 +116,7 @@ impl TryFrom<(&ethabi::Contract, Log)> for JobsEvent {
                             });
                         }
                     }
+                    */
                     JobsEventKind::JobNew => {
                         let len = log.data.0.len();
                         let expected = 32 * 2;
@@ -442,20 +126,6 @@ impl TryFrom<(&ethabi::Contract, Log)> for JobsEvent {
                             let nonce =
                                 types::U128::from_big_endian(&log.data.0[(64 - 16)..64]).as_u128();
                             return Ok(JobsEvent::JobNew { sender, nonce });
-                        } else {
-                            return Err(Error::JobsEventDataWrongSize {
-                                expected,
-                                got: len,
-                                data: log.data.0,
-                            });
-                        }
-                    }
-                    JobsEventKind::JobPending => {
-                        let len = log.data.0.len();
-                        let expected = HASH_SIZE;
-                        if len == expected {
-                            let job_id = (&log.data.0[..]).try_into()?;
-                            return Ok(JobsEvent::JobPending { job_id });
                         } else {
                             return Err(Error::JobsEventDataWrongSize {
                                 expected,
@@ -478,14 +148,36 @@ impl TryFrom<(&ethabi::Contract, Log)> for JobsEvent {
                             });
                         }
                     }
-                    JobsEventKind::NewResult => {
+                    JobsEventKind::TaskCompleted => {
                         let len = log.data.0.len();
+                        // TODO: only 32 ?!
                         let expected = HASH_SIZE + 32;
                         if len > expected {
                             let task_id = (&log.data.0[..HASH_SIZE]).try_into()?;
-                            return Ok(JobsEvent::NewResult {
+                            return Ok(JobsEvent::TaskCompleted {
                                 task_id,
-                                result: Vec::from(&log.data.0[32..]),
+                                result: Vec::from(&log.data.0[HASH_SIZE..]),
+                            });
+                        } else {
+                            return Err(Error::JobsEventDataWrongSize {
+                                expected,
+                                got: len,
+                                data: log.data.0,
+                            });
+                        }
+                    }
+                    // TODO
+                    JobsEventKind::TaskDefinetelyFailed => {
+                        let len = log.data.0.len();
+                        // TODO: only 32 ?!
+                        let expected = HASH_SIZE + 32;
+                        if len == expected {
+                            let task_id = (&log.data.0[..HASH_SIZE]).try_into()?;
+                            let reason_nb =
+                                types::U128::from_big_endian(&log.data.0[16..32]).as_u128();
+                            return Ok(JobsEvent::TaskDefinetelyFailed {
+                                task_id,
+                                reason: convert_task_error_kind(reason_nb),
                             });
                         } else {
                             return Err(Error::JobsEventDataWrongSize {
@@ -505,6 +197,20 @@ impl TryFrom<(&ethabi::Contract, Log)> for JobsEvent {
                             let new_val =
                                 types::U256::from_big_endian(&log.data.0[32..64]).low_u128();
                             return Ok(JobsEvent::PendingMoneyChanged { account, new_val });
+                        } else {
+                            return Err(Error::JobsEventDataWrongSize {
+                                expected,
+                                got: len,
+                                data: log.data.0,
+                            });
+                        }
+                    }
+                    JobsEventKind::JobCompleted => {
+                        let len = log.data.0.len();
+                        let expected = HASH_SIZE;
+                        if len == expected {
+                            let job_id = (&log.data.0[..]).try_into()?;
+                            return Ok(JobsEvent::JobCompleted { job_id });
                         } else {
                             return Err(Error::JobsEventDataWrongSize {
                                 expected,

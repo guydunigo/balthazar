@@ -14,6 +14,19 @@ pub mod multiformats;
 mod worker_specs;
 pub use worker_specs::WorkerSpecs;
 
+/*
+#[derive(Debug, Clone)]
+pub struct UnknownValue<T>(T);
+
+impl<T: fmt::Display> fmt::Display for UnknownValue<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Unknown value: {}", self.0)
+    }
+}
+
+impl<T: fmt::Debug + fmt::Display> std::error::Error for UnknownValue<T> {}
+*/
+
 /// Alias for [`tokio::sync::oneshot::error::RecvError`].
 pub type SpawnThreadError = RecvError;
 

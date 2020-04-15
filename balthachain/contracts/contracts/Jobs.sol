@@ -27,7 +27,7 @@ contract Jobs {
     enum TaskErrorKind {
         IncorrectSpecification,
         TimedOut,
-        DownloadError,
+        Download,
         Runtime,
         IncorrectResult,// ,
         // Aborted,
