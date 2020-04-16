@@ -59,6 +59,7 @@ impl TryFrom<(&ethabi::Contract, Log)> for JobsEvent {
     type Error = Error;
 
     // TODO: ugly ?
+    // TODO: use ethabi and all functions to auto parse ?
     /// We assume that [`Log::data`]] is just all the arguments of the events as `[u8; 256]`
     /// concatenated together.
     fn try_from((contract, log): (&ethabi::Contract, Log)) -> Result<Self, Self::Error> {

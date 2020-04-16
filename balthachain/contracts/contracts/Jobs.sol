@@ -89,7 +89,7 @@ contract Jobs {
     mapping(address => User) users;
 
     // TODO: ability to set this address ?
-    address oracle;
+    public address oracle;
 
     constructor(/*address oracle_address*/) public {
         // oracle = oracle_address;
@@ -116,8 +116,8 @@ contract Jobs {
         return keccak256(abi.encodePacked(sender, nonce));
     }
 
-    function calc_task_id(bytes32 job_id, uint128 index, bytes storage argument) internal pure returns (bytes32) {
-        return keccak256(abi.encodePacked(job_id, index, argument));
+    function calc_task_id(bytes32 job_id, uint128 index/*, bytes storage argument*/) internal pure returns (bytes32) {
+        return keccak256(abi.encodePacked(job_id, index/*, argument*/));
     }
 
     function is_draft_ready(Job storage job) internal view returns (bool) {
@@ -167,7 +167,7 @@ contract Jobs {
 
         result = true;
         for (uint128 i ; i < jobs[job_id].arguments.length ; i++) {
-            if (tasks[calc_task_id(job_id, i, jobs[job_id].arguments[i])].state == TaskState.Incomplete) {
+            if (tasks[calc_task_id(job_id, i/*, jobs[job_id].arguments[i]*/)].state == TaskState.Incomplete) {
                 result = false;
                 break;
             }
@@ -385,8 +385,12 @@ contract Jobs {
         return (job.sender, job.nonce);
     }
 
-    function is_non_null(bytes32 job_id) public view returns (bool) {
+    function is_job_non_null(bytes32 job_id) public view returns (bool) {
         return jobs[job_id].non_null;
+    }
+
+    function is_task_non_null(bytes32 task_id) public view returns (bool) {
+        return tasks[task_id].non_null;
     }
 
     function is_draft(bytes32 job_id) public view returns (bool) {
@@ -411,7 +415,7 @@ contract Jobs {
         job.is_draft = false;
 
         for (uint128 i; i < job.arguments.length ; i++) {
-            bytes32 task_id = calc_task_id(job_id, i, job.arguments[i]);
+            bytes32 task_id = calc_task_id(job_id, i/*, job.arguments[i]*/);
             require(tasks[task_id].non_null == false, "task collision");
             tasks[task_id] = Task(job_id,
                                    i,
@@ -508,21 +512,30 @@ contract Jobs {
     // If it's DefinetelyFailed, only the failure reason, the second value is relevent.
     // If it's Incomplete, none of the other values mean anything.
     // Reverts if there is no task corresponding to `task_id`.
-    function get_state(bytes32 task_id) public view returns (TaskState, TaskErrorKind, bytes memory) {
+    function get_task_state(bytes32 task_id) public view returns (TaskState, TaskErrorKind, bytes memory) {
         Task storage task = tasks[task_id];
         require(task.non_null/*, "unknown task"*/);
         return (task.state, task.reason, task.result);
     }
 
     // Reverts if there is no task corresponding to `task_id`.
-    function get_task(bytes32 task_id) public view returns (bytes32, uint128, bytes memory) {
+    function get_task(bytes32 task_id) public view returns (bytes32, uint128) {
         Task storage task = tasks[task_id];
         require(task.non_null/*, "unknown task"*/);
         return (
             task.job_id,
-            task.argument_id,
-            jobs[task.job_id].arguments[task.argument_id]
+            task.argument_id
         );
+    }
+
+    function get_argument(bytes32 task_id) public view returns (bytes memory) {
+        Task storage task = tasks[task_id];
+        require(task.non_null/*, "unknown task"*/);
+        Job storage job = jobs[task.job_id];
+        require(job.non_null/*, "unknown job"*/);
+        require(job.arguments.length > task.argument_id/*, "unknown argument id"*/);
+
+        return job.arguments[task.argument_id];
     }
 
     // ------------------------------------------------------------

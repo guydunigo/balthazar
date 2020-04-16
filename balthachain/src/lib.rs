@@ -16,11 +16,11 @@ pub use config::ChainConfig;
 use ethabi::Event;
 use futures::{compat::Compat01As03, future, Stream, StreamExt};
 use misc::{
-    job::{BestMethod, Job, JobId, OtherData, ProgramKind, TaskId},
+    job::{Job, JobId, OtherData, TaskId},
     multihash::Multihash,
 };
 use proto::{worker::TaskErrorKind, Message};
-use std::convert::TryInto;
+use std::{convert::TryInto, fmt};
 use web3::{
     contract::{Contract, Error as ContractError, Options},
     transports::{EventLoopHandle, WebSocket},
@@ -43,7 +43,23 @@ fn try_convert_task_error_kind(reason_nb: u64) -> Option<TaskErrorKind> {
     }
 }
 
+/// Convert [`TaskErrorKind`] to integer for the smart-contract.
+/// Returns [`None`] if the error can't be stored on the smart-contract
+/// (like [`TaskErrorKind::Aborted`]).
+fn convert_task_error_kind(reason: TaskErrorKind) -> Option<u64> {
+    match reason {
+        TaskErrorKind::IncorrectSpecification => Some(0),
+        TaskErrorKind::TimedOut => Some(1),
+        TaskErrorKind::Download => Some(2),
+        TaskErrorKind::Runtime => Some(3),
+        TaskErrorKind::IncorrectResult => Some(4),
+        TaskErrorKind::Unknown => Some(5),
+        TaskErrorKind::Aborted => None,
+    }
+}
+
 /// State a task can be on the blockchain.
+#[derive(Debug, Clone)]
 pub enum JobsTaskState {
     /// The task can still be executed and all.
     Incomplete,
@@ -53,6 +69,17 @@ pub enum JobsTaskState {
     Completed(Vec<u8>),
     /// The task is definetely failed and won't be scheduled again.
     DefinetelyFailed(TaskErrorKind),
+}
+
+impl fmt::Display for JobsTaskState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            JobsTaskState::Completed(res) => {
+                write!(f, "Completed({})", String::from_utf8_lossy(res))
+            }
+            _ => write!(f, "{:?}", self),
+        }
+    }
 }
 
 fn try_convert_tasks_state(
@@ -68,6 +95,12 @@ fn try_convert_tasks_state(
     }
 }
 
+/// Object to communicate with the blockchain and its smart-contracts.
+///
+/// To avoid unnecessary calls and for better error handling, conditions are checked
+/// before any calls to the blockchain.
+///
+/// > **Note:** Every function modifying a smart-contract will cost money to process.
 #[derive(Debug)]
 pub struct Chain<'a> {
     eloop: EventLoopHandle,
@@ -75,6 +108,7 @@ pub struct Chain<'a> {
     config: &'a ChainConfig,
 }
 
+// TODO: explain [`check_non_null`].
 impl<'a> Chain<'a> {
     pub fn new(config: &'a ChainConfig) -> Self {
         let (eloop, transport) = WebSocket::new(config.web3_ws()).unwrap();
@@ -85,7 +119,8 @@ impl<'a> Chain<'a> {
         }
     }
 
-    /// Return the address of the our account on the blockchain.
+    /// Return the address of the our account on the blockchain,
+    /// if given in [`ChainConfig`].
     pub fn local_address(&self) -> Result<&Address, Error> {
         if let Some(addr) = self.config.ethereum_address() {
             Ok(addr)
@@ -258,7 +293,7 @@ impl<'a> Chain<'a> {
 
     ///  Send money to local address's pending account.
     // TODO: not possible from someone else, yet.
-    async fn jobs_send_pending_money_local(
+    pub async fn jobs_send_pending_money_local(
         &self,
         amount: types::U256,
     ) -> Result<types::TransactionReceipt, Error> {
@@ -343,10 +378,7 @@ impl<'a> Chain<'a> {
         let nonce = stream
             .filter_map(|e| {
                 future::ready(match e {
-                    Ok(JobsEvent::JobNew {
-                        sender: addr,
-                        nonce,
-                    }) => Some(nonce),
+                    Ok(JobsEvent::JobNew { sender, nonce }) if sender == *addr => Some(nonce),
                     _ => None,
                 })
             })
@@ -472,53 +504,6 @@ impl<'a> Chain<'a> {
         Ok(Compat01As03::new(fut).await?)
     }
 
-    // TODO
-    pub async fn jobs_get_result(&self, task_id: &TaskId) -> Result<Vec<u8>, Error> {
-        let jobs = self.jobs()?;
-        let task_id = Vec::from(task_id.as_bytes());
-        let addr = self.local_address()?;
-
-        let fut = jobs.query("get_result", task_id, addr, Default::default(), None);
-        Ok(Compat01As03::new(fut).await?)
-    }
-
-    // TODO
-    pub async fn jobs_set_result(
-        &self,
-        task_id: &TaskId,
-        result: &[u8],
-        workers_infos: &[(Address, u64, u64)],
-    ) -> Result<types::TransactionReceipt, Error> {
-        let jobs = self.jobs()?;
-        let task_id = Vec::from(task_id.as_bytes());
-        let addr = self.local_address()?;
-
-        let mut workers = Vec::new();
-        let mut worker_prices = Vec::new();
-        let mut network_prices = Vec::new();
-
-        workers_infos.iter().for_each(|(w, p, n)| {
-            workers.push(w.clone());
-            worker_prices.push(*p);
-            network_prices.push(*n);
-        });
-
-        let fut = jobs.call_with_confirmations(
-            "set_result",
-            (
-                task_id,
-                Vec::from(result),
-                workers,
-                worker_prices,
-                network_prices,
-            ),
-            addr,
-            Default::default(),
-            0,
-        );
-        Ok(Compat01As03::new(fut).await?)
-    }
-
     /// Get [`Job::timeout`], [`Job::redundancy`] and [`Job::max_failures`] for given job.
     pub async fn jobs_get_parameters(
         &self,
@@ -528,7 +513,7 @@ impl<'a> Chain<'a> {
         let jobs = self.jobs()?;
         let addr = self.local_address()?;
 
-        if check_non_null || self.jobs_is_non_null(job_id).await? {
+        if check_non_null || self.jobs_is_job_non_null(job_id).await? {
             let fut = jobs.query(
                 "get_parameters",
                 job_id.as_bytes32(),
@@ -551,7 +536,7 @@ impl<'a> Chain<'a> {
         let jobs = self.jobs()?;
         let addr = self.local_address()?;
 
-        if check_non_null || self.jobs_is_non_null(job_id).await? {
+        if check_non_null || self.jobs_is_job_non_null(job_id).await? {
             let fut = jobs.query(
                 "get_other_data",
                 job_id.as_bytes32(),
@@ -576,7 +561,7 @@ impl<'a> Chain<'a> {
         let jobs = self.jobs()?;
         let addr = self.local_address()?;
 
-        if check_non_null || self.jobs_is_non_null(job_id).await? {
+        if check_non_null || self.jobs_is_job_non_null(job_id).await? {
             let fut = jobs.query(
                 "get_arguments",
                 job_id.as_bytes32(),
@@ -600,7 +585,7 @@ impl<'a> Chain<'a> {
         let jobs = self.jobs()?;
         let addr = self.local_address()?;
 
-        if check_non_null || self.jobs_is_non_null(job_id).await? {
+        if check_non_null || self.jobs_is_job_non_null(job_id).await? {
             let fut = jobs.query(
                 "get_worker_parameters",
                 job_id.as_bytes32(),
@@ -623,7 +608,7 @@ impl<'a> Chain<'a> {
         let jobs = self.jobs()?;
         let addr = self.local_address()?;
 
-        if check_non_null || self.jobs_is_non_null(job_id).await? {
+        if check_non_null || self.jobs_is_job_non_null(job_id).await? {
             let fut = jobs.query(
                 "get_management_parameters",
                 job_id.as_bytes32(),
@@ -646,7 +631,7 @@ impl<'a> Chain<'a> {
         let jobs = self.jobs()?;
         let addr = self.local_address()?;
 
-        if check_non_null || self.jobs_is_non_null(job_id).await? {
+        if check_non_null || self.jobs_is_job_non_null(job_id).await? {
             let fut = jobs.query(
                 "get_sender_nonce",
                 job_id.as_bytes32(),
@@ -661,12 +646,12 @@ impl<'a> Chain<'a> {
     }
 
     /// Check if a job id corresponds to an existing job.
-    pub async fn jobs_is_non_null(&self, job_id: &JobId) -> Result<bool, Error> {
+    pub async fn jobs_is_job_non_null(&self, job_id: &JobId) -> Result<bool, Error> {
         let jobs = self.jobs()?;
         let addr = self.local_address()?;
 
         let fut = jobs.query(
-            "is_non_null",
+            "is_job_non_null",
             job_id.as_bytes32(),
             *addr,
             Default::default(),
@@ -680,7 +665,7 @@ impl<'a> Chain<'a> {
         let jobs = self.jobs()?;
         let addr = self.local_address()?;
 
-        if !check_non_null || self.jobs_is_non_null(job_id).await? {
+        if !check_non_null || self.jobs_is_job_non_null(job_id).await? {
             let fut = jobs.query(
                 "is_draft",
                 job_id.as_bytes32(),
@@ -696,9 +681,6 @@ impl<'a> Chain<'a> {
 
     /// Get a job from the blockchain.
     pub async fn jobs_get_job(&self, job_id: &JobId, check_non_null: bool) -> Result<Job, Error> {
-        let jobs = self.jobs()?;
-        let addr = self.local_address()?;
-
         let (timeout, redundancy, max_failures) =
             self.jobs_get_parameters(job_id, check_non_null).await?;
         let other_data = self.jobs_get_other_data(job_id, check_non_null).await?;
@@ -758,28 +740,215 @@ impl<'a> Chain<'a> {
         unimplemented!();
     }
 
-    pub async fn jobs_get_task(&self, task_id: &TaskId) -> Result<(JobId, u128, Vec<u8>), Error> {
+    /// Check if a task id corresponds to an existing task.
+    pub async fn jobs_is_task_non_null(&self, task_id: &TaskId) -> Result<bool, Error> {
         let jobs = self.jobs()?;
         let addr = self.local_address()?;
 
         let fut = jobs.query(
-            "get_task",
+            "is_task_non_null",
             task_id.as_bytes32(),
-            addr,
+            *addr,
             Default::default(),
             None,
         );
-        let (job_id, argument_id, argument): (Vec<u8>, u128, Vec<u8>) =
-            Compat01As03::new(fut).await?;
-        Ok((job_id.as_slice().try_into()?, argument_id, argument))
+        Ok(Compat01As03::new(fut).await?)
+    }
+
+    /// Get the argument of a given task.
+    pub async fn jobs_get_argument(
+        &self,
+        task_id: &TaskId,
+        check_non_null: bool,
+    ) -> Result<Vec<u8>, Error> {
+        let jobs = self.jobs()?;
+        let addr = self.local_address()?;
+
+        if check_non_null || self.jobs_is_task_non_null(task_id).await? {
+            let fut = jobs.query(
+                "get_argument",
+                task_id.as_bytes32(),
+                *addr,
+                Default::default(),
+                None,
+            );
+            Ok(Compat01As03::new(fut).await?)
+        } else {
+            Err(Error::TaskNotFound(task_id.clone()))
+        }
+    }
+
+    /// Get the state of the given task.
+    pub async fn jobs_get_task_state(
+        &self,
+        task_id: &TaskId,
+        check_non_null: bool,
+    ) -> Result<JobsTaskState, Error> {
+        let jobs = self.jobs()?;
+        let addr = self.local_address()?;
+
+        if check_non_null || self.jobs_is_task_non_null(task_id).await? {
+            let fut = jobs.query(
+                "get_task_state",
+                task_id.as_bytes32(),
+                *addr,
+                Default::default(),
+                None,
+            );
+            let (state, result, reason) = Compat01As03::new(fut).await?;
+            let reason =
+                try_convert_task_error_kind(reason).ok_or(Error::TaskErrorKindParse(reason))?;
+            try_convert_tasks_state(state, result, reason).ok_or(Error::TaskStateParse(state))
+        } else {
+            Err(Error::TaskNotFound(task_id.clone()))
+        }
+    }
+
+    /// Get the task [`JobId`] and `argument_id`.
+    /// Calling [`TaskId::task_id`] on them should return [`task_id`].
+    pub async fn jobs_get_task(
+        &self,
+        task_id: &TaskId,
+        check_non_null: bool,
+    ) -> Result<(JobId, u128), Error> {
+        let jobs = self.jobs()?;
+        let addr = self.local_address()?;
+
+        if check_non_null || self.jobs_is_task_non_null(task_id).await? {
+            let fut = jobs.query(
+                "get_task",
+                task_id.as_bytes32(),
+                *addr,
+                Default::default(),
+                None,
+            );
+            let (job_id, argument_id): (Vec<u8>, u128) = Compat01As03::new(fut).await?;
+            Ok((JobId::from_bytes(job_id)?, argument_id))
+        } else {
+            Err(Error::TaskNotFound(task_id.clone()))
+        }
+    }
+
+    /// Get all the information related to given task.
+    pub async fn jobs_get_full_task(
+        &self,
+        task_id: &TaskId,
+        check_non_null: bool,
+    ) -> Result<(JobId, u128, Vec<u8>, JobsTaskState), Error> {
+        if check_non_null || self.jobs_is_task_non_null(task_id).await? {
+            let (job_id, argument_id) = self.jobs_get_task(task_id, false).await?;
+            let argument = self.jobs_get_argument(task_id, false).await?;
+            let state = self.jobs_get_task_state(task_id, false).await?;
+            Ok((job_id, argument_id, argument, state))
+        } else {
+            Err(Error::TaskNotFound(task_id.clone()))
+        }
+    }
+
+    /// Gets the address of the oracle which can modify pending tasks.
+    pub async fn jobs_oracle(&self) -> Result<Address, Error> {
+        let jobs = self.jobs()?;
+        let addr = self.local_address()?;
+
+        let fut = jobs.query("oracle", (), *addr, Default::default(), None);
+        Ok(Compat01As03::new(fut).await?)
+    }
+
+    /// Register managers who participated on the given task.
+    ///
+    /// > **Note:** Local address must be the oracle of the contract.
+    pub async fn jobs_set_managers(
+        &self,
+        task_id: &TaskId,
+        managers: &[Address],
+    ) -> Result<types::TransactionReceipt, Error> {
+        let jobs = self.jobs()?;
+        let addr = self.local_address()?;
+        let oracle = self.jobs_oracle().await?;
+
+        if oracle == *addr && self.jobs_is_task_non_null(task_id).await? {
+            let fut = jobs.call_with_confirmations(
+                "set_managers",
+                (task_id.as_bytes32(), Vec::from(managers)),
+                *addr,
+                Default::default(),
+                0,
+            );
+            Ok(Compat01As03::new(fut).await?)
+        } else {
+            Err(Error::LocalAddressNotOracle(*addr, oracle))
+        }
+    }
+
+    /// Register a task is definitely failed and pay the managers and refund
+    /// the sender.
+    ///
+    /// > **Note:** Local address must be the oracle of the contract.
+    pub async fn jobs_set_definitely_failed(
+        &self,
+        task_id: &TaskId,
+        reason: TaskErrorKind,
+    ) -> Result<types::TransactionReceipt, Error> {
+        let jobs = self.jobs()?;
+        let addr = self.local_address()?;
+        let oracle = self.jobs_oracle().await?;
+
+        if oracle == *addr && self.jobs_is_task_non_null(task_id).await? {
+            let reason = convert_task_error_kind(reason)
+                .ok_or(Error::TaskErrorKindNotCompatibleWithJobs(reason))?;
+            let fut = jobs.call_with_confirmations(
+                "set_definitely_failed",
+                (task_id.as_bytes32(), reason),
+                *addr,
+                Default::default(),
+                0,
+            );
+            Ok(Compat01As03::new(fut).await?)
+        } else {
+            Err(Error::LocalAddressNotOracle(*addr, oracle))
+        }
+    }
+
+    // TODO
+    /// Register managers who participated on the given task.
+    ///
+    /// > **Note:** Local address must be the oracle of the contract.
+    pub async fn jobs_set_completed(
+        &self,
+        task_id: &TaskId,
+        result: &[u8],
+        workers_infos: &[(Address, u64, u64)],
+    ) -> Result<types::TransactionReceipt, Error> {
+        let jobs = self.jobs()?;
+        let task_id = Vec::from(task_id.as_bytes());
+        let addr = self.local_address()?;
+
+        let mut workers = Vec::new();
+        let mut worker_prices = Vec::new();
+        let mut network_prices = Vec::new();
+
+        workers_infos.iter().for_each(|(w, p, n)| {
+            workers.push(w.clone());
+            worker_prices.push(*p);
+            network_prices.push(*n);
+        });
+
+        let fut = jobs.call_with_confirmations(
+            "set_result",
+            (
+                task_id,
+                Vec::from(result),
+                workers,
+                worker_prices,
+                network_prices,
+            ),
+            *addr,
+            Default::default(),
+            0,
+        );
+        Ok(Compat01As03::new(fut).await?)
     }
 }
-
-// TODO: get list of drafts
-// TODO: get list of incomplete jobs
-// TODO: get list of all jobs
-// TODO: ...
-// TODO: check if sender is correct
 
 #[cfg(test)]
 mod tests {

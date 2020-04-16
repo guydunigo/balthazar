@@ -15,8 +15,7 @@ enum NodeType {
  WORKER = 1;
 }
 
-// In the format `[TYPE]_[MAJOR]m[MINOR]n[PATCH]`, because when converting to type,
-// it renames it to `Wasm010` otherwise.
+// In the format `[TYPE][MAJOR]m[MINOR]n[PATCH]`, because when converting to `Wasm0m1n0`.
 enum ProgramKind {
  WASM0m1n0 = 0;
  // DOCKER0m1n0 = 10;

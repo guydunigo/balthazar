@@ -2,7 +2,7 @@ use misc::{
     job::{JobId, TaskId},
     multiaddr, multihash,
 };
-use proto::{DecodeError, EncodeError};
+use proto::{worker::TaskErrorKind, DecodeError, EncodeError};
 use std::fmt;
 use web3::{
     contract::Error as ContractError,
@@ -49,6 +49,10 @@ pub enum Error {
     JobNotReady(JobId),
     /// The local address isn't the job's sender.
     JobNotOurs(JobId),
+    /// Local address isn't the oracle, so it can't perform the operation.
+    LocalAddressNotOracle(Address, Address),
+    /// [`TaskErrorKind`] is not compatible with the Jobs smart-contract.
+    TaskErrorKindNotCompatibleWithJobs(TaskErrorKind),
 }
 
 impl From<web3::Error> for Error {

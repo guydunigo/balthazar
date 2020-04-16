@@ -68,11 +68,11 @@ impl HashId {
     }
 
     /// Calculate TaskId.
-    pub fn task_id(job_id: &JobId, i: u128, argument: &[u8]) -> TaskId {
-        let mut buffer = Vec::with_capacity(HASH_SIZE + argument.len());
+    pub fn task_id(job_id: &JobId, i: u128 /*, argument: &[u8]*/) -> TaskId {
+        let mut buffer = Vec::with_capacity(HASH_SIZE + 16 /*+ argument.len()*/);
         buffer.extend_from_slice(job_id.as_bytes());
         buffer.extend_from_slice(&i.to_be_bytes()[..]);
-        buffer.extend_from_slice(&argument[..]);
+        // buffer.extend_from_slice(&argument[..]);
         DefaultHash::digest(&buffer[..])
             .try_into()
             .expect("We just built it ourselves.")
@@ -199,7 +199,7 @@ impl fmt::Display for Job {
         for (i, a) in self.arguments.iter().enumerate() {
             write!(f, "  ")?;
             if let Some(job_id) = self.job_id() {
-                write!(f, "{}", TaskId::task_id(&job_id, i as u128, &a[..]))?;
+                write!(f, "{}", TaskId::task_id(&job_id, i as u128 /*, &a[..]*/))?;
             } else {
                 write!(f, "{}", i)?;
             }
@@ -468,7 +468,8 @@ impl Job {
 
 /*
 pub struct Task {
-    pub task_id: TaskId,
+    pub job_id: JobId,
+    pub argument_id: u128,
     pub arguments: Vec<u8>,
 }
 */
