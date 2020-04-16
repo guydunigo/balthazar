@@ -10,8 +10,8 @@ mod error;
 pub use error::Error;
 mod config;
 pub use config::ChainConfig;
-// mod run;
-// pub use run::{run, RunMode};
+mod run;
+pub use run::{run, RunMode};
 
 use ethabi::Event;
 use futures::{compat::Compat01As03, future, Stream, StreamExt};
@@ -21,10 +21,11 @@ use misc::{
 };
 use proto::{worker::TaskErrorKind, Message};
 use std::{convert::TryInto, fmt};
+pub use web3::types::Address;
 use web3::{
     contract::{Contract, Error as ContractError, Options},
     transports::{EventLoopHandle, WebSocket},
-    types::{self, Address, Block, BlockId, FilterBuilder},
+    types::{self, Block, BlockId, FilterBuilder},
     Web3,
 };
 
@@ -405,7 +406,7 @@ impl<'a> Chain<'a> {
         let mut encoded_data = Vec::with_capacity(other_data.encoded_len());
         other_data.encode(&mut encoded_data)?;
         let fut = jobs.call_with_confirmations(
-            "set_data",
+            "set_other_data",
             (job_id_32, encoded_data),
             *addr,
             Default::default(),
@@ -415,7 +416,7 @@ impl<'a> Chain<'a> {
 
         let fut = jobs.call_with_confirmations(
             "set_arguments",
-            (job_id_32, job.arguments().clone()),
+            (job_id_32, Vec::from(job.arguments())),
             *addr,
             Default::default(),
             0,
@@ -881,7 +882,7 @@ impl<'a> Chain<'a> {
     }
 
     /// Register a task is definitely failed and pay the managers and refund
-    /// the sender.
+    /// the sender with the remaining amount.
     ///
     /// > **Note:** Local address must be the oracle of the contract.
     pub async fn jobs_set_definitely_failed(
@@ -909,8 +910,8 @@ impl<'a> Chain<'a> {
         }
     }
 
-    // TODO
-    /// Register managers who participated on the given task.
+    /// Register a task is definitely failed and pay the managers and workers,
+    /// and refund the sender with the remaining amount.
     ///
     /// > **Note:** Local address must be the oracle of the contract.
     pub async fn jobs_set_completed(
@@ -920,33 +921,37 @@ impl<'a> Chain<'a> {
         workers_infos: &[(Address, u64, u64)],
     ) -> Result<types::TransactionReceipt, Error> {
         let jobs = self.jobs()?;
-        let task_id = Vec::from(task_id.as_bytes());
         let addr = self.local_address()?;
+        let oracle = self.jobs_oracle().await?;
 
-        let mut workers = Vec::new();
-        let mut worker_prices = Vec::new();
-        let mut network_prices = Vec::new();
+        if oracle == *addr && self.jobs_is_task_non_null(task_id).await? {
+            let mut worker_addrs = Vec::with_capacity(workers_infos.len());
+            let mut worker_prices = Vec::with_capacity(workers_infos.len());
+            let mut network_prices = Vec::with_capacity(workers_infos.len());
 
-        workers_infos.iter().for_each(|(w, p, n)| {
-            workers.push(w.clone());
-            worker_prices.push(*p);
-            network_prices.push(*n);
-        });
+            workers_infos.iter().for_each(|(w, p, n)| {
+                worker_addrs.push(w.clone());
+                worker_prices.push(*p);
+                network_prices.push(*n);
+            });
 
-        let fut = jobs.call_with_confirmations(
-            "set_result",
-            (
-                task_id,
-                Vec::from(result),
-                workers,
-                worker_prices,
-                network_prices,
-            ),
-            *addr,
-            Default::default(),
-            0,
-        );
-        Ok(Compat01As03::new(fut).await?)
+            let fut = jobs.call_with_confirmations(
+                "set_completed",
+                (
+                    task_id.as_bytes32(),
+                    Vec::from(result),
+                    worker_addrs,
+                    worker_prices,
+                    network_prices,
+                ),
+                *addr,
+                Default::default(),
+                0,
+            );
+            Ok(Compat01As03::new(fut).await?)
+        } else {
+            Err(Error::LocalAddressNotOracle(*addr, oracle))
+        }
     }
 }
 

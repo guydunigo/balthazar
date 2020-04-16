@@ -6,7 +6,7 @@ use futures::executor::block_on;
 
 use balthachain::{Chain, ChainConfig, Error};
 use balthamisc::{
-    job::{Job, ProgramKind},
+    job::{Job, JobId, ProgramKind},
     multiformats::try_decode_multibase_multihash_string,
 };
 use std::fs::{read, read_to_string};
@@ -63,7 +63,7 @@ fn it_can_process_a_new_job() -> Result<(), Error> {
     let chain = Chain::new(&conf);
 
     let mut job = Job::new(
-        ProgramKind::Wasm,
+        ProgramKind::Wasm0m1n0,
         vec!["/ipfs/QmZbABTQy1dHPrimGNhUeZKRnesiJ2RnMNJgDtc65KgnJv".to_string()],
         try_decode_multibase_multihash_string("MGyC7DRF34gDhPAY8HzBm9qAIceHwy7n0pCItA1teasyEyg==")
             .unwrap(),
@@ -71,29 +71,46 @@ fn it_can_process_a_new_job() -> Result<(), Error> {
         conf.ethereum_address().unwrap(),
     );
     job.set_timeout(10);
-    job.set_max_failures(5);
     job.set_max_worker_price(10);
     job.set_max_network_usage(10);
     job.set_max_network_price(10);
+    job.set_min_checking_interval(15);
+    job.set_management_price(10);
     job.set_redundancy(5);
+    job.set_max_failures(5);
     job.set_is_program_pure(true);
 
-    let nonce = block_on(chain.jobs_new_draft(&job))?;
+    let nonce = block_on(chain.jobs_create_draft(&job))?;
     job.set_nonce(Some(nonce));
-    let job_2 = block_on(chain.jobs_get_draft_job(nonce))?;
+    let job_id = job.job_id().expect("we just set it");
+    let job_2 = block_on(chain.jobs_get_job(&job_id, true))?;
     assert_eq!(job, job_2, "Sent job and draft are different!");
 
-    let (pending_0, _) = block_on(chain.jobs_get_pending_locked_money())?;
-    block_on(chain.jobs_send_pending_money(job.calc_max_price().into()))?;
-    let (pending_1, locked_0) = block_on(chain.jobs_get_pending_locked_money())?;
+    {
+        let nonce = block_on(chain.jobs_create_draft(&job))?;
+        let job_id = JobId::job_id(&job.sender(), nonce);
+        assert!(
+            block_on(chain.jobs_is_job_non_null(&job_id))?,
+            "Job is still null and hasn't been created."
+        );
+        block_on(chain.jobs_delete_draft(&job_id))?;
+        assert!(
+            block_on(chain.jobs_is_job_non_null(&job_id))?,
+            "Job isn't still null and hasn't been deleted."
+        );
+    }
+
+    let (pending_0, _) = block_on(chain.jobs_get_pending_locked_money_local())?;
+    block_on(chain.jobs_send_pending_money_local(job.calc_max_price().into()))?;
+    let (pending_1, locked_0) = block_on(chain.jobs_get_pending_locked_money_local())?;
     assert_eq!(
         pending_1,
         pending_0 + job.calc_max_price(),
         "Invalid pending money after transfer!"
     );
 
-    block_on(chain.jobs_ready(nonce))?;
-    let (pending_2, locked_1) = block_on(chain.jobs_get_pending_locked_money())?;
+    block_on(chain.jobs_lock(&job_id))?;
+    let (pending_2, locked_1) = block_on(chain.jobs_get_pending_locked_money_local())?;
     assert_eq!(
         pending_2,
         pending_1 - job.calc_max_price(),

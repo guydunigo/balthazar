@@ -1,13 +1,11 @@
-use super::{
-    config::{Address, ChainConfig},
-    Chain, Error, JobsEventKind,
-};
+use super::{config::ChainConfig, Chain, Error, JobsEventKind};
 use futures::{executor::block_on, future, StreamExt};
 use misc::{
-    job::{BestMethod, Job, JobId, ProgramKind, TaskId},
+    job::{Job, JobId, ProgramKind, TaskId},
     multihash::Multihash,
 };
-use web3::types::{BlockId, BlockNumber};
+use proto::worker::TaskErrorKind;
+use web3::types::{Address, BlockId, BlockNumber};
 
 #[derive(Clone, Debug)]
 pub enum RunMode {
@@ -23,60 +21,69 @@ pub enum RunMode {
     /// List all Jobs smart contract events.
     JobsEvents,
     /// Create draft job and return the cost to pay.
-    JobsNewDraft {
+    JobsCreateDraft {
         program_kind: ProgramKind,
         addresses: Vec<String>,
         program_hash: Multihash,
         arguments: Vec<Vec<u8>>,
         timeout: u64,
-        max_worker_price: u64,
+        // max_worker_price: u64,
         max_network_usage: u64,
-        max_network_price: u64,
+        // max_network_price: u64,
+        // min_checking_interval: u64,
+        // management_price: u64,
         redundancy: u64,
         max_failures: u64,
-        min_network_speed: u64,
-        best_method: BestMethod,
-        min_cpu_count: u64,
-        min_memory: u64,
+        // best_method: BestMethod,
+        // min_cpu_count: u64,
+        // min_memory: u64,
+        // min_network_speed: u64,
         is_program_pure: bool,
+    },
+    /// Remove a draft job.
+    JobsDeleteDraft {
+        job_id: JobId,
+    },
+    /// Lock a draft job if it meets readiness criteria and there's enough pending
+    /// money, will lock the job and send the tasks for execution.
+    JobsLock {
+        job_id: JobId,
     },
     /// Get an already validated job.
     /// As well as its tasks statuses.
     JobsGetJob {
         job_id: JobId,
+        /// Check if job is non_null before getting it.
+        check_non_null: bool,
     },
-    /// Get a pending draft job information.
-    JobsGetDraftJob {
-        nonce: u128,
-    },
-    /*
-    /// Get a list of pending job ids.
-    // TODO
-    JobsGetPendingJobs,
-    */
-    /// Get a list of pending drafts nonces.
+    /// Get the list of pending drafts jobs as job ids.
     JobsGetDraftJobs,
-    /// Remove a draft job.
-    JobsDeleteDraftJob {
-        nonce: u128,
-    },
-    /// Query a result if it exists.
-    // TODO
-    JobsGetResult {
+    /// Get the list of jobs waiting for computation as job ids.
+    JobsGetPendingJobs,
+    /// Get the list of completed jobs as job ids.
+    JobsGetCompletedJobs,
+    /// Query a task.
+    JobsGetTask {
         task_id: TaskId,
+        /// Check if job is non_null before getting it.
+        check_non_null: bool,
     },
-    /*
     /// Send a result and workers to the sc.
     /// There must be as many workers as job's `redundancy`.
-    // TODO
-    JobsSetResult {
+    JobsSetDefinitelyFailed {
+        task_id: TaskId,
+        reason: TaskErrorKind,
+        managers: Vec<Address>,
+    },
+    /// Send a result and workers to the sc.
+    /// There must be as many workers as job's `redundancy`.
+    JobsSetCompleted {
         task_id: TaskId,
         result: Vec<u8>,
-        // Workers ethereum address, worker_price, network_price.
+        managers: Vec<Address>,
+        /// Workers ethereum address, worker_price, network_price.
         workers: Vec<(Address, u64, u64)>,
     },
-    */
-    // TODO...
     /// Get money amounts on both locked and pending accounts.
     JobsGetMoney,
     /// Send money to pending account.
@@ -86,11 +93,6 @@ pub enum RunMode {
     /// Recover money from pending account.
     JobsRecoverMoney {
         amount: u128,
-    },
-    /// Set a job as ready, if it meets readiness criteria and there's enough pending
-    /// money, will lock the job and send the tasks for execution.
-    JobsReady {
-        nonce: u128,
     },
 }
 
@@ -165,21 +167,23 @@ async fn run_async(mode: &RunMode, config: &ChainConfig) -> Result<(), Error> {
                 println!("{:?}, {}", evt, evt.signature());
             }
         }
-        RunMode::JobsNewDraft {
+        RunMode::JobsCreateDraft {
             program_kind,
             addresses,
             program_hash,
             arguments,
             timeout,
-            max_failures,
-            best_method,
-            max_worker_price,
-            min_cpu_count,
-            min_memory,
+            // max_worker_price,
             max_network_usage,
-            max_network_price,
-            min_network_speed,
+            // max_network_price,
+            // min_checking_interval,
+            // management_price,
             redundancy,
+            max_failures,
+            // best_method,
+            // min_cpu_count,
+            // min_memory,
+            // min_network_speed,
             is_program_pure,
         } => {
             let mut job = Job::new(
@@ -187,102 +191,108 @@ async fn run_async(mode: &RunMode, config: &ChainConfig) -> Result<(), Error> {
                 addresses.clone(),
                 program_hash.clone(),
                 arguments.clone(),
-                chain.local_address()?,
+                *chain.local_address()?,
             );
             job.set_timeout(*timeout);
-            job.set_max_failures(*max_failures);
-            job.set_best_method(*best_method);
-            job.set_max_worker_price(*max_worker_price);
-            job.set_min_cpu_count(*min_cpu_count);
-            job.set_min_memory(*min_memory);
+            // job.set_max_worker_price(*max_worker_price);
             job.set_max_network_usage(*max_network_usage);
-            job.set_max_network_price(*max_network_price);
-            job.set_min_network_speed(*min_network_speed);
+            // job.set_max_network_price(*max_network_price);
+            // job.set_min_checking_interval(*min_checking_interval);
+            // job.set_management_price(*management_price);
             job.set_redundancy(*redundancy);
+            job.set_max_failures(*max_failures);
+            // job.set_best_method(*best_method);
+            // job.set_min_cpu_count(*min_cpu_count);
+            // job.set_min_memory(*min_memory);
+            // job.set_min_network_speed(*min_network_speed);
             job.set_is_program_pure(*is_program_pure);
-            job.set_nonce(None);
 
-            let nonce = chain.jobs_new_draft(&job).await?;
+            let mut job = job.clone();
+            let nonce = chain.jobs_create_draft(&job).await?;
+            job.set_nonce(Some(nonce));
+            let job_id = job.job_id().expect("nonce just set");
 
-            println!("{}", chain.jobs_get_draft_job(nonce).await?);
-            println!("Draft stored !");
-            println!("You might still need to send the money for it and set it as ready.");
+            println!("{}", chain.jobs_get_job(&job_id, true).await?);
+            println!("Draft stored as {}!", job_id);
+            println!("You might still need to send the money for it and set it as locked.");
         }
-        RunMode::JobsGetJob { job_id } => {
-            let job = chain.jobs_get_job(job_id).await?;
+        RunMode::JobsDeleteDraft { job_id } => {
+            let job = chain.jobs_get_job(job_id, true).await?;
             println!("{}", job);
+            chain.jobs_delete_draft(job_id).await?;
+            println!("{} deleted!", job_id);
         }
-        RunMode::JobsGetDraftJob { nonce } => {
-            let job = chain.jobs_get_draft_job(*nonce).await?;
+        RunMode::JobsLock { job_id } => {
+            let job = chain.jobs_get_job(job_id, true).await?;
             println!("{}", job);
+            chain.jobs_lock(job_id).await?;
+            println!("{} set as ready for work.", job_id);
         }
-        /*
-        RunMode::JobsGetPendingJobs => {
-            let jobs: Vec<String> = chain
-                .jobs_get_pending_jobs()
-                .await?
-                .iter()
-                .map(|h| format!("{}", h))
-                .collect();
-            println!("{:?}", jobs);
-        }
-        */
-        RunMode::JobsGetDraftJobs => {
-            let jobs = chain.jobs_get_draft_jobs().await?;
-            println!("{:?}", jobs);
-        }
-        RunMode::JobsDeleteDraftJob { nonce } => {
-            let job = chain.jobs_get_draft_job(*nonce).await?;
-            println!("{}", job);
-            chain.jobs_delete_draft_job(*nonce).await?;
-            println!("Deleted!");
-        }
-        RunMode::JobsGetResult { task_id } => {
-            let result = chain.jobs_get_result(task_id).await?;
-            println!(
-                "Result of task `{}`:\n{}",
-                task_id,
-                String::from_utf8_lossy(&result[..])
-            );
-        }
-        /*
-        RunMode::JobsSetResult {
-            task_id,
-            result,
-            workers,
+        RunMode::JobsGetJob {
+            job_id,
+            check_non_null,
         } => {
-            chain.jobs_set_result(task_id, result, &workers[..]).await?;
+            let job = chain.jobs_get_job(job_id, *check_non_null).await?;
+            println!("{}", job);
+        }
+        RunMode::JobsGetDraftJobs => {
+            let jobs = chain.jobs_get_draft_jobs_local().await?;
+            println!("{:?}", jobs);
+        }
+        RunMode::JobsGetPendingJobs => {
+            let jobs = chain.jobs_get_pending_jobs_local().await?;
+            println!("{:?}", jobs);
+        }
+        RunMode::JobsGetCompletedJobs => {
+            let jobs = chain.jobs_get_completed_jobs_local().await?;
+            println!("{:?}", jobs);
+        }
+        RunMode::JobsGetTask {
+            task_id,
+            check_non_null,
+        } => {
+            let task = chain.jobs_get_full_task(task_id, *check_non_null).await?;
+            // TODO: better printing.
+            println!("{:?}", task);
+        }
+        RunMode::JobsSetDefinitelyFailed {
+            task_id,
+            reason,
+            managers,
+        } => {
+            chain.jobs_set_managers(task_id, &managers[..]).await?;
+            chain.jobs_set_definitely_failed(task_id, *reason).await?;
             println!("Result of task `{}` stored.", task_id,);
         }
-        */
+        RunMode::JobsSetCompleted {
+            task_id,
+            result,
+            managers,
+            workers,
+        } => {
+            chain.jobs_set_managers(task_id, &managers[..]).await?;
+            chain
+                .jobs_set_completed(task_id, result, &workers[..])
+                .await?;
+            println!("Result of task `{}` stored.", task_id,);
+        }
         RunMode::JobsGetMoney => {
-            let (pending, locked) = chain.jobs_get_pending_locked_money().await?;
+            let (pending, locked) = chain.jobs_get_pending_locked_money_local().await?;
             println!(
                 "Pending money: {} money.\nLocked money: {} money.",
                 pending, locked
             );
         }
         RunMode::JobsSendMoney { amount } => {
-            chain.jobs_send_pending_money((*amount).into()).await?;
+            chain
+                .jobs_send_pending_money_local((*amount).into())
+                .await?;
             println!("{} money sent.", amount);
         }
         RunMode::JobsRecoverMoney { amount } => {
             chain.jobs_recover_pending_money((*amount).into()).await?;
             println!("{} money recovered.", amount);
         }
-        RunMode::JobsReady { nonce } => {
-            let job = chain.jobs_get_draft_job(*nonce).await?;
-            println!("{}", job);
-            chain.jobs_ready(*nonce).await?;
-            println!("{} set as ready for work.", nonce);
-        } /*
-          RunMode::JobsValidate { job_id } => {
-              let job = chain.jobs_get_job(job_id).await?;
-              println!("{}", job);
-              chain.jobs_validate_results(job_id).await?;
-              println!("{} validated, workers paid, and money available.", job_id);
-          }
-          */
     }
 
     Ok(())

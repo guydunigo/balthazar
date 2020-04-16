@@ -47,7 +47,7 @@ contract Jobs {
         uint64 min_checking_interval;
         uint64 management_price;
 
-        bytes data;
+        bytes other_data;
 
         address sender;
         uint128 nonce;
@@ -89,7 +89,7 @@ contract Jobs {
     mapping(address => User) users;
 
     // TODO: ability to set this address ?
-    public address oracle;
+    address public oracle;
 
     constructor(/*address oracle_address*/) public {
         // oracle = oracle_address;
@@ -293,16 +293,16 @@ contract Jobs {
     }
 
     // Reverts if there is no job corresponding to `job_id`.
-    function get_data(bytes32 job_id) public view returns (bytes memory) {
+    function get_other_data(bytes32 job_id) public view returns (bytes memory) {
         Job storage job = jobs[job_id];
         require(job.non_null/*, "unknown job"*/);
-        return job.data;
+        return job.other_data;
     }
-    function set_data(bytes32 job_id, bytes memory val) public {
+    function set_other_data(bytes32 job_id, bytes memory val) public {
         Job storage job = jobs[job_id];
         check_is_our_draft(job);
 
-        job.data = val;
+        job.other_data = val;
     }
 
     // Reverts if there is no job corresponding to `job_id`.

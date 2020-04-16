@@ -194,7 +194,11 @@ impl fmt::Display for Job {
             "Program hash: {}",
             encode_multibase_multihash_string(&self.program_hash)
         )?;
-        writeln!(f, "Addresses: {:?}", self.program_addresses)?;
+        writeln!(f, "Addresses: [")?;
+        for a in self.program_addresses.iter() {
+            writeln!(f, "  {}", a)?;
+        }
+        writeln!(f, "]")?;
         writeln!(f, "Arguments: [")?;
         for (i, a) in self.arguments.iter().enumerate() {
             write!(f, "  ")?;
@@ -215,6 +219,8 @@ impl fmt::Display for Job {
             "Max network price: {} money/kilobits",
             self.max_network_price
         )?;
+        writeln!(f, "Min checking interval: {}s", self.min_checking_interval)?;
+        writeln!(f, "Management price: {} money", self.management_price)?;
         writeln!(f)?;
         writeln!(f, "Redundancy: {}", self.redundancy)?;
         writeln!(f, "Max failures: {}", self.max_failures)?;
@@ -291,7 +297,7 @@ impl Job {
     pub fn program_hash(&self) -> &Multihash {
         &self.program_hash
     }
-    pub fn arguments(&self) -> &Vec<Vec<u8>> {
+    pub fn arguments(&self) -> &[Vec<u8>] {
         &self.arguments
     }
     pub fn timeout(&self) -> u64 {
