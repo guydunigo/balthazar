@@ -55,7 +55,11 @@ pub enum JobsTaskState {
     DefinetelyFailed(TaskErrorKind),
 }
 
-fn try_convert_tasks_state(state_nb: u64, result: Vec<u8>, reason: TaskErrorKind) -> Option<JobsTaskState> {
+fn try_convert_tasks_state(
+    state_nb: u64,
+    result: Vec<u8>,
+    reason: TaskErrorKind,
+) -> Option<JobsTaskState> {
     match state_nb {
         0 => Some(JobsTaskState::Incomplete),
         1 => Some(JobsTaskState::Completed(result)),
@@ -215,7 +219,8 @@ impl<'a> Chain<'a> {
         &self,
         event: JobsEventKind,
     ) -> Result<impl Stream<Item = Result<JobsEvent, Error>>, Error> {
-        self.jobs_subscribe_to_events(&[self.jobs_event(event)?][..]).await
+        self.jobs_subscribe_to_events(&[self.jobs_event(event)?][..])
+            .await
     }
 
     /// Get a list of all events from the smart-contract's ABI format.
@@ -234,20 +239,17 @@ impl<'a> Chain<'a> {
 
     /// Get the amount of money the Jobs SC contains for the local account in
     /// the pending account and the locked one.
-    pub async fn jobs_get_pending_locked_money_local(&self) -> Result<(types::U256, types::U256), Error> {
-        self.jobs_get_pending_locked_money(self.local_address()?).await
-    }
-
-    /// Get the amount of money the Jobs SC contains in the pending account
-    /// and the locked one.
     // TODO: not possible from someone else, yet.
-    async fn jobs_get_pending_locked_money(&self, address: &Address) -> Result<(types::U256, types::U256), Error> {
+    pub async fn jobs_get_pending_locked_money_local(
+        &self,
+    ) -> Result<(types::U256, types::U256), Error> {
         let jobs = self.jobs()?;
+        let addr = self.local_address()?;
 
         let fut = jobs.query(
             "get_pending_locked_money",
             (),
-            *address,
+            *addr,
             Default::default(),
             None,
         );
@@ -276,6 +278,7 @@ impl<'a> Chain<'a> {
             );
             Ok(Compat01As03::new(fut).await?)
         }
+        // TODO: check new values
     }
 
     /// Recover money from the pending account associated to local address.
@@ -288,7 +291,7 @@ impl<'a> Chain<'a> {
         let jobs = self.jobs()?;
         let addr = self.local_address()?;
 
-        let (pending, _) = self.jobs_get_pending_locked_money(addr).await?;
+        let (pending, _) = self.jobs_get_pending_locked_money_local().await?;
         if pending < amount {
             return Err(Error::NotEnoughMoneyInPending);
         }
@@ -301,6 +304,7 @@ impl<'a> Chain<'a> {
             0,
         );
         Ok(Compat01As03::new(fut).await?)
+        // TODO: check new values
     }
 
     /// Get next nonce used when a new draft job will be created.
@@ -309,261 +313,166 @@ impl<'a> Chain<'a> {
         let jobs = self.jobs()?;
         let addr = self.local_address()?;
 
-        let fut = jobs.query(
-            "get_next_nonce",
-            (),
-            *addr,
-            Default::default(),
-            None,
-        );
+        let fut = jobs.query("get_next_nonce", (), *addr, Default::default(), None);
         Ok(Compat01As03::new(fut).await?)
     }
 
-    /// Creates a new draft job based on given job, and return it's nonce.
-    pub async fn jobs_new_draft(&self, job: &Job) -> Result<u128, Error> {
+    /// Creates a new draft job based on given job, and return it's [`JobId`].
+    /// Every data from the given job is set in the blockchain.
+    ///
+    /// The job won't be executed at once, there still needs to be enough money in
+    /// the local address's pending account (e.g. using [`jobs_send_pending_money_local`]),
+    /// and mark it as ready using [`jobs_ready`].
+    // TODO: check new values
+    // TODO: split in sub-functions ?
+    pub async fn jobs_create_draft(&self, job: &Job) -> Result<u128, Error> {
         let jobs = self.jobs()?;
         let addr = self.local_address()?;
 
-        match job.program_kind() {
-            ProgramKind::Wasm0m1n0 => {
-                let stream = self
-                    .jobs_subscribe_to_event_kind(JobsEventKind::JobNew)
-                    .await?;
+        let stream = self
+            .jobs_subscribe_to_event_kind(JobsEventKind::JobNew)
+            .await?;
 
-                let fut =
-                    jobs.call_with_confirmations("create_job", (), *addr, Default::default(), 0);
-                Compat01As03::new(fut).await?;
+        let fut = jobs.call_with_confirmations("create_draft", (), *addr, Default::default(), 0);
+        Compat01As03::new(fut).await?;
 
-                // TODO: concurrency issues ?
-                // TODO: We have to suppose the user hasn't created another job at the same time.
-                // TODO: check jobs value ?
-                let nonce = stream
-                    .filter_map(|e| {
-                        future::ready(match e {
-                            Ok(JobsEvent::JobNew { sender, nonce }) if sender == addr => {
-                                Some(nonce)
-                            }
-                            _ => None,
-                        })
-                    })
-                    .next()
-                    .await
-                    .ok_or(Error::CouldntFindJobNonceEvent)?;
-
-                let fut = jobs.call_with_confirmations(
-                    "set_parameters_draft",
-                    (nonce, job.timeout, job.max_failures, job.redundancy),
-                    addr,
-                    Default::default(),
-                    0,
-                );
-                Compat01As03::new(fut).await?;
-
-                let other_data = job.other_data();
-                let mut encoded_data = Vec::with_capacity(other_data.encoded_len());
-                other_data.encode(&mut encoded_data)?;
-                let fut = jobs.call_with_confirmations(
-                    "set_data_draft",
-                    (nonce, encoded_data),
-                    addr,
-                    Default::default(),
-                    0,
-                );
-                Compat01As03::new(fut).await?;
-
-                let fut = jobs.call_with_confirmations(
-                    "set_arguments_draft",
-                    (nonce, job.arguments.clone()),
-                    addr,
-                    Default::default(),
-                    0,
-                );
-                Compat01As03::new(fut).await?;
-
-                let fut = jobs.call_with_confirmations(
-                    "set_worker_parameters_draft",
-                    (
+        // TODO: concurrency issues ?
+        // TODO: We have to suppose the user hasn't created another job at the same time.
+        // TODO: or use [`get_next_nonce`]?
+        // TODO: check jobs values ?
+        let nonce = stream
+            .filter_map(|e| {
+                future::ready(match e {
+                    Ok(JobsEvent::JobNew {
+                        sender: addr,
                         nonce,
-                        job.max_worker_price,
-                        job.max_network_usage,
-                        job.max_network_price,
-                    ),
-                    addr,
-                    Default::default(),
-                    0,
-                );
-                Compat01As03::new(fut).await?;
+                    }) => Some(nonce),
+                    _ => None,
+                })
+            })
+            .next()
+            .await
+            .ok_or(Error::CouldntFindJobNewEvent)?;
+        let job_id_32 = JobId::job_id(addr, nonce).as_bytes32();
 
-                Ok(nonce)
-            } /*
-              _ => Err(Error::UnsupportedProgramKind(program_kind)),
-              */
-        }
+        let fut = jobs.call_with_confirmations(
+            "set_parameters",
+            (
+                job_id_32,
+                job.timeout(),
+                job.max_failures(),
+                job.redundancy(),
+            ),
+            *addr,
+            Default::default(),
+            0,
+        );
+        Compat01As03::new(fut).await?;
+
+        let other_data = job.other_data();
+        let mut encoded_data = Vec::with_capacity(other_data.encoded_len());
+        other_data.encode(&mut encoded_data)?;
+        let fut = jobs.call_with_confirmations(
+            "set_data",
+            (job_id_32, encoded_data),
+            *addr,
+            Default::default(),
+            0,
+        );
+        Compat01As03::new(fut).await?;
+
+        let fut = jobs.call_with_confirmations(
+            "set_arguments",
+            (job_id_32, job.arguments().clone()),
+            *addr,
+            Default::default(),
+            0,
+        );
+        Compat01As03::new(fut).await?;
+
+        let fut = jobs.call_with_confirmations(
+            "set_worker_parameters",
+            (
+                job_id_32,
+                job.max_worker_price(),
+                job.max_network_usage(),
+                job.max_network_price(),
+            ),
+            *addr,
+            Default::default(),
+            0,
+        );
+        Compat01As03::new(fut).await?;
+
+        let fut = jobs.call_with_confirmations(
+            "set_management_parameters",
+            (
+                job_id_32,
+                job.min_checking_interval(),
+                job.management_price(),
+            ),
+            *addr,
+            Default::default(),
+            0,
+        );
+        Compat01As03::new(fut).await?;
+
+        Ok(nonce)
     }
 
-    pub async fn jobs_get_job(&self, job_id: &JobId) -> Result<Job, Error> {
-        let jobs = self.jobs()?;
-        let addr = self.local_address()?;
-
-        let fut = jobs.query(
-            "get_parameters",
-            job_id.as_bytes32(),
-            addr,
-            Default::default(),
-            None,
-        );
-        let (timeout, max_failures, redundancy): (u64, u64, u64) = Compat01As03::new(fut).await?;
-
-        let fut = jobs.query(
-            "get_data",
-            job_id.as_bytes32(),
-            addr,
-            Default::default(),
-            None,
-        );
-        let data: Vec<u8> = Compat01As03::new(fut).await?;
-        let data = OtherData::decode(&data[..])?;
-
-        let fut = jobs.query(
-            "get_worker_parameters",
-            job_id.as_bytes32(),
-            addr,
-            Default::default(),
-            None,
-        );
-        let (max_worker_price, max_network_usage, max_network_price): (u64, u64, u64) =
-            Compat01As03::new(fut).await?;
-
-        let fut = jobs.query(
-            "get_sender_nonce",
-            job_id.as_bytes32(),
-            addr,
-            Default::default(),
-            None,
-        );
-        let (sender, nonce): (Address, u128) = Compat01As03::new(fut).await?;
-
-        let fut = jobs.query(
-            "get_arguments",
-            job_id.as_bytes32(),
-            addr,
-            Default::default(),
-            None,
-        );
-        let arguments: Vec<Vec<u8>> = Compat01As03::new(fut).await?;
-
-        let mut job = Job::new(
-            ProgramKind::from_i32(data.program_kind).ok_or(Error::OtherDataDecodeEnumError)?,
-            data.program_addresses,
-            Multihash::from_bytes(data.program_hash)?,
-            arguments,
-            sender,
-        );
-        job.set_timeout(timeout);
-        job.set_max_failures(max_failures);
-        job.set_best_method(
-            BestMethod::from_i32(data.best_method).ok_or(Error::OtherDataDecodeEnumError)?,
-        );
-        job.set_max_worker_price(max_worker_price);
-        job.set_min_cpu_count(data.min_cpu_count);
-        job.set_min_memory(data.min_memory);
-        job.set_max_network_usage(max_network_usage);
-        job.set_max_network_price(max_network_price);
-        job.set_min_network_speed(data.min_network_speed);
-        job.set_redundancy(redundancy);
-        job.set_is_program_pure(data.is_program_pure);
-        job.set_nonce(Some(nonce));
-
-        Ok(job)
-    }
-
-    pub async fn jobs_get_draft_job(&self, nonce: u128) -> Result<Job, Error> {
-        let jobs = self.jobs()?;
-        let addr = self.local_address()?;
-
-        let fut = jobs.query(
-            "get_parameters_draft",
-            nonce,
-            addr,
-            Default::default(),
-            None,
-        );
-        let (timeout, max_failures, redundancy): (u64, u64, u64) = Compat01As03::new(fut).await?;
-
-        let fut = jobs.query("get_data_draft", nonce, addr, Default::default(), None);
-        let data: Vec<u8> = Compat01As03::new(fut).await?;
-        let data = OtherData::decode(&data[..])?;
-
-        let fut = jobs.query(
-            "get_worker_parameters_draft",
-            nonce,
-            addr,
-            Default::default(),
-            None,
-        );
-        let (max_worker_price, max_network_usage, max_network_price): (u64, u64, u64) =
-            Compat01As03::new(fut).await?;
-
-        let fut = jobs.query("get_arguments_draft", nonce, addr, Default::default(), None);
-        let arguments: Vec<Vec<u8>> = Compat01As03::new(fut).await?;
-
-        let mut job = Job::new(
-            ProgramKind::from_i32(data.program_kind).ok_or(Error::OtherDataDecodeEnumError)?,
-            data.program_addresses,
-            Multihash::from_bytes(data.program_hash)?,
-            arguments,
-            addr,
-        );
-        job.set_timeout(timeout);
-        job.set_max_failures(max_failures);
-        job.set_best_method(
-            BestMethod::from_i32(data.best_method).ok_or(Error::OtherDataDecodeEnumError)?,
-        );
-        job.set_max_worker_price(max_worker_price);
-        job.set_min_cpu_count(data.min_cpu_count);
-        job.set_min_memory(data.min_memory);
-        job.set_max_network_usage(max_network_usage);
-        job.set_max_network_price(max_network_price);
-        job.set_min_network_speed(data.min_network_speed);
-        job.set_redundancy(redundancy);
-        job.set_is_program_pure(data.is_program_pure);
-        job.set_nonce(Some(nonce));
-
-        Ok(job)
-    }
-
-    pub async fn jobs_get_pending_jobs(&self) -> Result<Vec<JobId>, Error> {
-        let jobs = self.jobs()?;
-        let addr = self.local_address()?;
-
-        let fut = jobs.query("get_pending_jobs", (), addr, Default::default(), None);
-        let mut pending_jobs: Vec<[u8; 32]> = Compat01As03::new(fut).await?;
-
-        Ok(pending_jobs.drain(..).map(JobId::from).collect())
-    }
-
-    pub async fn jobs_get_draft_jobs(&self) -> Result<Vec<u128>, Error> {
-        let jobs = self.jobs()?;
-        let addr = self.local_address()?;
-
-        let fut = jobs.query("get_draft_jobs", (), addr, Default::default(), None);
-        let pending_jobs: Vec<u128> = Compat01As03::new(fut).await?;
-
-        Ok(pending_jobs)
-    }
-
-    pub async fn jobs_delete_draft_job(
+    /// Deletes a draft job given it exists, belongs to the local address, and is a draft.
+    pub async fn jobs_delete_draft(
         &self,
-        nonce: u128,
+        job_id: &JobId,
     ) -> Result<types::TransactionReceipt, Error> {
         let jobs = self.jobs()?;
         let addr = self.local_address()?;
 
-        let fut =
-            jobs.call_with_confirmations("delete_draft_nonce", nonce, addr, Default::default(), 0);
+        let (sender, _) = self.jobs_get_sender_nonce(job_id, true).await?;
+        if sender == *addr {
+            return Err(Error::JobNotOurs(job_id.clone()));
+        }
+        if !self.jobs_is_draft(job_id, false).await? {
+            return Err(Error::JobNotADraft(job_id.clone()));
+        }
+
+        let fut = jobs.call_with_confirmations(
+            "delete_draft",
+            job_id.as_bytes32(),
+            *addr,
+            Default::default(),
+            0,
+        );
         Ok(Compat01As03::new(fut).await?)
     }
 
+    /// Locks a job from draft to pending so it can be computed.
+    /// The maximum amount of money it can need will be locked as well as all
+    /// its parameters.
+    pub async fn jobs_lock(&self, job_id: &JobId) -> Result<types::TransactionReceipt, Error> {
+        let jobs = self.jobs()?;
+        let addr = self.local_address()?;
+
+        let job = self.jobs_get_job(job_id, true).await?;
+        if job.sender() == *addr {
+            return Err(Error::JobNotOurs(job_id.clone()));
+        }
+
+        if !job.is_ready() {
+            return Err(Error::JobNotReady(job_id.clone()));
+        }
+
+        let (pending, _): (types::U256, _) = self.jobs_get_pending_locked_money_local().await?;
+        if pending.low_u128() < job.calc_max_price() as u128 {
+            return Err(Error::NotEnoughMoneyInPending);
+        }
+
+        let fut =
+            jobs.call_with_confirmations("lock", job_id.as_bytes32(), *addr, Default::default(), 0);
+        Ok(Compat01As03::new(fut).await?)
+    }
+
+    // TODO
     pub async fn jobs_get_result(&self, task_id: &TaskId) -> Result<Vec<u8>, Error> {
         let jobs = self.jobs()?;
         let task_id = Vec::from(task_id.as_bytes());
@@ -573,6 +482,7 @@ impl<'a> Chain<'a> {
         Ok(Compat01As03::new(fut).await?)
     }
 
+    // TODO
     pub async fn jobs_set_result(
         &self,
         task_id: &TaskId,
@@ -609,39 +519,243 @@ impl<'a> Chain<'a> {
         Ok(Compat01As03::new(fut).await?)
     }
 
-    pub async fn jobs_ready(&self, nonce: u128) -> Result<types::TransactionReceipt, Error> {
+    /// Get [`Job::timeout`], [`Job::redundancy`] and [`Job::max_failures`] for given job.
+    pub async fn jobs_get_parameters(
+        &self,
+        job_id: &JobId,
+        check_non_null: bool,
+    ) -> Result<(u64, u64, u64), Error> {
         let jobs = self.jobs()?;
         let addr = self.local_address()?;
 
-        let job = self.jobs_get_draft_job(nonce).await?;
-        if !job.is_complete() {
-            return Err(Error::JobNotComplete);
+        if check_non_null || self.jobs_is_non_null(job_id).await? {
+            let fut = jobs.query(
+                "get_parameters",
+                job_id.as_bytes32(),
+                *addr,
+                Default::default(),
+                None,
+            );
+            Ok(Compat01As03::new(fut).await?)
+        } else {
+            Err(Error::JobNotFound(job_id.clone()))
         }
+    }
 
-        let (pending, _): (types::U256, _) = self.jobs_get_pending_locked_money().await?;
-        if pending.low_u128() < job.calc_max_price() as u128 {
-            return Err(Error::NotEnoughMoneyInPending);
+    /// Get the data in [`OtherData`] for given job.
+    pub async fn jobs_get_other_data(
+        &self,
+        job_id: &JobId,
+        check_non_null: bool,
+    ) -> Result<OtherData, Error> {
+        let jobs = self.jobs()?;
+        let addr = self.local_address()?;
+
+        if check_non_null || self.jobs_is_non_null(job_id).await? {
+            let fut = jobs.query(
+                "get_other_data",
+                job_id.as_bytes32(),
+                *addr,
+                Default::default(),
+                None,
+            );
+            let other_data_bytes: Vec<u8> = Compat01As03::new(fut).await?;
+            let other_data = OtherData::decode(&other_data_bytes[..])?;
+            Ok(other_data)
+        } else {
+            Err(Error::JobNotFound(job_id.clone()))
         }
+    }
 
-        let fut = jobs.call_with_confirmations("ready", nonce, addr, Default::default(), 0);
+    /// Get [`Job::arguments`] for given job.
+    pub async fn jobs_get_arguments(
+        &self,
+        job_id: &JobId,
+        check_non_null: bool,
+    ) -> Result<Vec<Vec<u8>>, Error> {
+        let jobs = self.jobs()?;
+        let addr = self.local_address()?;
+
+        if check_non_null || self.jobs_is_non_null(job_id).await? {
+            let fut = jobs.query(
+                "get_arguments",
+                job_id.as_bytes32(),
+                *addr,
+                Default::default(),
+                None,
+            );
+            Ok(Compat01As03::new(fut).await?)
+        } else {
+            Err(Error::JobNotFound(job_id.clone()))
+        }
+    }
+
+    /// Get [`Job::max_worker_price`], [`Job::max_network_usage`],
+    /// and [`Job::max_network_price`] for given job.
+    pub async fn jobs_get_worker_parameters(
+        &self,
+        job_id: &JobId,
+        check_non_null: bool,
+    ) -> Result<(u64, u64, u64), Error> {
+        let jobs = self.jobs()?;
+        let addr = self.local_address()?;
+
+        if check_non_null || self.jobs_is_non_null(job_id).await? {
+            let fut = jobs.query(
+                "get_worker_parameters",
+                job_id.as_bytes32(),
+                *addr,
+                Default::default(),
+                None,
+            );
+            Ok(Compat01As03::new(fut).await?)
+        } else {
+            Err(Error::JobNotFound(job_id.clone()))
+        }
+    }
+
+    /// Get [`Job::min_checking_interval`] and [`Job::management_price`] for given job.
+    pub async fn jobs_get_management_parameters(
+        &self,
+        job_id: &JobId,
+        check_non_null: bool,
+    ) -> Result<(u64, u64), Error> {
+        let jobs = self.jobs()?;
+        let addr = self.local_address()?;
+
+        if check_non_null || self.jobs_is_non_null(job_id).await? {
+            let fut = jobs.query(
+                "get_management_parameters",
+                job_id.as_bytes32(),
+                *addr,
+                Default::default(),
+                None,
+            );
+            Ok(Compat01As03::new(fut).await?)
+        } else {
+            Err(Error::JobNotFound(job_id.clone()))
+        }
+    }
+
+    /// Get [`Job::sender`] and [`Job::nonce`] for given job.
+    pub async fn jobs_get_sender_nonce(
+        &self,
+        job_id: &JobId,
+        check_non_null: bool,
+    ) -> Result<(Address, u128), Error> {
+        let jobs = self.jobs()?;
+        let addr = self.local_address()?;
+
+        if check_non_null || self.jobs_is_non_null(job_id).await? {
+            let fut = jobs.query(
+                "get_sender_nonce",
+                job_id.as_bytes32(),
+                *addr,
+                Default::default(),
+                None,
+            );
+            Ok(Compat01As03::new(fut).await?)
+        } else {
+            Err(Error::JobNotFound(job_id.clone()))
+        }
+    }
+
+    /// Check if a job id corresponds to an existing job.
+    pub async fn jobs_is_non_null(&self, job_id: &JobId) -> Result<bool, Error> {
+        let jobs = self.jobs()?;
+        let addr = self.local_address()?;
+
+        let fut = jobs.query(
+            "is_non_null",
+            job_id.as_bytes32(),
+            *addr,
+            Default::default(),
+            None,
+        );
         Ok(Compat01As03::new(fut).await?)
     }
 
-    pub async fn jobs_validate_results(
-        &self,
-        job_id: &JobId,
-    ) -> Result<types::TransactionReceipt, Error> {
+    /// Check if the job is a draft and can still be modified by its sender.
+    pub async fn jobs_is_draft(&self, job_id: &JobId, check_non_null: bool) -> Result<bool, Error> {
         let jobs = self.jobs()?;
         let addr = self.local_address()?;
 
-        let fut = jobs.call_with_confirmations(
-            "validate_results",
-            job_id.as_bytes32(),
-            addr,
-            Default::default(),
-            0,
+        if !check_non_null || self.jobs_is_non_null(job_id).await? {
+            let fut = jobs.query(
+                "is_draft",
+                job_id.as_bytes32(),
+                *addr,
+                Default::default(),
+                None,
+            );
+            Ok(Compat01As03::new(fut).await?)
+        } else {
+            Err(Error::JobNotFound(job_id.clone()))
+        }
+    }
+
+    /// Get a job from the blockchain.
+    pub async fn jobs_get_job(&self, job_id: &JobId, check_non_null: bool) -> Result<Job, Error> {
+        let jobs = self.jobs()?;
+        let addr = self.local_address()?;
+
+        let (timeout, redundancy, max_failures) =
+            self.jobs_get_parameters(job_id, check_non_null).await?;
+        let other_data = self.jobs_get_other_data(job_id, check_non_null).await?;
+        let args = self.jobs_get_arguments(job_id, check_non_null).await?;
+        let (max_worker_price, max_network_usage, max_network_price) = self
+            .jobs_get_worker_parameters(job_id, check_non_null)
+            .await?;
+        let (min_checking_interval, management_price) = self
+            .jobs_get_management_parameters(job_id, check_non_null)
+            .await?;
+        let (sender, nonce) = self.jobs_get_sender_nonce(job_id, check_non_null).await?;
+
+        let best_method = other_data.best_method();
+        let mut job = Job::new(
+            other_data.program_kind(),
+            other_data.program_addresses,
+            Multihash::from_bytes(other_data.program_hash)?,
+            args,
+            sender,
         );
-        Ok(Compat01As03::new(fut).await?)
+        job.set_timeout(timeout);
+        job.set_max_worker_price(max_worker_price);
+        job.set_max_network_usage(max_network_usage);
+        job.set_max_network_price(max_network_price);
+        job.set_min_checking_interval(min_checking_interval);
+        job.set_management_price(management_price);
+        job.set_redundancy(redundancy);
+        job.set_max_failures(max_failures);
+        job.set_best_method(best_method);
+        job.set_min_cpu_count(other_data.min_cpu_count);
+        job.set_min_memory(other_data.min_memory);
+        job.set_min_network_speed(other_data.min_network_speed);
+        job.set_is_program_pure(other_data.is_program_pure);
+        job.set_nonce(Some(nonce));
+
+        Ok(job)
+    }
+
+    /// Among all the jobs created by the local address, find and list all which are
+    /// drafts.
+    pub async fn jobs_get_draft_jobs_local(&self) -> Result<Vec<JobId>, Error> {
+        // TODO
+        unimplemented!();
+    }
+
+    /// Among all the jobs created by the local address, find and list all which still
+    /// have tasks waiting for computation.
+    pub async fn jobs_get_pending_jobs_local(&self) -> Result<Vec<JobId>, Error> {
+        // TODO
+        unimplemented!();
+    }
+
+    /// Among all the jobs created by the local address, find and list all which are
+    /// completed or definitely failed for all tasks.
+    pub async fn jobs_get_completed_jobs_local(&self) -> Result<Vec<JobId>, Error> {
+        // TODO
+        unimplemented!();
     }
 
     pub async fn jobs_get_task(&self, task_id: &TaskId) -> Result<(JobId, u128, Vec<u8>), Error> {

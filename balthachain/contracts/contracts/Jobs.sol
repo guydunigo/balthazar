@@ -352,7 +352,7 @@ contract Jobs {
     }
 
     // Reverts if there is no job corresponding to `job_id`.
-    function get_manager_parameters(bytes32 job_id) public view returns (
+    function get_management_parameters(bytes32 job_id) public view returns (
         uint64,
         uint64
     ) {
@@ -365,7 +365,7 @@ contract Jobs {
         );
     }
     // Reverts if `min_checking_interval` or `management_price` is null.
-    function set_manager_parameters(
+    function set_management_parameters(
         bytes32 job_id,
         uint64 min_checking_interval,
         uint64 management_price
@@ -385,6 +385,10 @@ contract Jobs {
         return (job.sender, job.nonce);
     }
 
+    function is_non_null(bytes32 job_id) public view returns (bool) {
+        return jobs[job_id].non_null;
+    }
+
     function is_draft(bytes32 job_id) public view returns (bool) {
         Job storage job = jobs[job_id];
         require(job.non_null/*, "unknown job"*/);
@@ -400,7 +404,7 @@ contract Jobs {
         delete jobs[job_id];
     }
 
-    function ready(bytes32 job_id) public {
+    function lock(bytes32 job_id) public {
         Job storage job = jobs[job_id];
         check_is_our_draft(job);
         require(is_draft_ready(job)/*, "conditions unmet"*/);
@@ -442,7 +446,7 @@ contract Jobs {
         tasks[task_id].managers_addresses = addresses;
     }
 
-    function set_failed(bytes32 task_id, TaskErrorKind reason) public {
+    function set_definitely_failed(bytes32 task_id, TaskErrorKind reason) public {
         require(msg.sender == oracle/*, "only the oracle can do that"*/);
         Task storage task = tasks[task_id];
         require(task.non_null/*, "unknown task"*/);

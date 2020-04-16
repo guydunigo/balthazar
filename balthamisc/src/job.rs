@@ -247,6 +247,7 @@ impl fmt::Display for Job {
 }
 
 impl Job {
+    // TODO: do we really need all those ?
     pub fn new(
         program_kind: ProgramKind,
         program_addresses: Vec<String>,
@@ -286,6 +287,7 @@ impl Job {
     pub fn program_addresses(&self) -> &[String] {
         &self.program_addresses
     }
+    // TODO: setter ?
     pub fn program_hash(&self) -> &Multihash {
         &self.program_hash
     }
@@ -394,6 +396,7 @@ impl Job {
     pub fn set_is_program_pure(&mut self, new: bool) {
         self.is_program_pure = new;
     }
+    // TODO: setter ?
     pub fn sender(&self) -> Address {
         self.sender
     }
@@ -405,10 +408,10 @@ impl Job {
     }
 
     // TODO: self-described error?
-    /// Is job correct and complete to be set as ready on the blockchain?
+    /// Is job correct and ready to be locked as pending on the blockchain?
     /// All values must be defined and above their minimum value
     /// and `program_addresses` and `arguments` must be non-empty.
-    pub fn is_complete(&self) -> bool {
+    pub fn is_ready(&self) -> bool {
         !self.program_addresses.is_empty()
             && !self.arguments.is_empty()
             && self.timeout >= MIN_TIMEOUT

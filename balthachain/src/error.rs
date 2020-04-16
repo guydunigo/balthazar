@@ -1,4 +1,7 @@
-use misc::{job::ProgramKind, multiaddr, multihash};
+use misc::{
+    job::{JobId, TaskId},
+    multiaddr, multihash,
+};
 use proto::{DecodeError, EncodeError};
 use std::fmt;
 use web3::{
@@ -7,6 +10,7 @@ use web3::{
 };
 
 // TODO: inconsistent naming
+// TODO: check every one, remove duplicates, doc, ...
 #[derive(Debug)]
 pub enum Error {
     MissingLocalAddress,
@@ -14,7 +18,7 @@ pub enum Error {
     Web3(web3::Error),
     Contract(ContractError),
     EthAbi(ethabi::Error),
-    UnsupportedProgramKind(ProgramKind),
+    // UnsupportedProgramKind(ProgramKind),
     CouldntParseJobsEventName(String),
     CouldntParseJobsEventFromLog(Box<Log>),
     JobsEventDataWrongSize {
@@ -24,7 +28,7 @@ pub enum Error {
     },
     /// When storing a job, an JobNew event is sent with the new nonce for the pending job.
     /// This error is sent when the event couldn't be found.
-    CouldntFindJobNonceEvent,
+    CouldntFindJobNewEvent,
     MultiaddrParse(multiaddr::Error),
     Multihash(multihash::DecodeOwnedError),
     TaskStateParse(u64),
@@ -35,7 +39,16 @@ pub enum Error {
     OtherDataDecodeError(DecodeError),
     OtherDataDecodeEnumError,
     CouldntDecodeMultihash(misc::multiformats::Error),
-    JobNotComplete, // TODO: ? (Job),
+    /// There is no job correpsonding to this [`JobId`].
+    JobNotFound(JobId),
+    /// There is no task correpsonding to this [`TaskId`].
+    TaskNotFound(TaskId),
+    /// Job is not a draft and therefore can't be modified.
+    JobNotADraft(JobId),
+    /// Job doesn't have correct values to be set as ready.
+    JobNotReady(JobId),
+    /// The local address isn't the job's sender.
+    JobNotOurs(JobId),
 }
 
 impl From<web3::Error> for Error {
