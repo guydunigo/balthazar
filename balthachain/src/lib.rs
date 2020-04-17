@@ -954,6 +954,7 @@ impl<'a> Chain<'a> {
         let oracle = self.jobs_oracle().await?;
 
         // TODO: check incomplete
+        // TODO: check redundancy
         if oracle == *addr && self.jobs_is_task_non_null(task_id).await? {
             let mut worker_addrs = Vec::with_capacity(workers_infos.len());
             let mut worker_prices = Vec::with_capacity(workers_infos.len());

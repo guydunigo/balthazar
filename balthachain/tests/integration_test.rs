@@ -122,5 +122,19 @@ fn it_can_process_a_new_job() -> Result<(), Error> {
         "Invalid locked money after ready!"
     );
 
+    // TODO: check tasks
+    // TODO: set one completed
+    // TODO: check task state
+    // TODO: check money
+    // TODO: set one def failed
+    // TODO: check task state
+    // TODO: check money
+    // TODO: set the third
+    // TODO: check task state
+    // TODO: check money
+    // TODO: check job complete
+    //
+    // TODO: check ALL events
+
     Ok(())
 }
