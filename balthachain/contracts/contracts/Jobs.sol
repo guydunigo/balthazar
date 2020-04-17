@@ -120,8 +120,7 @@ contract Jobs {
         return keccak256(abi.encodePacked(job_id, index/*, argument*/));
     }
 
-    function is_draft_ready(Job storage job) internal view returns (bool) {
-        // TODO: check if correct and add manager...
+    function is_draft_ready(Job storage job) public view returns (bool) {
         return job.arguments.length > 0 &&
 
             job.timeout > 9 &&
@@ -400,7 +399,7 @@ contract Jobs {
     }
 
     // Reverts if there is no draft job corresponding to `id`.
-    function delete_draft(bytes32 job_id) internal {
+    function delete_draft(bytes32 job_id) public {
         Job storage job = jobs[job_id];
         check_is_our_draft(job);
 
@@ -416,7 +415,7 @@ contract Jobs {
 
         for (uint128 i; i < job.arguments.length ; i++) {
             bytes32 task_id = calc_task_id(job_id, i/*, job.arguments[i]*/);
-            require(tasks[task_id].non_null == false, "task collision");
+            require(tasks[task_id].non_null == false/*, "task collision"*/);
             tasks[task_id] = Task(job_id,
                                    i,
                                    TaskState.Incomplete,

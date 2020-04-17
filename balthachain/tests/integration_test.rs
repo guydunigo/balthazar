@@ -95,7 +95,7 @@ fn it_can_process_a_new_job() -> Result<(), Error> {
         );
         block_on(chain.jobs_delete_draft(&job_id))?;
         assert!(
-            block_on(chain.jobs_is_job_non_null(&job_id))?,
+            !block_on(chain.jobs_is_job_non_null(&job_id))?,
             "Job isn't still null and hasn't been deleted."
         );
     }

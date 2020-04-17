@@ -110,6 +110,7 @@ pub struct Chain<'a> {
 }
 
 // TODO: explain [`check_non_null`].
+// TODO: transaction costs
 impl<'a> Chain<'a> {
     pub fn new(config: &'a ChainConfig) -> Self {
         let (eloop, transport) = WebSocket::new(config.web3_ws()).unwrap();
@@ -462,7 +463,7 @@ impl<'a> Chain<'a> {
         let addr = self.local_address()?;
 
         let (sender, _) = self.jobs_get_sender_nonce(job_id, true).await?;
-        if sender == *addr {
+        if sender != *addr {
             return Err(Error::JobNotOurs(job_id.clone()));
         }
         if !self.jobs_is_draft(job_id, false).await? {
@@ -487,7 +488,7 @@ impl<'a> Chain<'a> {
         let addr = self.local_address()?;
 
         let job = self.jobs_get_job(job_id, true).await?;
-        if job.sender() == *addr {
+        if job.sender() != *addr {
             return Err(Error::JobNotOurs(job_id.clone()));
         }
 
@@ -514,7 +515,7 @@ impl<'a> Chain<'a> {
         let jobs = self.jobs()?;
         let addr = self.local_address()?;
 
-        if check_non_null || self.jobs_is_job_non_null(job_id).await? {
+        if !check_non_null || self.jobs_is_job_non_null(job_id).await? {
             let fut = jobs.query(
                 "get_parameters",
                 job_id.as_bytes32(),
@@ -537,7 +538,7 @@ impl<'a> Chain<'a> {
         let jobs = self.jobs()?;
         let addr = self.local_address()?;
 
-        if check_non_null || self.jobs_is_job_non_null(job_id).await? {
+        if !check_non_null || self.jobs_is_job_non_null(job_id).await? {
             let fut = jobs.query(
                 "get_other_data",
                 job_id.as_bytes32(),
@@ -562,7 +563,7 @@ impl<'a> Chain<'a> {
         let jobs = self.jobs()?;
         let addr = self.local_address()?;
 
-        if check_non_null || self.jobs_is_job_non_null(job_id).await? {
+        if !check_non_null || self.jobs_is_job_non_null(job_id).await? {
             let fut = jobs.query(
                 "get_arguments",
                 job_id.as_bytes32(),
@@ -586,7 +587,7 @@ impl<'a> Chain<'a> {
         let jobs = self.jobs()?;
         let addr = self.local_address()?;
 
-        if check_non_null || self.jobs_is_job_non_null(job_id).await? {
+        if !check_non_null || self.jobs_is_job_non_null(job_id).await? {
             let fut = jobs.query(
                 "get_worker_parameters",
                 job_id.as_bytes32(),
@@ -609,7 +610,7 @@ impl<'a> Chain<'a> {
         let jobs = self.jobs()?;
         let addr = self.local_address()?;
 
-        if check_non_null || self.jobs_is_job_non_null(job_id).await? {
+        if !check_non_null || self.jobs_is_job_non_null(job_id).await? {
             let fut = jobs.query(
                 "get_management_parameters",
                 job_id.as_bytes32(),
@@ -632,7 +633,7 @@ impl<'a> Chain<'a> {
         let jobs = self.jobs()?;
         let addr = self.local_address()?;
 
-        if check_non_null || self.jobs_is_job_non_null(job_id).await? {
+        if !check_non_null || self.jobs_is_job_non_null(job_id).await? {
             let fut = jobs.query(
                 "get_sender_nonce",
                 job_id.as_bytes32(),
@@ -669,6 +670,29 @@ impl<'a> Chain<'a> {
         if !check_non_null || self.jobs_is_job_non_null(job_id).await? {
             let fut = jobs.query(
                 "is_draft",
+                job_id.as_bytes32(),
+                *addr,
+                Default::default(),
+                None,
+            );
+            Ok(Compat01As03::new(fut).await?)
+        } else {
+            Err(Error::JobNotFound(job_id.clone()))
+        }
+    }
+
+    /// Check if all tasks are either completed or definitely failed.
+    pub async fn jobs_is_completed(
+        &self,
+        job_id: &JobId,
+        check_non_null: bool,
+    ) -> Result<bool, Error> {
+        let jobs = self.jobs()?;
+        let addr = self.local_address()?;
+
+        if !check_non_null || self.jobs_is_job_non_null(job_id).await? {
+            let fut = jobs.query(
+                "is_job_completed",
                 job_id.as_bytes32(),
                 *addr,
                 Default::default(),
@@ -765,7 +789,7 @@ impl<'a> Chain<'a> {
         let jobs = self.jobs()?;
         let addr = self.local_address()?;
 
-        if check_non_null || self.jobs_is_task_non_null(task_id).await? {
+        if !check_non_null || self.jobs_is_task_non_null(task_id).await? {
             let fut = jobs.query(
                 "get_argument",
                 task_id.as_bytes32(),
@@ -788,7 +812,7 @@ impl<'a> Chain<'a> {
         let jobs = self.jobs()?;
         let addr = self.local_address()?;
 
-        if check_non_null || self.jobs_is_task_non_null(task_id).await? {
+        if !check_non_null || self.jobs_is_task_non_null(task_id).await? {
             let fut = jobs.query(
                 "get_task_state",
                 task_id.as_bytes32(),
@@ -815,7 +839,7 @@ impl<'a> Chain<'a> {
         let jobs = self.jobs()?;
         let addr = self.local_address()?;
 
-        if check_non_null || self.jobs_is_task_non_null(task_id).await? {
+        if !check_non_null || self.jobs_is_task_non_null(task_id).await? {
             let fut = jobs.query(
                 "get_task",
                 task_id.as_bytes32(),
@@ -836,7 +860,7 @@ impl<'a> Chain<'a> {
         task_id: &TaskId,
         check_non_null: bool,
     ) -> Result<(JobId, u128, Vec<u8>, JobsTaskState), Error> {
-        if check_non_null || self.jobs_is_task_non_null(task_id).await? {
+        if !check_non_null || self.jobs_is_task_non_null(task_id).await? {
             let (job_id, argument_id) = self.jobs_get_task(task_id, false).await?;
             let argument = self.jobs_get_argument(task_id, false).await?;
             let state = self.jobs_get_task_state(task_id, false).await?;

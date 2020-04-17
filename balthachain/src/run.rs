@@ -213,7 +213,7 @@ async fn run_async(mode: &RunMode, config: &ChainConfig) -> Result<(), Error> {
             let job_id = job.job_id().expect("nonce just set");
 
             println!("{}", chain.jobs_get_job(&job_id, true).await?);
-            println!("Draft stored as {}!", job_id);
+            println!("Draft stored as {} !", job_id);
             println!("You might still need to send the money for it and set it as locked.");
         }
         RunMode::JobsDeleteDraft { job_id } => {
@@ -226,7 +226,7 @@ async fn run_async(mode: &RunMode, config: &ChainConfig) -> Result<(), Error> {
             let job = chain.jobs_get_job(job_id, true).await?;
             println!("{}", job);
             chain.jobs_lock(job_id).await?;
-            println!("{} set as ready for work.", job_id);
+            println!("{} set as pending for work.", job_id);
         }
         RunMode::JobsGetJob {
             job_id,
@@ -234,6 +234,14 @@ async fn run_async(mode: &RunMode, config: &ChainConfig) -> Result<(), Error> {
         } => {
             let job = chain.jobs_get_job(job_id, *check_non_null).await?;
             println!("{}", job);
+            print!("State: ");
+            if chain.jobs_is_draft(job_id, *check_non_null).await? {
+                println!("Draft");
+            } else if chain.jobs_is_completed(job_id, *check_non_null).await? {
+                println!("Completed");
+            } else {
+                println!("Pending");
+            }
         }
         RunMode::JobsGetDraftJobs => {
             let jobs = chain.jobs_get_draft_jobs_local().await?;

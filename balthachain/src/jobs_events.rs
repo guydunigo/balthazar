@@ -38,8 +38,15 @@ pub enum JobsEvent {
 impl fmt::Display for JobsEvent {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            JobsEvent::JobNew { sender, nonce } => write!(
+                fmt,
+                "JobNew {{ sender: {}, nonce: {}, job_id: {} }}",
+                sender,
+                nonce,
+                JobId::job_id(sender, *nonce)
+            ),
             JobsEvent::TaskPending { task_id } => {
-                write!(fmt, "TaskPending {{ task_id: {} }}", task_id,)
+                write!(fmt, "TaskPending {{ task_id: {} }}", task_id)
             }
             JobsEvent::TaskCompleted { task_id, result } => write!(
                 fmt,
@@ -48,7 +55,7 @@ impl fmt::Display for JobsEvent {
                 String::from_utf8_lossy(&result[..])
             ),
             JobsEvent::JobCompleted { job_id } => {
-                write!(fmt, "JobCompleted {{ job_id: {} }}", job_id,)
+                write!(fmt, "JobCompleted {{ job_id: {} }}", job_id)
             }
             _ => write!(fmt, "{:?}", self),
         }
