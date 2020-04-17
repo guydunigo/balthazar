@@ -4,7 +4,7 @@ extern crate ethereum_types;
 use super::multiformats::{
     encode_multibase_multihash_string, try_decode_multibase_multihash_string, Error,
 };
-use ethereum_types::Address;
+pub use ethereum_types::Address;
 use multihash::{wrap, Keccak256, Multihash};
 pub use proto::{
     smartcontracts::{BestMethod, OtherData},

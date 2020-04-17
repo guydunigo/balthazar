@@ -10,6 +10,7 @@ use tokio::sync::oneshot::{self, error::RecvError};
 
 pub mod job;
 pub mod multiformats;
+pub mod shared_state;
 
 mod worker_specs;
 pub use worker_specs::WorkerSpecs;

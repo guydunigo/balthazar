@@ -6,9 +6,9 @@ extern crate parity_multiaddr as multiaddr;
 use clap::{arg_enum, Clap};
 // TODO: use uniform Multiaddr
 use lib::{
-    chain::{self, Address, JobsEventKind},
+    chain::{self, JobsEventKind},
     misc::{
-        job::{JobId, ProgramKind, TaskId},
+        job::{Address, JobId, ProgramKind, TaskId},
         multiformats::{self as formats, try_decode_multibase_multihash_string},
         multihash::Multihash,
     },

@@ -16,7 +16,7 @@ pub use run::{run, RunMode};
 use ethabi::Event;
 use futures::{compat::Compat01As03, future, Stream, StreamExt};
 use misc::{
-    job::{Job, JobId, OtherData, TaskId},
+    job::{Address, Job, JobId, OtherData, TaskId},
     multihash::Multihash,
 };
 use proto::{worker::TaskErrorKind, Message};
@@ -24,7 +24,6 @@ use std::{
     convert::{TryFrom, TryInto},
     fmt,
 };
-pub use web3::types::Address;
 use web3::{
     contract::{Contract, Error as ContractError, Options},
     transports::{EventLoopHandle, WebSocket},
@@ -64,7 +63,7 @@ fn convert_task_error_kind(reason: TaskErrorKind) -> Option<u64> {
 
 /// State a task can be on the blockchain.
 #[derive(Debug, Clone)]
-pub enum JobsTaskState {
+pub enum JobsCompleteness {
     /// The task can still be executed and all.
     Incomplete,
     /// The task was successfuly computed and here is the selected result.
@@ -75,10 +74,10 @@ pub enum JobsTaskState {
     DefinetelyFailed(TaskErrorKind),
 }
 
-impl fmt::Display for JobsTaskState {
+impl fmt::Display for JobsCompleteness {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            JobsTaskState::Completed(res) => {
+            JobsCompleteness::Completed(res) => {
                 write!(f, "Completed({})", String::from_utf8_lossy(res))
             }
             _ => write!(f, "{:?}", self),
@@ -90,11 +89,11 @@ fn try_convert_tasks_state(
     state_nb: u64,
     result: Vec<u8>,
     reason: TaskErrorKind,
-) -> Option<JobsTaskState> {
+) -> Option<JobsCompleteness> {
     match state_nb {
-        0 => Some(JobsTaskState::Incomplete),
-        1 => Some(JobsTaskState::Completed(result)),
-        2 => Some(JobsTaskState::DefinetelyFailed(reason)),
+        0 => Some(JobsCompleteness::Incomplete),
+        1 => Some(JobsCompleteness::Completed(result)),
+        2 => Some(JobsCompleteness::DefinetelyFailed(reason)),
         _ => None,
     }
 }
@@ -811,7 +810,7 @@ impl<'a> Chain<'a> {
         &self,
         task_id: &TaskId,
         check_non_null: bool,
-    ) -> Result<JobsTaskState, Error> {
+    ) -> Result<JobsCompleteness, Error> {
         let jobs = self.jobs()?;
         let addr = self.local_address()?;
 
@@ -863,7 +862,7 @@ impl<'a> Chain<'a> {
         &self,
         task_id: &TaskId,
         check_non_null: bool,
-    ) -> Result<(JobId, u128, Vec<u8>, JobsTaskState), Error> {
+    ) -> Result<(JobId, u128, Vec<u8>, JobsCompleteness), Error> {
         if !check_non_null || self.jobs_is_task_non_null(task_id).await? {
             let (job_id, argument_id) = self.jobs_get_task(task_id, false).await?;
             let argument = self.jobs_get_argument(task_id, false).await?;
