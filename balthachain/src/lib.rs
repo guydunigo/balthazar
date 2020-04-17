@@ -922,6 +922,7 @@ impl<'a> Chain<'a> {
         let addr = self.local_address()?;
         let oracle = self.jobs_oracle().await?;
 
+        // TODO: check incomplete
         if oracle == *addr && self.jobs_is_task_non_null(task_id).await? {
             let reason = convert_task_error_kind(reason)
                 .ok_or(Error::TaskErrorKindNotCompatibleWithJobs(reason))?;
@@ -952,6 +953,7 @@ impl<'a> Chain<'a> {
         let addr = self.local_address()?;
         let oracle = self.jobs_oracle().await?;
 
+        // TODO: check incomplete
         if oracle == *addr && self.jobs_is_task_non_null(task_id).await? {
             let mut worker_addrs = Vec::with_capacity(workers_infos.len());
             let mut worker_prices = Vec::with_capacity(workers_infos.len());

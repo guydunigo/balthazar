@@ -146,8 +146,9 @@ contract Jobs {
     }
     */
 
-    function pay_managers(Task storage task) internal {
+    function pay_managers(Task storage task) internal returns (uint256){
         require(task.managers_addresses.length > 0/*, no managers set*/);
+        // TODO: check max size
         Job storage job = jobs[task.job_id];
 
         for (uint64 i ; i < task.managers_addresses.length; i++) {
@@ -155,9 +156,7 @@ contract Jobs {
             emit PendingMoneyChanged(task.managers_addresses[i], users[task.managers_addresses[i]].pending_money);
         }
 
-        uint256 management_price = job.management_price * task.managers_addresses.length;
-        users[job.sender].locked_money -= management_price;
-        users[job.sender].pending_money += calc_max_price_per_task(job) - management_price;
+        return job.management_price * task.managers_addresses.length;
     }
 
     // Reverts if there is no job corresponding to `job_id`.
@@ -457,7 +456,11 @@ contract Jobs {
 
         task.state = TaskState.DefinetelyFailed;
         task.reason = reason;
-        pay_managers(task);
+
+        Job storage job = jobs[task.job_id];
+        uint max_price = calc_max_price_per_task(job);
+        users[job.sender].locked_money -= max_price;
+        users[job.sender].pending_money += max_price - pay_managers(task);
 
         emit TaskDefinetelyFailed(task_id, reason);
         if (is_job_completed(task.job_id)) {
@@ -494,9 +497,10 @@ contract Jobs {
             total_actual_cost += actual_cost;
             emit PendingMoneyChanged(workers_addresses[i], users[workers_addresses[i]].pending_money);
         }
-        users[job.sender].locked_money -= total_actual_cost;
-        users[job.sender].pending_money += calc_max_price_per_task(job) - total_actual_cost;
-        pay_managers(task);
+        total_actual_cost += pay_managers(task);
+        uint max_price = calc_max_price_per_task(job);
+        users[job.sender].locked_money -= max_price;
+        users[job.sender].pending_money += max_price - total_actual_cost;
 
         emit PendingMoneyChanged(job.sender, users[job.sender].pending_money);
 

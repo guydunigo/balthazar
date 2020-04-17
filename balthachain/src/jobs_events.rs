@@ -123,13 +123,14 @@ impl TryFrom<(&ethabi::Contract, Log)> for JobsEvent {
                     }
                     JobsEventKind::TaskCompleted => {
                         let len = log.data.0.len();
-                        // TODO: only 32 ?!
-                        let expected = HASH_SIZE + 32;
+                        let expected = HASH_SIZE;
                         if len > expected {
                             let task_id = (&log.data.0[..HASH_SIZE]).try_into()?;
                             return Ok(JobsEvent::TaskCompleted {
                                 task_id,
-                                result: Vec::from(&log.data.0[HASH_SIZE..]),
+                                // + 32 because there seems to be an extra 32 bytes
+                                // between the two fields.
+                                result: Vec::from(&log.data.0[HASH_SIZE + 32..]),
                             });
                         } else {
                             return Err(Error::JobsEventDataWrongSize {
