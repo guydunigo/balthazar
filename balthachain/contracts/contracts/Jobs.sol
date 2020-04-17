@@ -41,11 +41,11 @@ contract Jobs {
         uint64 max_network_usage;
         uint64 max_network_price;
 
-        uint64 redundancy;
-        uint64 max_failures;
-
         uint64 min_checking_interval;
         uint64 management_price;
+
+        uint64 redundancy;
+        uint64 max_failures;
 
         bytes other_data;
 
@@ -240,14 +240,14 @@ contract Jobs {
 
         jobs[calc_job_id(msg.sender, nonce)] = Job(
             new bytes[](0),
-            1,
-            1,
-            0,
-            1,
+            10,
             1,
             0,
+            1,
             15,
             1,
+            1,
+            0,
             new bytes(0),
             msg.sender,
             nonce,
@@ -282,7 +282,7 @@ contract Jobs {
         uint64 redundancy,
         uint64 max_failures//,
     ) public {
-        require(timeout > 0 && redundancy > 0/*, "invalid data"*/);
+        require(timeout > 9 && redundancy > 0/*, "invalid data"*/);
         Job storage job = jobs[job_id];
         check_is_our_draft(job);
 
@@ -369,7 +369,7 @@ contract Jobs {
         uint64 min_checking_interval,
         uint64 management_price
     ) public {
-        require(min_checking_interval > 0 && management_price > 0/*, "invalid data"*/);
+        require(min_checking_interval > 14 && management_price > 0/*, "invalid data"*/);
         Job storage job = jobs[job_id];
         check_is_our_draft(job);
 

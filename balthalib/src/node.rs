@@ -1,4 +1,7 @@
 //! Grouping module for all balthazar sub-modules.
+// TODO: remove allws
+#![allow(unused_imports)]
+#![allow(dead_code)]
 use futures::{
     channel::{
         mpsc::{channel, Sender},
