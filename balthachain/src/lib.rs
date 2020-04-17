@@ -20,7 +20,10 @@ use misc::{
     multihash::Multihash,
 };
 use proto::{worker::TaskErrorKind, Message};
-use std::{convert::TryInto, fmt};
+use std::{
+    convert::{TryFrom, TryInto},
+    fmt,
+};
 pub use web3::types::Address;
 use web3::{
     contract::{Contract, Error as ContractError, Options},
@@ -358,8 +361,8 @@ impl<'a> Chain<'a> {
     /// Every data from the given job is set in the blockchain.
     ///
     /// The job won't be executed at once, there still needs to be enough money in
-    /// the local address's pending account (e.g. using [`jobs_send_pending_money_local`]),
-    /// and mark it as ready using [`jobs_ready`].
+    /// the local address's pending account (e.g. using [`Chain::jobs_send_pending_money_local`]),
+    /// and mark it as ready using [`Chain::jobs_lock`].
     // TODO: check new values
     // TODO: split in sub-functions ?
     pub async fn jobs_create_draft(&self, job: &Job) -> Result<u128, Error> {
@@ -387,7 +390,7 @@ impl<'a> Chain<'a> {
             .next()
             .await
             .ok_or(Error::CouldntFindJobNewEvent)?;
-        let job_id_32 = JobId::job_id(addr, nonce).as_bytes32();
+        let job_id_32 = JobId::job_id(addr, nonce).to_bytes32();
 
         let fut = jobs.call_with_confirmations(
             "set_parameters",
@@ -472,7 +475,7 @@ impl<'a> Chain<'a> {
 
         let fut = jobs.call_with_confirmations(
             "delete_draft",
-            job_id.as_bytes32(),
+            job_id.to_bytes32(),
             *addr,
             Default::default(),
             0,
@@ -502,7 +505,7 @@ impl<'a> Chain<'a> {
         }
 
         let fut =
-            jobs.call_with_confirmations("lock", job_id.as_bytes32(), *addr, Default::default(), 0);
+            jobs.call_with_confirmations("lock", job_id.to_bytes32(), *addr, Default::default(), 0);
         Ok(Compat01As03::new(fut).await?)
     }
 
@@ -518,7 +521,7 @@ impl<'a> Chain<'a> {
         if !check_non_null || self.jobs_is_job_non_null(job_id).await? {
             let fut = jobs.query(
                 "get_parameters",
-                job_id.as_bytes32(),
+                job_id.to_bytes32(),
                 *addr,
                 Default::default(),
                 None,
@@ -541,7 +544,7 @@ impl<'a> Chain<'a> {
         if !check_non_null || self.jobs_is_job_non_null(job_id).await? {
             let fut = jobs.query(
                 "get_other_data",
-                job_id.as_bytes32(),
+                job_id.to_bytes32(),
                 *addr,
                 Default::default(),
                 None,
@@ -566,7 +569,7 @@ impl<'a> Chain<'a> {
         if !check_non_null || self.jobs_is_job_non_null(job_id).await? {
             let fut = jobs.query(
                 "get_arguments",
-                job_id.as_bytes32(),
+                job_id.to_bytes32(),
                 *addr,
                 Default::default(),
                 None,
@@ -590,7 +593,7 @@ impl<'a> Chain<'a> {
         if !check_non_null || self.jobs_is_job_non_null(job_id).await? {
             let fut = jobs.query(
                 "get_worker_parameters",
-                job_id.as_bytes32(),
+                job_id.to_bytes32(),
                 *addr,
                 Default::default(),
                 None,
@@ -613,7 +616,7 @@ impl<'a> Chain<'a> {
         if !check_non_null || self.jobs_is_job_non_null(job_id).await? {
             let fut = jobs.query(
                 "get_management_parameters",
-                job_id.as_bytes32(),
+                job_id.to_bytes32(),
                 *addr,
                 Default::default(),
                 None,
@@ -636,7 +639,7 @@ impl<'a> Chain<'a> {
         if !check_non_null || self.jobs_is_job_non_null(job_id).await? {
             let fut = jobs.query(
                 "get_sender_nonce",
-                job_id.as_bytes32(),
+                job_id.to_bytes32(),
                 *addr,
                 Default::default(),
                 None,
@@ -654,7 +657,7 @@ impl<'a> Chain<'a> {
 
         let fut = jobs.query(
             "is_job_non_null",
-            job_id.as_bytes32(),
+            job_id.to_bytes32(),
             *addr,
             Default::default(),
             None,
@@ -670,7 +673,7 @@ impl<'a> Chain<'a> {
         if !check_non_null || self.jobs_is_job_non_null(job_id).await? {
             let fut = jobs.query(
                 "is_draft",
-                job_id.as_bytes32(),
+                job_id.to_bytes32(),
                 *addr,
                 Default::default(),
                 None,
@@ -693,7 +696,7 @@ impl<'a> Chain<'a> {
         if !check_non_null || self.jobs_is_job_non_null(job_id).await? {
             let fut = jobs.query(
                 "is_job_completed",
-                job_id.as_bytes32(),
+                job_id.to_bytes32(),
                 *addr,
                 Default::default(),
                 None,
@@ -772,7 +775,7 @@ impl<'a> Chain<'a> {
 
         let fut = jobs.query(
             "is_task_non_null",
-            task_id.as_bytes32(),
+            task_id.to_bytes32(),
             *addr,
             Default::default(),
             None,
@@ -792,7 +795,7 @@ impl<'a> Chain<'a> {
         if !check_non_null || self.jobs_is_task_non_null(task_id).await? {
             let fut = jobs.query(
                 "get_argument",
-                task_id.as_bytes32(),
+                task_id.to_bytes32(),
                 *addr,
                 Default::default(),
                 None,
@@ -815,12 +818,12 @@ impl<'a> Chain<'a> {
         if !check_non_null || self.jobs_is_task_non_null(task_id).await? {
             let fut = jobs.query(
                 "get_task_state",
-                task_id.as_bytes32(),
+                task_id.to_bytes32(),
                 *addr,
                 Default::default(),
                 None,
             );
-            let (state, result, reason) = Compat01As03::new(fut).await?;
+            let (state, reason, result) = Compat01As03::new(fut).await?;
             let reason =
                 try_convert_task_error_kind(reason).ok_or(Error::TaskErrorKindParse(reason))?;
             try_convert_tasks_state(state, result, reason).ok_or(Error::TaskStateParse(state))
@@ -829,8 +832,9 @@ impl<'a> Chain<'a> {
         }
     }
 
-    /// Get the task [`JobId`] and `argument_id`.
-    /// Calling [`TaskId::task_id`] on them should return [`task_id`].
+    /// Get the task's [`JobId`] and `argument_id`.
+    /// Calculating the [`TaskId`] with them should the exact same value as the parameter
+    /// `task_id`.
     pub async fn jobs_get_task(
         &self,
         task_id: &TaskId,
@@ -842,13 +846,13 @@ impl<'a> Chain<'a> {
         if !check_non_null || self.jobs_is_task_non_null(task_id).await? {
             let fut = jobs.query(
                 "get_task",
-                task_id.as_bytes32(),
+                task_id.to_bytes32(),
                 *addr,
                 Default::default(),
                 None,
             );
             let (job_id, argument_id): (Vec<u8>, u128) = Compat01As03::new(fut).await?;
-            Ok((JobId::from_bytes(job_id)?, argument_id))
+            Ok((JobId::try_from(&job_id[..])?, argument_id))
         } else {
             Err(Error::TaskNotFound(task_id.clone()))
         }
@@ -894,7 +898,7 @@ impl<'a> Chain<'a> {
         if oracle == *addr && self.jobs_is_task_non_null(task_id).await? {
             let fut = jobs.call_with_confirmations(
                 "set_managers",
-                (task_id.as_bytes32(), Vec::from(managers)),
+                (task_id.to_bytes32(), Vec::from(managers)),
                 *addr,
                 Default::default(),
                 0,
@@ -923,7 +927,7 @@ impl<'a> Chain<'a> {
                 .ok_or(Error::TaskErrorKindNotCompatibleWithJobs(reason))?;
             let fut = jobs.call_with_confirmations(
                 "set_definitely_failed",
-                (task_id.as_bytes32(), reason),
+                (task_id.to_bytes32(), reason),
                 *addr,
                 Default::default(),
                 0,
@@ -954,7 +958,7 @@ impl<'a> Chain<'a> {
             let mut network_prices = Vec::with_capacity(workers_infos.len());
 
             workers_infos.iter().for_each(|(w, p, n)| {
-                worker_addrs.push(w.clone());
+                worker_addrs.push(*w);
                 worker_prices.push(*p);
                 network_prices.push(*n);
             });
@@ -962,7 +966,7 @@ impl<'a> Chain<'a> {
             let fut = jobs.call_with_confirmations(
                 "set_completed",
                 (
-                    task_id.as_bytes32(),
+                    task_id.to_bytes32(),
                     Vec::from(result),
                     worker_addrs,
                     worker_prices,

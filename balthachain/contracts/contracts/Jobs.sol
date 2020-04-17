@@ -120,7 +120,7 @@ contract Jobs {
         return keccak256(abi.encodePacked(job_id, index/*, argument*/));
     }
 
-    function is_draft_ready(Job storage job) public view returns (bool) {
+    function is_draft_ready(Job storage job) internal view returns (bool) {
         return job.arguments.length > 0 &&
 
             job.timeout > 9 &&

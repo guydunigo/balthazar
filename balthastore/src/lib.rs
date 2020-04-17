@@ -103,7 +103,7 @@ pub trait StoreStorage: FetchStorage {
 }
 
 // TODO: try with a simple `type GenericReader=Box<dyn io::Read + Send + Sync>`
-/// This structure helps circumvent the problems arising with Generic types in [`Storage`] trait.
+/// This structure helps circumvent the problems arising with Generic types in [`FetchStorage`] trait.
 /// Indeed, the error `the trait cannot be made into an object` is caused by using directly a
 /// generic type.
 pub struct GenericReader {

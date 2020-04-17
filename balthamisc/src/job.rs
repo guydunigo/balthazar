@@ -51,7 +51,7 @@ impl HashId {
         self.inner.into_bytes()
     }
 
-    pub fn as_bytes32(&self) -> [u8; 32] {
+    pub fn to_bytes32(&self) -> [u8; 32] {
         let mut res = [0; HASH_SIZE];
         res.copy_from_slice(&self.hash().digest()[..HASH_SIZE]);
         res

@@ -78,7 +78,7 @@ pub trait Handle {
     fn task_id(&self) -> &TaskId;
     */
 
-    /// Kill the running task, when called the [`result`] future should return
+    /// Kill the running task, when called the run or test result future should return
     /// [`ExecutorError::Aborted`].
     // TODO: result if killing failed ?
     // TODO: consume self ?
@@ -115,7 +115,7 @@ pub trait Executor {
     ) -> BoxFuture<'a, Result<Vec<u8>, ()>>;
 
     /// Run the task with the given arguments.
-    /// `program` must be the result of [`download_program`].
+    /// `program` must be the result of [`Executor::download_program`].
     ///
     /// See [`ExecutorError`] for the different errors returned.
     fn run(
@@ -131,7 +131,7 @@ pub trait Executor {
 
     /// Run the tests of the program, and return the index of a correct one.
     /// Any other value is considered as an error.
-    /// `program` must be the result of [`download_program`].
+    /// `program` must be the result of [`Executor::download_program`].
     ///
     /// See [`ExecutorError`] for the different errors returned.
     fn test(
@@ -166,7 +166,7 @@ pub trait Executor {
     // TODO: return value with actual chosen value or something ?
     fn set_max_network_speed(speed: u64);
 
-    /// Executes [`run`] outside an async executor.
+    /// Executes [`Executor::run`] outside an async executor.
     fn run_sync(
         &mut self,
         program: &[u8],
@@ -178,7 +178,7 @@ pub trait Executor {
         futures::executor::block_on(result_fut)
     }
 
-    /// Executes [`test`] outside an async executor.
+    /// Executes [`Executor::test`] outside an async executor.
     fn test_sync(
         &mut self,
         program: &[u8],
