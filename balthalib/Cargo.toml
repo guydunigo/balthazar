@@ -14,6 +14,6 @@ balthachain = { path = "../balthachain" }
 balthaproto = { path = "../balthaproto" }
 balthamisc = { path = "../balthamisc" }
 balthwasm = { path = "../balthwasm" }
-# TODO: restrict features to bare essentials.
-tokio = { version = "0.2.17", features = ["full"] }
+tokio = { version = "0.2.18", features = ["sync"] }
 futures = "0.3.4"
+async-ctrlc = "1.0.0"

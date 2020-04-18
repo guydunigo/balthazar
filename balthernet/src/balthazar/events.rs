@@ -19,6 +19,8 @@ pub enum EventIn {
     TaskStatus(TaskId, TaskStatus),
     /// Get current list of workers.
     GetWorkers(oneshot::Sender<Option<Vec<PeerRc>>>),
+    /// The node will shut down... Send ManagerBye and all.
+    Bye,
 }
 
 /// Event returned by [`BalthBehaviour`] towards the Swarm when polled.
@@ -105,6 +107,8 @@ pub enum EventOut {
     },
     /// Cannot send message because we don't have any manager.
     NoManager(EventIn),
+    /// Message won't be sent, prob because we're shutting down.
+    MsgDropped(PeerId, HandlerIn<QueryId>),
 }
 
 #[derive(Debug)]

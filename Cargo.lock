@@ -47,12 +47,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d9a60d744a80c30fcb657dfe2c1b22bcb3e814c1a1e3674f32bf5820b570fbff"
 
 [[package]]
-name = "arc-swap"
-version = "0.4.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d663a8e9a99154b5fb793032533f6328da35e23aac63d5c152279aa8ba356825"
-
-[[package]]
 name = "arrayref"
 version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -81,6 +75,13 @@ checksum = "0d0864d84b8e07b145449be9a8537db86bf9de5ce03b913214694643b4743502"
 dependencies = [
  "quote",
  "syn",
+]
+
+[[package]]
+name = "async-ctrlc"
+version = "1.0.0"
+dependencies = [
+ "ctrlc",
 ]
 
 [[package]]
@@ -193,6 +194,7 @@ dependencies = [
 name = "balthalib"
 version = "0.3.0"
 dependencies = [
+ "async-ctrlc",
  "balthachain",
  "balthamisc",
  "balthaproto",
@@ -473,7 +475,7 @@ checksum = "4785bdd1c96b2a846b2bd7cc02e86b6b3dbf14e7e53446c4f54c92a361040822"
 [[package]]
 name = "clap"
 version = "3.0.0-beta.1"
-source = "git+https://github.com/clap-rs/clap/#e1d83a78804a271b053d4d21f69b67f7eb01ad01"
+source = "git+https://github.com/clap-rs/clap/#aae96236b27d43ede24bd7e58668786cd1073c21"
 dependencies = [
  "atty",
  "bitflags 1.2.1",
@@ -490,7 +492,7 @@ dependencies = [
 [[package]]
 name = "clap_derive"
 version = "3.0.0-beta.1"
-source = "git+https://github.com/clap-rs/clap/#e1d83a78804a271b053d4d21f69b67f7eb01ad01"
+source = "git+https://github.com/clap-rs/clap/#aae96236b27d43ede24bd7e58668786cd1073c21"
 dependencies = [
  "heck",
  "proc-macro-error",
@@ -711,6 +713,16 @@ checksum = "022cd691704491df67d25d006fe8eca083098253c4d43516c2206479c58c6736"
 dependencies = [
  "block-cipher-trait",
  "stream-cipher",
+]
+
+[[package]]
+name = "ctrlc"
+version = "3.1.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7a4ba686dff9fa4c1c9636ce1010b0cf98ceb421361b0bb3d6faeec43bd217a7"
+dependencies = [
+ "nix 0.17.0",
+ "winapi 0.3.8",
 ]
 
 [[package]]
@@ -1404,9 +1416,9 @@ dependencies = [
 
 [[package]]
 name = "hyper"
-version = "0.13.4"
+version = "0.13.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ed6081100e960d9d74734659ffc9cc91daf1c0fc7aceb8eaa94ee1a3f5046f2e"
+checksum = "96816e1d921eca64d208a85aab4f7798455a8e34229ee5a88c935bdee1b78b14"
 dependencies = [
  "bytes 0.5.4",
  "futures-channel",
@@ -1436,7 +1448,7 @@ dependencies = [
  "common-multipart-rfc7578",
  "futures 0.3.4",
  "http 0.2.1",
- "hyper 0.13.4",
+ "hyper 0.13.5",
 ]
 
 [[package]]
@@ -1459,7 +1471,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3adcd308402b9553630734e9c36b77a7e48b3821251ca2493e8cd596763aafaa"
 dependencies = [
  "bytes 0.5.4",
- "hyper 0.13.4",
+ "hyper 0.13.5",
  "native-tls",
  "tokio 0.2.18",
  "tokio-tls 0.3.0",
@@ -1553,7 +1565,7 @@ dependencies = [
  "failure",
  "futures 0.3.4",
  "http 0.2.1",
- "hyper 0.13.4",
+ "hyper 0.13.5",
  "hyper-multipart-rfc7578",
  "hyper-tls 0.4.1",
  "parity-multiaddr 0.7.3",
@@ -2038,22 +2050,10 @@ dependencies = [
  "kernel32-sys",
  "libc",
  "log 0.4.8",
- "miow 0.2.1",
+ "miow",
  "net2",
  "slab 0.4.2",
  "winapi 0.2.8",
-]
-
-[[package]]
-name = "mio-named-pipes"
-version = "0.1.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f5e374eff525ce1c5b7687c4cef63943e7686524a387933ad27ca7ec43779cb3"
-dependencies = [
- "log 0.4.8",
- "mio",
- "miow 0.3.3",
- "winapi 0.3.8",
 ]
 
 [[package]]
@@ -2077,16 +2077,6 @@ dependencies = [
  "net2",
  "winapi 0.2.8",
  "ws2_32-sys",
-]
-
-[[package]]
-name = "miow"
-version = "0.3.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "396aa0f2003d7df8395cb93e09871561ccc3e785f0acb369170e8cc74ddf9226"
-dependencies = [
- "socket2",
- "winapi 0.3.8",
 ]
 
 [[package]]
@@ -2169,6 +2159,19 @@ name = "nix"
 version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3b2e0b4f3320ed72aaedb9a5ac838690a8047c7b275da22711fddff4f8a14229"
+dependencies = [
+ "bitflags 1.2.1",
+ "cc",
+ "cfg-if",
+ "libc",
+ "void",
+]
+
+[[package]]
+name = "nix"
+version = "0.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "50e4785f2c3b7589a0d0c1dd60285e1188adac4006e8abd6dd578e1567027363"
 dependencies = [
  "bitflags 1.2.1",
  "cc",
@@ -2990,16 +2993,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "signal-hook-registry"
-version = "1.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "94f478ede9f64724c5d173d7bb56099ec3e2d9fc2774aac65d34b8b890405f41"
-dependencies = [
- "arc-swap",
- "libc",
-]
-
-[[package]]
 name = "slab"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3025,18 +3018,6 @@ name = "smallvec"
 version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "05720e22615919e4734f6a99ceae50d00226c3c5aca406e102ebc33298214e0a"
-
-[[package]]
-name = "socket2"
-version = "0.3.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "03088793f677dce356f3ccc2edb1b314ad191ab702a5de3faf49304f7e104918"
-dependencies = [
- "cfg-if",
- "libc",
- "redox_syscall",
- "winapi 0.3.8",
-]
 
 [[package]]
 name = "soketto"
@@ -3259,17 +3240,10 @@ dependencies = [
  "futures-core",
  "iovec",
  "lazy_static",
- "libc",
  "memchr",
  "mio",
- "mio-named-pipes",
- "mio-uds",
- "num_cpus",
  "pin-project-lite",
- "signal-hook-registry",
  "slab 0.4.2",
- "tokio-macros",
- "winapi 0.3.8",
 ]
 
 [[package]]
@@ -3353,17 +3327,6 @@ dependencies = [
  "bytes 0.4.12",
  "futures 0.1.29",
  "log 0.4.8",
-]
-
-[[package]]
-name = "tokio-macros"
-version = "0.2.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f0c3acc6aa564495a0f2e1d59fab677cd7f81a19994cfc7f3ad0e64301560389"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
 ]
 
 [[package]]
@@ -3844,7 +3807,7 @@ dependencies = [
  "cranelift-entity",
  "cranelift-native",
  "libc",
- "nix",
+ "nix 0.15.0",
  "rayon",
  "serde",
  "serde-bench",
@@ -3914,7 +3877,7 @@ dependencies = [
  "indexmap",
  "lazy_static",
  "libc",
- "nix",
+ "nix 0.15.0",
  "page_size",
  "parking_lot 0.10.2",
  "rustc_version",

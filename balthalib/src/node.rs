@@ -2,23 +2,29 @@
 // TODO: remove allws
 #![allow(unused_imports)]
 #![allow(dead_code)]
+
+extern crate async_ctrlc;
+
 use futures::{
     channel::{
         mpsc::{channel, Sender},
         oneshot,
     },
-    future, join, FutureExt, SinkExt, StreamExt,
+    future, join, poll, select, FutureExt, SinkExt, StreamExt,
 };
 use std::{
     borrow::Cow,
     collections::{HashMap, HashSet, VecDeque},
     convert::TryFrom,
     fmt,
+    future::Future,
+    pin::Pin,
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
 use tokio::{runtime::Runtime, sync::RwLock};
 
+use async_ctrlc::CtrlC;
 use chain::{Chain, JobsEvent};
 use misc::{
     job::{DefaultHash, JobId, ProgramKind, TaskId},
@@ -224,13 +230,37 @@ impl Balthazar {
             .boxed()
         });
         */
-
         let swarm_fut = swarm_out.for_each(|e| spawn_event(balth.tx.clone(), Event::Swarm(e)));
 
         // TODO: concurrent ?
         let channel_fut = rx.for_each(|e| balth.clone().handle_event(e));
 
-        join!(/*chain_fut, */ swarm_fut, channel_fut);
+        let ctrlc = async {
+            // TODO: dirty, make it an actual stream...
+            let mut ctrlc = CtrlC::new().expect("cannot create Ctrl+C handler?");
+            {
+                future::poll_fn(|ctx| CtrlC::poll(Pin::new(&mut ctrlc), ctx)).await;
+                eprintln!("Ctrl+C pressed, breaking relationships... :'(");
+
+                let mut swarm_in = balth.swarm_in.clone();
+                swarm_in
+                    .send(net::EventIn::Bye)
+                    .await
+                    .expect("Swarm channel in closed.");
+            }
+            {
+                future::poll_fn(|ctx| CtrlC::poll(Pin::new(&mut ctrlc), ctx)).await;
+                eprintln!("Ctrl+C pressed a second time, definetely quitting...");
+            }
+        };
+        // join!(/*chain_fut, */ swarm_fut, channel_fut, ctrlc);
+        select! {
+            _ = swarm_fut.fuse() => (),
+            _ = channel_fut.fuse() => (),
+            _ = ctrlc.fuse() => {
+                eprintln!("Existing...");
+            }
+        }
 
         Ok(())
     }

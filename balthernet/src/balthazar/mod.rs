@@ -84,7 +84,11 @@ pub struct BalthBehaviour {
     manager_check_interval: Duration,
     /// See [`NetConfig::manager_timeout`](`super::NetConfig::manager_timeout`) for more information.
     manager_timeout: Duration,
+    /// Queue of delays which will wake up the behaviour.
     delays: DelayQueue<()>,
+    /// Tells if the system is shutting down, so we shouldn't send or accept any message
+    /// anymore...
+    is_shutting_down: bool,
 }
 
 impl BalthBehaviour {
@@ -120,6 +124,7 @@ impl BalthBehaviour {
                 manager_check_interval,
                 manager_timeout,
                 delays: DelayQueue::new(),
+                is_shutting_down: false,
             },
             tx,
         )
@@ -193,26 +198,57 @@ impl BalthBehaviour {
 
     /// If the peer is connected, the message is pushed to a handler right away,
     /// otherwise it will be stored on hold and a dialing request will be made.
+    /// If we are shutting down (i.e. [`is_shutting_down`] is `true`),
+    /// the message won't be dropped.
     fn send_to_peer_or_dial(
         &mut self,
         peer_id: PeerId,
         event: HandlerIn<QueryId>,
     ) -> NetworkBehaviourAction<HandlerIn<QueryId>, EventOut> {
-        let peer = self.get_peer_or_insert(&peer_id);
-        let mut peer = peer.write().unwrap();
+        if !self.is_shutting_down {
+            let peer = self.get_peer_or_insert(&peer_id);
+            let mut peer = peer.write().unwrap();
 
-        if peer.connected {
+            if peer.connected {
+                NetworkBehaviourAction::NotifyHandler {
+                    handler: NotifyHandler::Any,
+                    peer_id,
+                    event,
+                }
+            } else {
+                peer.pending_messages.push(event);
+                NetworkBehaviourAction::DialPeer {
+                    peer_id,
+                    condition: DialPeerCondition::Disconnected,
+                }
+            }
+        } else {
+            NetworkBehaviourAction::GenerateEvent(EventOut::MsgDropped(peer_id, event))
+        }
+    }
+
+    /// Send the event to the handler if we aren't shutting down
+    /// (i.e. [`is_shutting_down`] is `true`).
+    fn send_to_peer(
+        &self,
+        peer_id: PeerId,
+        event: HandlerIn<QueryId>,
+    ) -> NetworkBehaviourAction<HandlerIn<QueryId>, EventOut> {
+        // TODO: let some messages pass ? (e.g. ManagerBye)
+        if let HandlerIn::ManagerBye { .. } = event {
+            NetworkBehaviourAction::NotifyHandler {
+                handler: NotifyHandler::Any,
+                peer_id,
+                event,
+            }
+        } else if !self.is_shutting_down {
             NetworkBehaviourAction::NotifyHandler {
                 handler: NotifyHandler::Any,
                 peer_id,
                 event,
             }
         } else {
-            peer.pending_messages.push(event);
-            NetworkBehaviourAction::DialPeer {
-                peer_id,
-                condition: DialPeerCondition::Disconnected,
-            }
+            NetworkBehaviourAction::GenerateEvent(EventOut::MsgDropped(peer_id, event))
         }
     }
 
@@ -315,12 +351,16 @@ impl NetworkBehaviour for BalthBehaviour {
         cx: &mut Context,
         _params: &mut impl PollParameters
 ) -> Poll<NetworkBehaviourAction<<<Self::ProtocolsHandler as IntoProtocolsHandler>::Handler as ProtocolsHandler>::InEvent, Self::OutEvent>>{
+        // Delays waking us up.
         {
             if let Poll::Ready(Some(_)) = self.delays.poll_expired(cx) {
                 // eprintln!("Wake up Neo...");
             }
         }
-        {
+
+        // Pinging manager or workers we're in relationship with.
+        // Not necessary if we're shutting down.
+        if !self.is_shutting_down {
             use CheckManagerWorkerRelationshipAction::*;
             let manager_check_interval = self.manager_check_interval;
             let manager_timeout = self.manager_timeout;
@@ -471,9 +511,44 @@ impl NetworkBehaviour for BalthBehaviour {
 
                     Poll::Pending
                 }
-                // TODO: close the swarm + unsubscribe relations if channel has been dropped ?
-                None => unimplemented!("Channel was closed"),
+                // TODO: close the swarm and prevent any other in-connections
+                // TODO: find a way to notify balthalib when we're done sending bye
+                // TODO: special message ?
+                Some(EventIn::Bye) | None => {
+                    let mut peer_ids = match &mut self.node_type_data {
+                        NodeTypeData::Manager(ManagerData { workers, .. }) => {
+                            workers.keys().cloned().collect()
+                        }
+                        NodeTypeData::Worker(WorkerData { manager, .. }) => {
+                            if let Some((peer, _, _)) = manager.take() {
+                                vec![peer.read().unwrap().peer_id.clone()]
+                            } else {
+                                Vec::new()
+                            }
+                        }
+                    };
+                    for id in peer_ids.drain(..) {
+                        let user_data = self.next_query_unique_id();
+                        self.inject_send_to_peer_or_dial_event(
+                            id,
+                            HandlerIn::ManagerBye { user_data },
+                        );
+                    }
+                    self.is_shutting_down = true;
+                    Poll::Pending
+                }
             };
+
+            // If we're shutting down and trying to send a message, won't send it:
+            let action =
+                if let Poll::Ready(NetworkBehaviourAction::NotifyHandler {
+                    peer_id, event, ..
+                }) = action
+                {
+                    Poll::Ready(self.send_to_peer(peer_id, event))
+                } else {
+                    action
+                };
 
             if action.is_ready() {
                 return action;
