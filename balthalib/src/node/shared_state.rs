@@ -2,7 +2,7 @@ use super::{Balthazar, LogKind};
 
 use misc::{
     job::{try_bytes_to_address, TaskId},
-    shared_state::{PeerId, SharedState, SubTasksState, Task},
+    shared_state::{Assigned, PeerId, SharedState, SubTasksState, Task},
 };
 use proto::{manager as man, worker};
 
@@ -103,7 +103,7 @@ impl Balthazar {
         &self,
         shared_state: &mut impl std::ops::DerefMut<Target = SharedState>,
         task_id: &TaskId,
-        proposal: man::ProposeNewTask,
+        _proposal: man::ProposeNewTask,
     ) -> Result<String, String> {
         if shared_state.tasks.contains_key(task_id) {
             Err("Task already known.".to_string())
@@ -190,20 +190,60 @@ impl Balthazar {
             log("Error: ProposeFailure: bad new number of failures".to_string()).await;
             false
         }
+        // TODO: in the BC too
 
         Ok(())
             */
     }
 
+    // TODO: check offers and all...
     async fn handle_proposal_scheduling(
         &self,
         shared_state: &mut impl std::ops::DerefMut<Target = SharedState>,
         task_id: &TaskId,
-        proposal: man::ProposeScheduling,
+        mut proposal: man::ProposeScheduling,
     ) -> Result<String, String> {
-        Err("Not implemented.".to_string())
+        let mut task = check_task_is_known(shared_state, task_id)?;
+        let substates = get_substates(&mut task)?;
+
+        let mut offers_filtered = Vec::new();
+        for o in proposal.selected_offers.drain(..) {
+            if &o.task_id[..] != task_id.as_bytes() {
+                return Err("Unmatching task id in offer.".to_string());
+            }
+
+            let payment_address = try_bytes_to_address(&o.payment_address[..])
+                .map_err(|_| "Can't parse payment_address in offer.".to_string())?;
+            // TODO: check also prices values...
+
+            let worker = PeerId::from_bytes(o.worker)
+                .map_err(|_| "Couln't parse worker PeerId.".to_string())?;
+            let workers_manager = PeerId::from_bytes(o.workers_manager)
+                .map_err(|_| "Couln't parse worker PeerId.".to_string())?;
+
+            offers_filtered.push(Assigned::new(
+                worker,
+                workers_manager,
+                payment_address,
+                o.worker_price,
+                o.network_price,
+            ));
+        }
+
+        // TODO: do something else than map ?
+        #[allow(clippy::suspicious_map)]
+        let nb_assigned = substates
+            .iter_mut()
+            .filter(|o| o.is_none())
+            .zip(offers_filtered.drain(..))
+            .map(|(unassigned, selected)| {
+                unassigned.replace(selected);
+            })
+            .count();
+        Ok(format!("Stored {} tasks.", nb_assigned))
     }
 
+    // TODO: check pinging message and sender
     async fn handle_proposal_checked(
         &self,
         shared_state: &mut impl std::ops::DerefMut<Target = SharedState>,
@@ -214,7 +254,6 @@ impl Balthazar {
         let substates = get_substates(&mut task)?;
         let worker = PeerId::from_bytes(proposal.worker)
             .map_err(|_| "Couln't parse worker PeerId.".to_string())?;
-        // TODO: check pinging message and sender
 
         if let Some(substate) = substates
             .iter_mut()
@@ -227,14 +266,14 @@ impl Balthazar {
         }
     }
 
+    // TODO: check completion signals...
+    // TODO: check that selected_result is part of other signals...
     async fn handle_proposal_completed(
         &self,
         shared_state: &mut impl std::ops::DerefMut<Target = SharedState>,
         task_id: &TaskId,
         proposal: man::ProposeCompleted,
     ) -> Result<String, String> {
-        // TODO: check completion signals...
-        // TODO: check that selected_result is part of other signals...
         let mut task = check_task_is_known(shared_state, task_id)?;
         if !task.is_incomplete() {
             return Err("Task already no more incomplete.".to_string());
@@ -274,7 +313,7 @@ impl Balthazar {
         {
             (task_id_3, result)
         } else {
-            return Err("No status data.".to_string());
+            return Err("No status data or incorrect one.".to_string());
         };
 
         // TODO: already checked when receiving it ?
@@ -282,8 +321,11 @@ impl Balthazar {
             return Err("TaskStatus not corresponding to this task.".to_string());
         }
 
-        task.set_completed(result);
-        // TODO: store in the BC
+        let (result, payment_info) = task.set_completed(result);
+        self.chain()
+            .jobs_set_completed(&task_id, result, payment_info)
+            .await
+            .map_err(|err| format!("Couldn't set completed on the Jobs SC: {}", err))?;
         Ok("Result stored...".to_string())
     }
 }

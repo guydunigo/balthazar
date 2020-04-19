@@ -72,7 +72,6 @@ impl Task {
         self.completeness.get_substates()
     }
 
-    // TODO: check if not already ?
     // TODO: error and no panic!
     pub fn set_definitely_failed(&mut self, reason: TaskErrorKind) {
         if self.is_incomplete() {
@@ -81,9 +80,10 @@ impl Task {
             panic!("Already no more incomplete!");
         }
     }
-    // TODO: check if not already ?
+
+    // TODO: error and no panic!
     /// Beware to check that the task is assigned to enough workers and all...
-    pub fn set_completed(&mut self, result: Vec<u8>) {
+    pub fn set_completed(&mut self, result: Vec<u8>) -> (&[u8], &[WorkerPaymentInfo]) {
         if let Some(substates) = self.get_substates() {
             self.completeness = TaskCompleteness::Completed {
                 result,
@@ -91,6 +91,16 @@ impl Task {
                     .drain(..)
                     .filter_map(|s| s.map(Assigned::into_payment_info))
                     .collect(),
+            };
+            if let TaskCompleteness::Completed {
+                workers_payment_info,
+                result,
+                ..
+            } = &self.completeness
+            {
+                (&result[..], &workers_payment_info[..])
+            } else {
+                unreachable!("just assigned");
             }
         } else {
             panic!("Already no more incomplete!");

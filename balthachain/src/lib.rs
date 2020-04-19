@@ -18,6 +18,7 @@ use futures::{compat::Compat01As03, future, Stream, StreamExt};
 use misc::{
     job::{Address, Job, JobId, OtherData, TaskId},
     multihash::Multihash,
+    shared_state::WorkerPaymentInfo,
 };
 use proto::{worker::TaskErrorKind, Message};
 use std::{
@@ -946,7 +947,7 @@ impl<'a> Chain<'a> {
         &self,
         task_id: &TaskId,
         result: &[u8],
-        workers_infos: &[(Address, u64, u64)],
+        workers_infos: &[WorkerPaymentInfo],
     ) -> Result<types::TransactionReceipt, Error> {
         let jobs = self.jobs()?;
         let addr = self.local_address()?;
@@ -959,10 +960,10 @@ impl<'a> Chain<'a> {
             let mut worker_prices = Vec::with_capacity(workers_infos.len());
             let mut network_prices = Vec::with_capacity(workers_infos.len());
 
-            workers_infos.iter().for_each(|(w, p, n)| {
-                worker_addrs.push(*w);
-                worker_prices.push(*p);
-                network_prices.push(*n);
+            workers_infos.iter().for_each(|w| {
+                worker_addrs.push(*w.worker_address());
+                worker_prices.push(w.worker_price());
+                network_prices.push(w.network_price());
             });
 
             let fut = jobs.call_with_confirmations(

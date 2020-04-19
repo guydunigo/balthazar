@@ -3,6 +3,7 @@ use futures::{executor::block_on, future, StreamExt};
 use misc::{
     job::{Job, JobId, ProgramKind, TaskId},
     multihash::Multihash,
+    shared_state::WorkerPaymentInfo,
 };
 use proto::worker::TaskErrorKind;
 use web3::types::{Address, BlockId, BlockNumber};
@@ -278,6 +279,10 @@ async fn run_async(mode: &RunMode, config: &ChainConfig) -> Result<(), Error> {
             managers,
             workers,
         } => {
+            let workers: Vec<WorkerPaymentInfo> = workers
+                .iter()
+                .map(|(w, p, n)| WorkerPaymentInfo::new(*w, *p, *n))
+                .collect();
             chain.jobs_set_managers(task_id, &managers[..]).await?;
             chain
                 .jobs_set_completed(task_id, result, &workers[..])
