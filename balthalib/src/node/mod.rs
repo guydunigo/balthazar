@@ -27,7 +27,7 @@ use tokio::{runtime::Runtime, sync::RwLock};
 use async_ctrlc::CtrlC;
 use chain::{Chain, JobsEvent};
 use misc::{
-    job::{try_bytes_to_address, DefaultHash, JobId, ProgramKind, TaskId},
+    job::{try_bytes_to_address, Address, DefaultHash, JobId, ProgramKind, TaskId},
     multihash::{Keccak256, Multihash},
     shared_state::{SharedState, Task, TaskCompleteness},
     WorkerSpecs,
@@ -227,28 +227,15 @@ impl Balthazar {
 
         let balth = Balthazar::new(config, event_tx, shared_state_tx, swarm_in);
 
-        /*
-        let chain = balth.chain();
-        let chain_fut = chain.jobs_subscribe().await?.for_each(|e| {
-            async {
-                let event = match e {
-                    Ok(evt) => Event::ChainJobs(evt),
-                    Err(e) => Event::Error(e.into()),
-                };
-                spawn_event(balth.tx.clone(), event).await;
-            }
-            .boxed()
-        });
-        */
-
         // TODO: concurrent ?
+        let chain_fut = balth.clone().handle_chain();
         let channel_fut = event_rx.for_each(|e| balth.clone().handle_event(e));
         let ctrlc_fut = balth.clone().handle_ctrlc();
-        // spawn_event(balth.tx.clone(), Event::Swarm(e))
         let swarm_fut = swarm_out.for_each(|e| balth.clone().handle_swarm_event(e));
         let shared_state_fut = balth.clone().handle_shared_state(shared_state_rx);
 
         select! {
+            res = chain_fut.fuse() => res?,
             _ = swarm_fut.fuse() => (),
             _ = channel_fut.fuse() => (),
             _ = shared_state_fut.fuse() => (),
@@ -281,21 +268,46 @@ impl Balthazar {
         }
     }
 
-    /*
+    /// Handle events coming out of smart-contracts.
+    async fn handle_chain(self) -> Result<(), Error> {
+        let chain = self.chain();
+        let addr = chain.local_address()?;
+        chain
+            .jobs_subscribe()
+            .await?
+            .for_each(|e| async {
+                match e {
+                    Ok(evt) => self.clone().handle_chain_event(evt, *addr).await,
+                    Err(e) => self.spawn_event(Event::Error(e.into())).await,
+                }
+            })
+            .await;
+
+        Ok(())
+    }
+
     /// Handle events coming out of Swarm.
-    async fn handle_chain_event(self, event: chain::JobsEvent) {
+    async fn handle_chain_event(&self, event: chain::JobsEvent, local_address: Address) {
+        // TODO: update changes in the tasks in the SC which didn't come from us.
         self.spawn_log(LogKind::Blockchain, format!("{}", event))
             .await;
         match event {
             // let mut free_workers_iter = self.find_available_worker().await;
             chain::JobsEvent::TaskPending { task_id } => {
-                let mut p = self.pending_tasks_mut().await;
-                p.push_back((task_id, None))
+                let msg = man::Proposal {
+                    task_id: task_id.into_bytes(),
+                    payment_address: Vec::from(local_address.as_bytes()),
+                    proposal: Some(man::proposal::Proposal::NewTask(man::ProposeNewTask {})),
+                };
+                let mut shared_state_tx = self.shared_state_tx.clone();
+                shared_state_tx
+                    .send(msg)
+                    .await
+                    .expect("problem with shared_state_tx");
             }
             _ => (),
         }
     }
-    */
 
     // Accepting everything...
     // TODO: Channel out to send notif to wake up other parts ?

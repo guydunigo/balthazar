@@ -50,6 +50,7 @@ impl Task {
     pub fn nb_failures(&self) -> u64 {
         self.nb_failures
     }
+    // TODO: prevent modifs if no more incomplete?
     pub fn set_nb_failures(&mut self, new: u64) {
         // TODO: check limit and new value ?
         self.nb_failures = new;
@@ -58,6 +59,7 @@ impl Task {
     pub fn managers_addresses(&self) -> &[Address] {
         &self.managers_addresses[..]
     }
+    // TODO: prevent modifs if no more incomplete?
     pub fn managers_addresses_mut(&mut self) -> &mut Vec<Address> {
         &mut self.managers_addresses
     }
@@ -83,7 +85,7 @@ impl Task {
 
     // TODO: error and no panic!
     /// Beware to check that the task is assigned to enough workers and all...
-    pub fn set_completed(&mut self, result: Vec<u8>) -> (&[u8], &[WorkerPaymentInfo]) {
+    pub fn set_completed(&mut self, result: Vec<u8>) {
         if let Some(substates) = self.get_substates() {
             self.completeness = TaskCompleteness::Completed {
                 result,
@@ -92,16 +94,6 @@ impl Task {
                     .filter_map(|s| s.map(Assigned::into_payment_info))
                     .collect(),
             };
-            if let TaskCompleteness::Completed {
-                workers_payment_info,
-                result,
-                ..
-            } = &self.completeness
-            {
-                (&result[..], &workers_payment_info[..])
-            } else {
-                unreachable!("just assigned");
-            }
         } else {
             panic!("Already no more incomplete!");
         }

@@ -2,8 +2,8 @@
 use super::{Balthazar, LogKind};
 
 use misc::{
-    job::{try_bytes_to_address, TaskId},
-    shared_state::{Assigned, PeerId, SharedState, SubTasksState, Task},
+    job::{try_bytes_to_address, Address, TaskId},
+    shared_state::{Assigned, PeerId, SharedState, SubTasksState, Task, TaskCompleteness},
 };
 use proto::{manager as man, worker, worker::TaskErrorKind};
 
@@ -28,7 +28,7 @@ impl Balthazar {
     }
     pub async fn log_res(&self, res: Result<String, String>, name: &str) -> bool {
         let (msg, is_success) = match res {
-            Ok(_) => (format!("{}: accepted.", name), true),
+            Ok(ok) => (format!("{}: accepted : {}", name, ok), true),
             Err(err) => (format!("Error: {}: {}", name, err), false),
         };
         self.log_shared_state(msg).await;
@@ -66,7 +66,7 @@ impl Balthazar {
                 "ProposeNewTask",
             ),
             Some(man::ProposalKind::Failure(p)) => (
-                self.handle_proposal_failure(&mut shared_state, &task_id, p)
+                self.handle_proposal_failure(&mut shared_state, &task_id, p, payment_address)
                     .await,
                 "ProposeFailure",
             ),
@@ -81,7 +81,7 @@ impl Balthazar {
                 "ProposeChecked",
             ),
             Some(man::ProposalKind::Completed(p)) => (
-                self.handle_proposal_completed(&mut shared_state, &task_id, p)
+                self.handle_proposal_completed(&mut shared_state, &task_id, p, payment_address)
                     .await,
                 "ProposeCompleted",
             ),
@@ -93,7 +93,9 @@ impl Balthazar {
         let is_accepted = self.log_res(is_accepted_res, name).await;
         if is_accepted {
             if let Some(task) = shared_state.tasks.get_mut(&task_id) {
-                task.managers_addresses_mut().push(payment_address);
+                if task.is_incomplete() {
+                    task.managers_addresses_mut().push(payment_address);
+                }
             } else {
                 unreachable!("Still no task, but we aren't supposed to reach here...");
             }
@@ -122,6 +124,7 @@ impl Balthazar {
         shared_state: &mut impl std::ops::DerefMut<Target = SharedState>,
         task_id: &TaskId,
         proposal: man::ProposeFailure,
+        payment_address: Address,
     ) -> Result<String, String> {
         let mut task = check_task_is_known(shared_state, task_id)?;
         // TODO: empty substates...
@@ -239,9 +242,16 @@ impl Balthazar {
         // TODO: store list of failures rather than only last one?
         task.set_nb_failures(proposal.new_nb_failures);
 
+        // Definetely failed if too many failures...
         if task.nb_failures() >= max_failures {
+            task.managers_addresses_mut().push(payment_address);
             task.set_definitely_failed(reason);
+
             let chain = self.chain();
+            chain
+                .jobs_set_managers(task_id, task.managers_addresses())
+                .await
+                .map_err(|err| format!("Problem setting managers in the Jobs SC: {}", err))?;
             chain
                 .jobs_set_definitely_failed(task_id, reason)
                 .await
@@ -334,6 +344,7 @@ impl Balthazar {
         shared_state: &mut impl std::ops::DerefMut<Target = SharedState>,
         task_id: &TaskId,
         proposal: man::ProposeCompleted,
+        payment_address: Address,
     ) -> Result<String, String> {
         let mut task = check_task_is_known(shared_state, task_id)?;
         if !task.is_incomplete() {
@@ -382,7 +393,24 @@ impl Balthazar {
             return Err("TaskStatus not corresponding to this task.".to_string());
         }
 
-        let (result, payment_info) = task.set_completed(result);
+        task.managers_addresses_mut().push(payment_address);
+        task.set_completed(result);
+
+        let (result, payment_info) = if let TaskCompleteness::Completed {
+            workers_payment_info,
+            result,
+            ..
+        } = task.completeness()
+        {
+            (&result[..], &workers_payment_info[..])
+        } else {
+            unreachable!("just assigned");
+        };
+
+        self.chain()
+            .jobs_set_managers(&task_id, task.managers_addresses())
+            .await
+            .map_err(|err| format!("Couldn't set managers on the Jobs SC: {}", err))?;
         self.chain()
             .jobs_set_completed(&task_id, result, payment_info)
             .await
