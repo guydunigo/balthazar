@@ -1,16 +1,16 @@
 //! Grouping module for all balthazar sub-modules.
 // TODO: remove allws
-#![allow(unused_imports)]
-#![allow(dead_code)]
+// #![allow(unused_imports)]
+// #![allow(dead_code)]
 
 extern crate async_ctrlc;
 
 use futures::{
     channel::{
-        mpsc::{channel, Sender},
+        mpsc::{channel, Receiver, Sender},
         oneshot,
     },
-    future, join, poll, select, FutureExt, SinkExt, StreamExt,
+    future, join, poll, select, FutureExt, SinkExt, Stream, StreamExt,
 };
 use std::{
     borrow::Cow,
@@ -27,12 +27,14 @@ use tokio::{runtime::Runtime, sync::RwLock};
 use async_ctrlc::CtrlC;
 use chain::{Chain, JobsEvent};
 use misc::{
-    job::{DefaultHash, JobId, ProgramKind, TaskId},
+    job::{try_bytes_to_address, DefaultHash, JobId, ProgramKind, TaskId},
     multihash::{Keccak256, Multihash},
+    shared_state::{SharedState, Task, TaskCompleteness},
     WorkerSpecs,
 };
 use net::PeerRc;
 use proto::{
+    manager as man,
     worker::{TaskErrorKind, TaskExecute},
     NodeType, TaskStatus,
 };
@@ -40,6 +42,7 @@ use run::{Executor, WasmExecutor};
 use store::{FetchStorage, StoragesWrapper};
 
 use super::{BalthazarConfig, Error};
+mod shared_state;
 
 const CHANNEL_SIZE: usize = 1024;
 
@@ -80,6 +83,7 @@ enum LogKind {
     Worker,
     Manager,
     Blockchain,
+    SharedState,
     Error,
 }
 
@@ -90,6 +94,7 @@ impl fmt::Display for LogKind {
             LogKind::Worker => "W",
             LogKind::Manager => "M",
             LogKind::Blockchain => "B",
+            LogKind::SharedState => "T",
             LogKind::Error => "E",
         };
         write!(fmt, "{}", letter)
@@ -99,9 +104,11 @@ impl fmt::Display for LogKind {
 #[derive(Clone)]
 struct Balthazar {
     config: Arc<BalthazarConfig>,
-    tx: Sender<Event>,
+    event_tx: Sender<Event>,
+    shared_state_tx: Sender<man::Proposal>,
     swarm_in: Sender<net::EventIn>,
-    pending_tasks: Arc<RwLock<VecDeque<(TaskId, Option<PeerRc>)>>>,
+    shared_state: Arc<RwLock<SharedState>>,
+    // pending_tasks: Arc<RwLock<VecDeque<(TaskId, Option<PeerRc>)>>>,
 }
 /*
 {
@@ -111,26 +118,24 @@ struct Balthazar {
 }
 */
 
-async fn spawn_log(tx: Sender<Event>, kind: LogKind, msg: String) {
-    spawn_event(tx, Event::Log { kind, msg }).await
-}
-
-async fn spawn_event(mut tx: Sender<Event>, event: Event) {
-    if let Err(e) = tx.send(event).await {
-        panic!("{:?}", Error::EventChannelError(e));
-    }
-}
-
 impl Balthazar {
-    fn new(config: BalthazarConfig, tx: Sender<Event>, swarm_in: Sender<net::EventIn>) -> Self {
+    fn new(
+        config: BalthazarConfig,
+        event_tx: Sender<Event>,
+        shared_state_tx: Sender<man::Proposal>,
+        swarm_in: Sender<net::EventIn>,
+    ) -> Self {
         Balthazar {
             config: Arc::new(config),
-            tx,
+            event_tx,
+            shared_state_tx,
             swarm_in,
-            pending_tasks: Arc::new(RwLock::new(VecDeque::new())),
+            shared_state: Arc::new(RwLock::new(SharedState::default())),
+            // pending_tasks: Arc::new(RwLock::new(VecDeque::new())),
         }
     }
 
+    /*
     async fn pending_tasks<'a>(
         &'a self,
     ) -> impl 'a + std::ops::Deref<Target = VecDeque<(TaskId, Option<PeerRc>)>> {
@@ -142,11 +147,14 @@ impl Balthazar {
     ) -> impl 'a + std::ops::DerefMut<Target = VecDeque<(TaskId, Option<PeerRc>)>> {
         self.pending_tasks.write().await
     }
+    */
 
+    // TODO: re-create it each time ?
     fn chain(&self) -> Chain {
         Chain::new(self.config.chain())
     }
 
+    /*
     /// Get the next task that doesn't have any worker.
     async fn next_pending_task(&self) -> Option<TaskId> {
         let mut pending_tasks = self.pending_tasks_mut().await;
@@ -164,6 +172,7 @@ impl Balthazar {
             None
         }
     }
+    */
 
     /*
     /// Returns a worker who isn't computing anything.
@@ -202,20 +211,21 @@ impl Balthazar {
 
     async fn send_msg_to_behaviour(&self, event: net::EventIn) {
         if let Err(e) = self.swarm_in.clone().send(event).await {
-            panic!("{:?}", Error::SwarmChannelError(e));
+            panic!("Swarm channel error: {:?}", Error::SwarmChannelError(e));
         }
     }
 
     pub async fn run(config: BalthazarConfig) -> Result<(), Error> {
         println!("Starting as {:?}...", config.node_type());
 
-        let (tx, rx) = channel(CHANNEL_SIZE);
+        let (event_tx, event_rx) = channel(CHANNEL_SIZE);
+        let (shared_state_tx, shared_state_rx) = channel(CHANNEL_SIZE);
 
         let specs = WorkerSpecs::default();
         let keypair = balthernet::identity::Keypair::generate_secp256k1();
         let (swarm_in, swarm_out) = net::get_swarm(keypair.clone(), config.net(), Some(&specs));
 
-        let balth = Balthazar::new(config, tx, swarm_in);
+        let balth = Balthazar::new(config, event_tx, shared_state_tx, swarm_in);
 
         /*
         let chain = balth.chain();
@@ -230,55 +240,48 @@ impl Balthazar {
             .boxed()
         });
         */
-        let swarm_fut = swarm_out.for_each(|e| spawn_event(balth.tx.clone(), Event::Swarm(e)));
 
         // TODO: concurrent ?
-        let channel_fut = rx.for_each(|e| balth.clone().handle_event(e));
+        let channel_fut = event_rx.for_each(|e| balth.clone().handle_event(e));
+        let ctrlc_fut = balth.clone().handle_ctrlc();
+        // spawn_event(balth.tx.clone(), Event::Swarm(e))
+        let swarm_fut = swarm_out.for_each(|e| balth.clone().handle_swarm_event(e));
+        let shared_state_fut = balth.clone().handle_shared_state(shared_state_rx);
 
-        let ctrlc = async {
-            // TODO: dirty, make it an actual stream...
-            let mut ctrlc = CtrlC::new().expect("cannot create Ctrl+C handler?");
-            {
-                future::poll_fn(|ctx| CtrlC::poll(Pin::new(&mut ctrlc), ctx)).await;
-                eprintln!("Ctrl+C pressed, breaking relationships... :'(");
-
-                let mut swarm_in = balth.swarm_in.clone();
-                swarm_in
-                    .send(net::EventIn::Bye)
-                    .await
-                    .expect("Swarm channel in closed.");
-            }
-            {
-                future::poll_fn(|ctx| CtrlC::poll(Pin::new(&mut ctrlc), ctx)).await;
-                eprintln!("Ctrl+C pressed a second time, definetely quitting...");
-            }
-        };
-        // join!(/*chain_fut, */ swarm_fut, channel_fut, ctrlc);
         select! {
             _ = swarm_fut.fuse() => (),
             _ = channel_fut.fuse() => (),
-            _ = ctrlc.fuse() => {
-                eprintln!("Existing...");
-            }
+            _ = shared_state_fut.fuse() => (),
+            _ = ctrlc_fut.fuse() => (),
         }
 
+        eprintln!("Bye...");
         Ok(())
     }
 
+    // TODO: ref as mutable ? or just clone tx ?
+    async fn spawn_event(&self, event: Event) {
+        let mut tx = self.event_tx.clone();
+        if let Err(e) = tx.send(event).await {
+            panic!("{:?}", Error::EventChannelError(e));
+        }
+    }
+
     async fn spawn_log(&self, kind: LogKind, msg: String) {
-        spawn_log(self.tx.clone(), kind, msg).await;
+        self.spawn_event(Event::Log { kind, msg }).await
     }
 
     /// Handle all inner events.
     async fn handle_event(self, event: Event) {
         match event {
-            Event::Swarm(e) => self.handle_swarm_event(e).await,
-            Event::ChainJobs(e) => self.handle_chain_event(e).await,
+            // Event::Swarm(e) => self.handle_swarm_event(e).await,
+            // Event::ChainJobs(e) => self.handle_chain_event(e).await,
             Event::Log { .. } => eprintln!("{}", event),
             _ => unimplemented!(),
         }
     }
 
+    /*
     /// Handle events coming out of Swarm.
     async fn handle_chain_event(self, event: chain::JobsEvent) {
         self.spawn_log(LogKind::Blockchain, format!("{}", event))
@@ -292,13 +295,38 @@ impl Balthazar {
             _ => (),
         }
     }
+    */
+
+    // Accepting everything...
+    // TODO: Channel out to send notif to wake up other parts ?
+    // TODO: check proof messages...
+    async fn handle_shared_state(self, shared_state_rx: Receiver<man::Proposal>) {
+        shared_state_rx
+            .for_each(|p| self.check_and_apply_proposal(p))
+            .await
+    }
+
+    /// Handle Interruption event when Ctrl+C is pressed.
+    async fn handle_ctrlc(self) {
+        // TODO: dirty, make it an actual stream...
+        let mut ctrlc = CtrlC::new().expect("cannot create Ctrl+C handler?");
+        {
+            future::poll_fn(|ctx| CtrlC::poll(Pin::new(&mut ctrlc), ctx)).await;
+            eprintln!("Ctrl+C pressed, breaking relationships... :'(");
+
+            self.send_msg_to_behaviour(net::EventIn::Bye).await;
+        }
+        {
+            future::poll_fn(|ctx| CtrlC::poll(Pin::new(&mut ctrlc), ctx)).await;
+            eprintln!("Ctrl+C pressed a second time, definetely quitting...");
+        }
+    }
 
     /// Handle events coming out of Swarm.
     async fn handle_swarm_event(self, event: net::EventOut) {
         match (self.config.node_type(), event) {
             (NodeType::Manager, net::EventOut::WorkerNew(peer_id)) => {
-                spawn_log(
-                    self.tx.clone(),
+                self.spawn_log(
                     LogKind::Swarm,
                     format!("event: {:?}", net::EventOut::WorkerNew(peer_id.clone())),
                 )
@@ -325,8 +353,7 @@ impl Balthazar {
                         .iter()
                         .map(|a| String::from_utf8_lossy(&a[..]))
                         .collect();
-                    spawn_log(
-                        self.tx.clone(),
+                    self.spawn_log(
                         LogKind::Manager,
                         format!(
                             "Sending task `{}` with parameters {:?} to worker `{}`",
@@ -348,8 +375,7 @@ impl Balthazar {
                     status,
                 },
             ) => {
-                spawn_log(
-                    self.tx.clone(),
+                self.spawn_log(
                     LogKind::Manager,
                     format!(
                         "Task status from peer `{}` for task `{}`: {}",
@@ -482,12 +508,8 @@ impl Balthazar {
             | (_, net::EventOut::WorkerPong(_))
             | (_, net::EventOut::ManagerPong(_)) => (),
             (_, event) => {
-                spawn_log(
-                    self.tx.clone(),
-                    LogKind::Swarm,
-                    format!("event: {:?}", event),
-                )
-                .await;
+                self.spawn_log(LogKind::Swarm, format!("event: {:?}", event))
+                    .await;
             }
         }
     }

@@ -27,7 +27,7 @@ pub type JobId = HashId;
 /// Identifies a unique task for a given job.
 pub type TaskId = HashId;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct HashId {
     inner: Multihash,
 }
@@ -479,3 +479,17 @@ pub struct Task {
     pub arguments: Vec<u8>,
 }
 */
+
+// TODO: proper Errors...
+/// Tries to convert an array of bytes to an Ethereum Address.
+pub fn try_bytes_to_address(bytes: &[u8]) -> Result<Address, String> {
+    if bytes.len() == Address::len_bytes() {
+        Ok(Address::from_slice(bytes))
+    } else {
+        Err(format!(
+            "Lengths not matching, expected `{}`, got `{}`.",
+            Address::len_bytes(),
+            bytes.len()
+        ))
+    }
+}

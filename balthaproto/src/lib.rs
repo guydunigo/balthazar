@@ -24,6 +24,8 @@ pub mod smartcontracts {
 pub mod manager {
     //! Protocol between managers to achieve self-management of the network.
     include!(concat!(env!("OUT_DIR"), "/manager.rs"));
+    pub use proposal::Proposal as ProposalKind;
+    pub use propose_failure::Kind as FailureKind;
 }
 
 pub mod worker {
@@ -41,6 +43,7 @@ pub mod worker {
 
     include!(concat!(env!("OUT_DIR"), "/worker.rs"));
 
+    pub use task_status::StatusData;
     pub use tasks_execute::TaskExecute;
     pub use worker_msg_wrapper::Msg as WorkerMsg;
 

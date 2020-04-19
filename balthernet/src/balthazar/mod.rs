@@ -514,6 +514,7 @@ impl NetworkBehaviour for BalthBehaviour {
                 // TODO: close the swarm and prevent any other in-connections
                 // TODO: find a way to notify balthalib when we're done sending bye
                 // TODO: special message ?
+                // TODO: ExtendedSwarm::remove_listener ?
                 Some(EventIn::Bye) | None => {
                     let mut peer_ids = match &mut self.node_type_data {
                         NodeTypeData::Manager(ManagerData { workers, .. }) => {
