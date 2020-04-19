@@ -1,10 +1,11 @@
+// TODO: review all in respect to specs and all...
 use super::{Balthazar, LogKind};
 
 use misc::{
     job::{try_bytes_to_address, TaskId},
     shared_state::{Assigned, PeerId, SharedState, SubTasksState, Task},
 };
-use proto::{manager as man, worker};
+use proto::{manager as man, worker, worker::TaskErrorKind};
 
 fn check_task_is_known<'a>(
     shared_state: &'a mut impl std::ops::DerefMut<Target = SharedState>,
@@ -115,85 +116,145 @@ impl Balthazar {
         }
     }
 
+    // TODO: Check all things sub-messages.
     async fn handle_proposal_failure(
         &self,
         shared_state: &mut impl std::ops::DerefMut<Target = SharedState>,
         task_id: &TaskId,
         proposal: man::ProposeFailure,
     ) -> Result<String, String> {
-        Err("Not implemented.".to_string())
-        /*
         let mut task = check_task_is_known(shared_state, task_id)?;
-        let substates = if let Some(substates) = task.get_substates() {
-            substates
-        } else {
-            return Err("Task no more incomplete.".to_string());
-        };
+        // TODO: empty substates...
+        let substates = get_substates(&mut task)?;
 
         let max_failures = {
             let chain = self.chain();
-            let (job_id, _) = if let Ok(ok) = chain.jobs_get_task(&task_id, true).await {
-                ok
-            } else {
-                return log(format!(
-                    "Error, could not find task `{}` in Jobs smart-contract",
-                    task_id
-                ))
-                .await;
-            };
+            let (job_id, _) = chain.jobs_get_task(&task_id, true).await.map_err(|err| {
+                format!(
+                    "Problem fetchin task `{}` from Jobs smart-contract: {}",
+                    task_id, err
+                )
+            })?;
             let (_, _, max_failures) =
-                if let Ok(ok) = chain.jobs_get_parameters(&job_id, true).await {
-                    ok
-                } else {
-                    return log(format!(
-                        "Error, could not find task `{}` in Jobs smart-contract",
-                        task_id
-                    ))
-                    .await;
-                };
+                chain
+                    .jobs_get_parameters(&job_id, true)
+                    .await
+                    .map_err(|err| {
+                        format!(
+                            "Problem fetching max_failures for job `{}` in Jobs smart-contract: {}",
+                            job_id, err
+                        )
+                    })?;
             max_failures
         };
 
         // TODO: Option ?
-        let (reason, correct_val) = match prop.kind {
+        let (reason, correct_val) = match proposal.kind {
             // TODO: check task statuses and new_nb_failures...
-            Some(man::FailureKind::Worker(_)) => (TaskErrorKind::Unknown, true),
-            Some(man::FailureKind::ManUnavailable(_)) => {
+            Some(man::FailureKind::Worker(man::ProposeFailureWorker {
+                original_message:
+                    Some(man::ManTaskStatus {
+                        // TODO: got lazy in testing all parameters, but at the same time it was maybe
+                        // already checked right beforehand...
+                        status:
+                            Some(worker::TaskStatus {
+                                status_data: Some(worker::StatusData::Error(err_i32)),
+                                ..
+                            }),
+                        ..
+                    }),
+                ..
+            })) => {
+                let error = worker::TaskErrorKind::from_i32(err_i32)
+                    .ok_or_else(|| "Couldn't parse error type.".to_string())?;
+
+                use TaskErrorKind::*;
+
+                match error {
+                    Aborted | Unknown => (error, proposal.new_nb_failures == task.nb_failures()),
+                    TimedOut | Download | Runtime => {
+                        (error, proposal.new_nb_failures == task.nb_failures() + 1)
+                    }
+                    _ => {
+                        return Err("Incorrect error kind in TaskStatus.".to_string());
+                    }
+                }
+            }
+            Some(man::FailureKind::Worker(_)) => {
+                return Err("Invalid or missing original_message.".to_string());
+            }
+            Some(man::FailureKind::ManUnavailable(man::ProposeFailureManagerUnavailable {
+                unanswered_ping:
+                    Some(man::PingManagerForTask {
+                        task_id: task_id_2,
+                        worker,
+                        ..
+                    }),
+            })) => {
+                if &task_id_2[..] != task_id.as_bytes() {
+                    return Err("Ping for wrong task.".to_string());
+                }
+
+                if let Some(substate) = substates.iter_mut().find(|s| {
+                    s.as_ref()
+                        .filter(|a| a.worker().as_bytes() == &worker[..])
+                        .is_some()
+                }) {
+                    substate.take();
+                } else {
+                    return Err("Worker not assigned to it.".to_string());
+                }
+
                 (
                     // TODO: better error kind ?
                     TaskErrorKind::Unknown,
-                    prop.new_nb_failures == task.nb_failures(),
+                    proposal.new_nb_failures == task.nb_failures(),
                 )
             }
-            Some(man::FailureKind::Results(_)) => (
-                TaskErrorKind::IncorrectResult,
-                prop.new_nb_failures == task.nb_failures() + 1,
-            ),
+            Some(man::FailureKind::ManUnavailable(_)) => {
+                return Err("Missing unanswered_ping.".to_string());
+            }
+            Some(man::FailureKind::Results(_)) => {
+                substates.iter_mut().for_each(|s| {
+                    s.take();
+                });
+                (
+                    TaskErrorKind::IncorrectResult,
+                    proposal.new_nb_failures == task.nb_failures() + 1,
+                )
+            }
             Some(man::FailureKind::Specs(_)) => (
                 TaskErrorKind::IncorrectSpecification,
-                prop.new_nb_failures >= max_failures,
+                proposal.new_nb_failures >= max_failures,
             ),
-            None => (TaskErrorKind::Unknown, false),
+            None => {
+                return Err("Missing proposal failure kind.".to_string());
+            }
         };
 
-        if correct_val {
-            // TODO: store list of failures ?
-            task.set_nb_failures(prop.new_nb_failures);
-            log("ProposeFailure".to_string()).await;
-
-            if task.nb_failures() >= max_failures {
-                task.set_definitely_failed(reason);
-                log("Definitely failed".to_string()).await;
-            }
-            true
-        } else {
-            log("Error: ProposeFailure: bad new number of failures".to_string()).await;
-            false
+        if !correct_val {
+            return Err("Error: ProposeFailure: bad new number of failures".to_string());
         }
-        // TODO: in the BC too
 
-        Ok(())
-            */
+        // TODO: store list of failures rather than only last one?
+        task.set_nb_failures(proposal.new_nb_failures);
+
+        if task.nb_failures() >= max_failures {
+            task.set_definitely_failed(reason);
+            let chain = self.chain();
+            chain
+                .jobs_set_definitely_failed(task_id, reason)
+                .await
+                .map_err(|err| {
+                    format!(
+                        "Problem setting task as definitely failed in the Jobs SC: {}",
+                        err
+                    )
+                })?;
+            Ok("Definitely failed, set as such in the Jobs SC.".to_string())
+        } else {
+            Ok("Failed".to_string())
+        }
     }
 
     // TODO: check offers and all...
@@ -262,7 +323,7 @@ impl Balthazar {
             substate.update_last_check_timestamp();
             Ok("Last checked timestamp updated.".to_string())
         } else {
-            Err("Task not assigned to it.".to_string())
+            Err("Worker not assigned to it.".to_string())
         }
     }
 

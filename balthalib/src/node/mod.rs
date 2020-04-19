@@ -10,7 +10,7 @@ use futures::{
         mpsc::{channel, Receiver, Sender},
         oneshot,
     },
-    future, join, poll, select, FutureExt, SinkExt, Stream, StreamExt,
+    future, select, FutureExt, SinkExt, Stream, StreamExt,
 };
 use std::{
     borrow::Cow,
