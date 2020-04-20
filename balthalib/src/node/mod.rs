@@ -216,7 +216,8 @@ impl Balthazar {
     }
 
     pub async fn run(config: BalthazarConfig) -> Result<(), Error> {
-        println!("Starting as {:?}...", config.node_type());
+        let node_type = *config.node_type();
+        println!("Starting as {:?}...", node_type);
 
         let (event_tx, event_rx) = channel(CHANNEL_SIZE);
         let (shared_state_tx, shared_state_rx) = channel(CHANNEL_SIZE);
@@ -228,18 +229,27 @@ impl Balthazar {
         let balth = Balthazar::new(config, event_tx, shared_state_tx, swarm_in);
 
         // TODO: concurrent ?
-        let chain_fut = balth.clone().handle_chain();
         let channel_fut = event_rx.for_each(|e| balth.clone().handle_event(e));
         let ctrlc_fut = balth.clone().handle_ctrlc();
         let swarm_fut = swarm_out.for_each(|e| balth.clone().handle_swarm_event(e));
-        let shared_state_fut = balth.clone().handle_shared_state(shared_state_rx);
 
-        select! {
-            res = chain_fut.fuse() => res?,
-            _ = swarm_fut.fuse() => (),
-            _ = channel_fut.fuse() => (),
-            _ = shared_state_fut.fuse() => (),
-            _ = ctrlc_fut.fuse() => (),
+        if let NodeType::Manager = node_type {
+            let chain_fut = balth.clone().handle_chain();
+            let shared_state_fut = balth.clone().handle_shared_state(shared_state_rx);
+
+            select! {
+                res = chain_fut.fuse() => res?,
+                _ = swarm_fut.fuse() => (),
+                _ = channel_fut.fuse() => (),
+                _ = shared_state_fut.fuse() => (),
+                _ = ctrlc_fut.fuse() => (),
+            }
+        } else {
+            select! {
+                _ = swarm_fut.fuse() => (),
+                _ = channel_fut.fuse() => (),
+                _ = ctrlc_fut.fuse() => (),
+            }
         }
 
         eprintln!("Bye...");
