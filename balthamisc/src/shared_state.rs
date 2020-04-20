@@ -34,12 +34,12 @@ pub struct Task {
 }
 
 impl Task {
-    pub fn new(task_id: TaskId) -> Self {
+    pub fn new(task_id: TaskId, redundancy: u64) -> Self {
         Task {
             task_id,
             nb_failures: 0,
             managers_addresses: Vec::new(),
-            completeness: TaskCompleteness::default(),
+            completeness: TaskCompleteness::new(redundancy),
         }
     }
 
@@ -70,8 +70,31 @@ impl Task {
     pub fn is_incomplete(&self) -> bool {
         self.completeness.is_incomplete()
     }
-    pub fn get_substates(&mut self) -> Option<&mut Vec<SubTasksState>> {
+    pub fn get_substates(&self) -> Option<&[SubTasksState]> {
         self.completeness.get_substates()
+    }
+    pub fn get_substates_mut(&mut self) -> Option<&mut [SubTasksState]> {
+        self.completeness.get_substates_mut()
+    }
+    pub fn get_substate(&self, worker: &PeerId) -> Option<&Assigned> {
+        self.completeness.get_substate(worker)
+    }
+    pub fn get_substate_mut(&mut self, worker: &PeerId) -> Option<&mut Assigned> {
+        self.completeness.get_substate_mut(worker)
+    }
+
+    pub fn unassign(&mut self, worker: &PeerId) -> Option<Assigned> {
+        self.completeness.unassign(worker)
+    }
+
+    pub fn assign(
+        &mut self,
+        worker: PeerId,
+        workers_manager: PeerId,
+        payment_info: WorkerPaymentInfo,
+    ) -> Result<(), String> {
+        self.completeness
+            .assign(worker, workers_manager, payment_info)
     }
 
     // TODO: error and no panic!
@@ -86,7 +109,7 @@ impl Task {
     // TODO: error and no panic!
     /// Beware to check that the task is assigned to enough workers and all...
     pub fn set_completed(&mut self, result: Vec<u8>) {
-        if let Some(substates) = self.get_substates() {
+        if let TaskCompleteness::Incomplete { substates } = &mut self.completeness {
             self.completeness = TaskCompleteness::Completed {
                 result,
                 workers_payment_info: substates
@@ -129,6 +152,12 @@ pub enum TaskCompleteness {
 }
 
 impl TaskCompleteness {
+    fn new(redundancy: u64) -> Self {
+        let mut substates = Vec::with_capacity(redundancy as usize);
+        substates.resize(redundancy as usize, None);
+        TaskCompleteness::Incomplete { substates }
+    }
+
     pub fn is_incomplete(&self) -> bool {
         if let TaskCompleteness::Incomplete { .. } = self {
             true
@@ -137,11 +166,89 @@ impl TaskCompleteness {
         }
     }
 
-    pub fn get_substates(&mut self) -> Option<&mut Vec<SubTasksState>> {
+    pub fn get_substates(&self) -> Option<&[SubTasksState]> {
         if let TaskCompleteness::Incomplete { substates } = self {
             Some(substates)
         } else {
             None
+        }
+    }
+    pub fn get_substates_mut(&mut self) -> Option<&mut [SubTasksState]> {
+        if let TaskCompleteness::Incomplete { substates } = self {
+            Some(substates)
+        } else {
+            None
+        }
+    }
+
+    pub fn get_substate(&self, worker: &PeerId) -> Option<&Assigned> {
+        if let TaskCompleteness::Incomplete { substates } = self {
+            substates
+                .iter()
+                .find(|s| s.as_ref().filter(|a| *a.worker() == *worker).is_some())
+                .map(|a| a.as_ref())
+                .flatten()
+        } else {
+            None
+        }
+    }
+    pub fn get_substate_mut(&mut self, worker: &PeerId) -> Option<&mut Assigned> {
+        if let TaskCompleteness::Incomplete { substates } = self {
+            substates
+                .iter_mut()
+                .find(|s| s.as_ref().filter(|a| *a.worker() == *worker).is_some())
+                .map(|a| a.as_mut())
+                .flatten()
+        } else {
+            None
+        }
+    }
+
+    pub fn get_nb_unassigned(&self) -> Option<usize> {
+        if let TaskCompleteness::Incomplete { substates } = self {
+            Some(substates.iter().filter(|a| a.is_none()).count())
+        } else {
+            None
+        }
+    }
+
+    pub fn unassign(&mut self, worker: &PeerId) -> Option<Assigned> {
+        if let TaskCompleteness::Incomplete { substates } = self {
+            substates
+                .iter_mut()
+                .find(|s| s.as_ref().filter(|a| *a.worker() == *worker).is_some())
+                .map(|a| a.take())
+                .flatten()
+        } else {
+            None
+        }
+    }
+
+    // TODO: proper error
+    pub fn assign(
+        &mut self,
+        worker: PeerId,
+        workers_manager: PeerId,
+        payment_info: WorkerPaymentInfo,
+    ) -> Result<(), String> {
+        // TODO: test already assign to it.
+        if let TaskCompleteness::Incomplete { substates } = self {
+            if substates
+                .iter()
+                .filter_map(|a| a.as_ref())
+                .any(|a| *a.worker() == worker)
+            {
+                if let Some(unassigned_slot) = substates.iter_mut().find(|a| a.is_none()) {
+                    unassigned_slot.replace(Assigned::new(worker, workers_manager, payment_info));
+                    Ok(())
+                } else {
+                    Err("No more available slots.".to_string())
+                }
+            } else {
+                Err("Worker already is assigned to this task.".to_string())
+            }
+        } else {
+            Err("Task already no more incomplete.".to_string())
         }
     }
 }
@@ -156,14 +263,6 @@ impl fmt::Display for TaskCompleteness {
                 String::from_utf8_lossy(result),
             ),
             _ => write!(f, "{:?}", self),
-        }
-    }
-}
-
-impl Default for TaskCompleteness {
-    fn default() -> Self {
-        TaskCompleteness::Incomplete {
-            substates: Vec::new(),
         }
     }
 }
@@ -183,19 +282,27 @@ pub struct Assigned {
 }
 
 impl Assigned {
-    pub fn new(
+    pub fn new(worker: PeerId, workers_manager: PeerId, payment_info: WorkerPaymentInfo) -> Self {
+        Assigned {
+            last_check_timestamp: SystemTime::now(),
+            worker,
+            workers_manager,
+            payment_info,
+        }
+    }
+
+    pub fn new_with_details(
         worker: PeerId,
         workers_manager: PeerId,
         worker_address: Address,
         worker_price: u64,
         network_price: u64,
     ) -> Self {
-        Assigned {
-            last_check_timestamp: SystemTime::now(),
+        Self::new(
             worker,
             workers_manager,
-            payment_info: WorkerPaymentInfo::new(worker_address, worker_price, network_price),
-        }
+            WorkerPaymentInfo::new(worker_address, worker_price, network_price),
+        )
     }
 
     pub fn last_check_timestamp(&self) -> SystemTime {
@@ -216,6 +323,11 @@ impl Assigned {
     pub fn into_payment_info(self) -> WorkerPaymentInfo {
         self.payment_info
     }
+    /// When unassigning, we need only the worker's and workers manager's PeerIds to
+    /// notify them to stop.
+    pub fn into_unassigned(self) -> (PeerId, PeerId) {
+        (self.worker, self.workers_manager)
+    }
 }
 
 impl fmt::Display for Assigned {
@@ -225,7 +337,7 @@ impl fmt::Display for Assigned {
 }
 
 /// Information needed to pay a worker.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct WorkerPaymentInfo {
     worker_address: Address,
     worker_price: u64,

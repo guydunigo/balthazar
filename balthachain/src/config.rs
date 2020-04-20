@@ -17,7 +17,7 @@ pub struct ChainConfig {
 impl Default for ChainConfig {
     fn default() -> Self {
         ChainConfig {
-            web3_ws: "ws://localhost:8546".to_string(),
+            web3_ws: "ws://127.0.0.1:8546".to_string(),
             ethereum_address: None,
             ethereum_password: None,
             contract_jobs: None,

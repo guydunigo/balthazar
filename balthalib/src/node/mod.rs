@@ -43,6 +43,7 @@ use store::{FetchStorage, StoragesWrapper};
 
 use super::{BalthazarConfig, Error};
 mod shared_state;
+use shared_state::Event as SharedStateEvent;
 
 const CHANNEL_SIZE: usize = 1024;
 
@@ -60,9 +61,12 @@ async fn get_keypair(keyfile_path: &Path) -> Result<Keypair, Error> {
 }
 */
 
+/// Internal events for Balthazar.
 #[derive(Debug)]
 enum Event {
-    ChainJobs(chain::JobsEvent),
+    SharedStateProposal(man::Proposal),
+    SharedStateChange(TaskId, shared_state::Event),
+    // ChainJobs(chain::JobsEvent),
     Swarm(net::EventOut),
     Error(Error),
     Log { kind: LogKind, msg: String },
@@ -104,75 +108,30 @@ impl fmt::Display for LogKind {
 #[derive(Clone)]
 struct Balthazar {
     config: Arc<BalthazarConfig>,
-    event_tx: Sender<Event>,
-    shared_state_tx: Sender<man::Proposal>,
+    inner_tx: Sender<Event>,
     swarm_in: Sender<net::EventIn>,
     shared_state: Arc<RwLock<SharedState>>,
-    // pending_tasks: Arc<RwLock<VecDeque<(TaskId, Option<PeerRc>)>>>,
+    // keypair: balthernet::identity::Keypair,
 }
-/*
-{
-    keypair: balthernet::identity::Keypair,
-    swarm_in: Sender<net::EventIn>,
-    store: StoragesWrapper,
-}
-*/
 
 impl Balthazar {
     fn new(
         config: BalthazarConfig,
-        event_tx: Sender<Event>,
-        shared_state_tx: Sender<man::Proposal>,
+        inner_tx: Sender<Event>,
         swarm_in: Sender<net::EventIn>,
     ) -> Self {
         Balthazar {
             config: Arc::new(config),
-            event_tx,
-            shared_state_tx,
+            inner_tx,
             swarm_in,
             shared_state: Arc::new(RwLock::new(SharedState::default())),
-            // pending_tasks: Arc::new(RwLock::new(VecDeque::new())),
         }
     }
-
-    /*
-    async fn pending_tasks<'a>(
-        &'a self,
-    ) -> impl 'a + std::ops::Deref<Target = VecDeque<(TaskId, Option<PeerRc>)>> {
-        self.pending_tasks.read().await
-    }
-
-    async fn pending_tasks_mut<'a>(
-        &'a self,
-    ) -> impl 'a + std::ops::DerefMut<Target = VecDeque<(TaskId, Option<PeerRc>)>> {
-        self.pending_tasks.write().await
-    }
-    */
 
     // TODO: re-create it each time ?
     fn chain(&self) -> Chain {
         Chain::new(self.config.chain())
     }
-
-    /*
-    /// Get the next task that doesn't have any worker.
-    async fn next_pending_task(&self) -> Option<TaskId> {
-        let mut pending_tasks = self.pending_tasks_mut().await;
-        let next_index =
-            pending_tasks
-                .iter()
-                .enumerate()
-                .find_map(|(i, (_, o))| if o.is_none() { Some(i) } else { None });
-        if let Some(i) = next_index {
-            let (t, _) = pending_tasks
-                .remove(i)
-                .expect("We just found the value, it should exists.");
-            Some(t)
-        } else {
-            None
-        }
-    }
-    */
 
     /*
     /// Returns a worker who isn't computing anything.
@@ -219,29 +178,25 @@ impl Balthazar {
         let node_type = *config.node_type();
         println!("Starting as {:?}...", node_type);
 
-        let (event_tx, event_rx) = channel(CHANNEL_SIZE);
-        let (shared_state_tx, shared_state_rx) = channel(CHANNEL_SIZE);
+        let (inner_tx, inner_rx) = channel(CHANNEL_SIZE);
 
         let specs = WorkerSpecs::default();
         let keypair = balthernet::identity::Keypair::generate_secp256k1();
         let (swarm_in, swarm_out) = net::get_swarm(keypair.clone(), config.net(), Some(&specs));
 
-        let balth = Balthazar::new(config, event_tx, shared_state_tx, swarm_in);
+        let balth = Balthazar::new(config, inner_tx, swarm_in);
 
         // TODO: concurrent ?
-        let channel_fut = event_rx.for_each(|e| balth.clone().handle_event(e));
+        let channel_fut = inner_rx.for_each(|e| balth.clone().handle_event(e));
         let ctrlc_fut = balth.clone().handle_ctrlc();
         let swarm_fut = swarm_out.for_each(|e| balth.clone().handle_swarm_event(e));
 
         if let NodeType::Manager = node_type {
             let chain_fut = balth.clone().handle_chain();
-            let shared_state_fut = balth.clone().handle_shared_state(shared_state_rx);
-
             select! {
                 res = chain_fut.fuse() => res?,
                 _ = swarm_fut.fuse() => (),
                 _ = channel_fut.fuse() => (),
-                _ = shared_state_fut.fuse() => (),
                 _ = ctrlc_fut.fuse() => (),
             }
         } else {
@@ -258,10 +213,15 @@ impl Balthazar {
 
     // TODO: ref as mutable ? or just clone tx ?
     async fn spawn_event(&self, event: Event) {
-        let mut tx = self.event_tx.clone();
+        let mut tx = self.inner_tx.clone();
         if let Err(e) = tx.send(event).await {
             panic!("{:?}", Error::EventChannelError(e));
         }
+    }
+
+    async fn spawn_shared_state_change(&self, task_id: TaskId, event: SharedStateEvent) {
+        self.spawn_event(Event::SharedStateChange(task_id, event))
+            .await;
     }
 
     async fn spawn_log(&self, kind: LogKind, msg: String) {
@@ -271,6 +231,7 @@ impl Balthazar {
     /// Handle all inner events.
     async fn handle_event(self, event: Event) {
         match event {
+            Event::SharedStateProposal(p) => self.check_and_apply_proposal(p).await,
             // Event::Swarm(e) => self.handle_swarm_event(e).await,
             // Event::ChainJobs(e) => self.handle_chain_event(e).await,
             Event::Log { .. } => eprintln!("{}", event),
@@ -297,35 +258,19 @@ impl Balthazar {
     }
 
     /// Handle events coming out of Swarm.
+    // TODO: update changes in the tasks in the SC which didn't come from us.
+    // We only react to TaskPending and really expect the SC doesn't change otherwise...
     async fn handle_chain_event(&self, event: chain::JobsEvent, local_address: Address) {
-        // TODO: update changes in the tasks in the SC which didn't come from us.
         self.spawn_log(LogKind::Blockchain, format!("{}", event))
             .await;
-        match event {
-            // let mut free_workers_iter = self.find_available_worker().await;
-            chain::JobsEvent::TaskPending { task_id } => {
-                let msg = man::Proposal {
-                    task_id: task_id.into_bytes(),
-                    payment_address: Vec::from(local_address.as_bytes()),
-                    proposal: Some(man::proposal::Proposal::NewTask(man::ProposeNewTask {})),
-                };
-                let mut shared_state_tx = self.shared_state_tx.clone();
-                shared_state_tx
-                    .send(msg)
-                    .await
-                    .expect("problem with shared_state_tx");
-            }
-            _ => (),
+        if let chain::JobsEvent::TaskPending { task_id } = event {
+            let msg = man::Proposal {
+                task_id: task_id.into_bytes(),
+                payment_address: Vec::from(local_address.as_bytes()),
+                proposal: Some(man::proposal::Proposal::NewTask(man::ProposeNewTask {})),
+            };
+            self.spawn_event(Event::SharedStateProposal(msg)).await;
         }
-    }
-
-    // Accepting everything...
-    // TODO: Channel out to send notif to wake up other parts ?
-    // TODO: check proof messages...
-    async fn handle_shared_state(self, shared_state_rx: Receiver<man::Proposal>) {
-        shared_state_rx
-            .for_each(|p| self.check_and_apply_proposal(p))
-            .await
     }
 
     /// Handle Interruption event when Ctrl+C is pressed.
