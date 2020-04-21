@@ -64,19 +64,19 @@ fn it_can_process_a_new_job() -> Result<(), Error> {
 
     let mut job = Job::new(
         ProgramKind::Wasm0m1n0,
-        vec!["/ipfs/QmZbABTQy1dHPrimGNhUeZKRnesiJ2RnMNJgDtc65KgnJv".to_string()],
-        try_decode_multibase_multihash_string("MGyC7DRF34gDhPAY8HzBm9qAIceHwy7n0pCItA1teasyEyg==")
+        vec!["/ipfs/QmXmuUXCJT7MZXYBRhBzAAgCPtXC5EqEi6RnaqzQET6PM4".to_string()],
+        try_decode_multibase_multihash_string("MGyC7/Hy16q+46UJozCiBUlU40Oyv6Q+Oha91qT3ixpoeAg==")
             .unwrap(),
         vec![b"1234".to_vec(), b"12345".to_vec(), b"404".to_vec()],
         conf.ethereum_address().unwrap(),
     );
     job.set_timeout(10);
-    job.set_max_worker_price(10);
-    job.set_max_network_usage(10);
+    job.set_max_worker_price(8);
+    job.set_max_network_usage(9);
     job.set_max_network_price(10);
     job.set_min_checking_interval(15);
-    job.set_management_price(10);
-    job.set_redundancy(5);
+    job.set_management_price(11);
+    job.set_redundancy(1);
     job.set_max_failures(5);
     job.set_is_program_pure(true);
 

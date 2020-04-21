@@ -38,6 +38,7 @@ impl HashId {
         &self.inner
     }
 
+    /// Get the bytes of the multihash including the self-describing part.
     pub fn as_bytes(&self) -> &[u8] {
         self.hash().as_bytes()
     }
@@ -47,13 +48,15 @@ impl HashId {
         Multihash::from_bytes(bytes)?.try_into()
     }
 
+    /// Get the bytes of the multihash including the self-describing part.
     pub fn into_bytes(self) -> Vec<u8> {
         self.inner.into_bytes()
     }
 
+    /// Takes the digest and make it into a 32 bytes array.
     pub fn to_bytes32(&self) -> [u8; 32] {
         let mut res = [0; HASH_SIZE];
-        res.copy_from_slice(&self.hash().as_bytes()[..HASH_SIZE]);
+        res.copy_from_slice(&self.hash().digest()[..HASH_SIZE]);
         res
     }
 

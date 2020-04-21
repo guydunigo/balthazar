@@ -484,7 +484,7 @@ impl Balthazar {
         Ok(actions)
     }
 
-    // TODO: check offers and all...
+    // TODO: check offers and all + no two twice the same worker...
     async fn handle_proposal_scheduling(
         &self,
         shared_state: &impl std::ops::Deref<Target = SharedState>,
@@ -509,8 +509,13 @@ impl Balthazar {
 
             let worker = PeerId::from_bytes(o.worker)
                 .map_err(|_| "Couln't parse worker PeerId.".to_string())?;
+
+            if task.get_substate(&worker).is_some() {
+                return Err("Worker already assigned to this task.".to_string());
+            }
+
             let workers_manager = PeerId::from_bytes(o.workers_manager)
-                .map_err(|_| "Couln't parse worker PeerId.".to_string())?;
+                .map_err(|_| "Couln't parse worker's manager PeerId.".to_string())?;
 
             offers_filtered.push(StateChange::Assign {
                 worker,

@@ -102,7 +102,7 @@ impl Default for NetConfig {
             bootstrap_peers: Vec::new(),
             node_type_configuration: NodeType::default().into(),
             manager_check_interval: Duration::from_secs(15),
-            manager_timeout: Duration::from_secs(10),
+            manager_timeout: Duration::from_secs(60),
         }
     }
 }

@@ -239,7 +239,7 @@ impl TaskCompleteness {
             if substates
                 .iter()
                 .filter_map(|a| a.as_ref())
-                .any(|a| *a.worker() == worker)
+                .all(|a| *a.worker() != worker)
             {
                 if let Some(unassigned_slot) = substates.iter_mut().find(|a| a.is_none()) {
                     unassigned_slot.replace(Assigned::new(worker, workers_manager, payment_info));

@@ -29,7 +29,7 @@ use misc::{
 };
 use proto::{
     manager as man,
-    worker::{TaskErrorKind, TaskExecute},
+    worker::{self, TaskErrorKind, TaskExecute},
     NodeType, TaskStatus,
 };
 use run::{Executor, WasmExecutor};
@@ -348,6 +348,31 @@ impl Balthazar {
                     ),
                 )
                 .await;
+                if let TaskStatus::Completed(_) = status {
+                    let mut workers = self.workers.write().await;
+                    workers.iter_mut()
+                        .find_map(|(w,p)| if *w == peer_id { Some(p) } else { None })
+                        .expect("Worker unknown.").take().take();
+                    let chain = self.chain();
+                    let local_address = chain.local_address().unwrap();
+                    let msg = man::Proposal {
+                        task_id: task_id.clone().into_bytes(),
+                        payment_address: Vec::from(local_address.as_bytes()),
+                        proposal: Some(man::proposal::Proposal::Completed(man::ProposeCompleted {
+                            completion_signals_senders: Vec::new(),
+                            completion_signals: Vec::new(),
+                            selected_result: Some(man::ManTaskStatus {
+                                task_id: task_id.clone().into_bytes(),
+                                worker: peer_id.into_bytes(),
+                                status: Some(worker::TaskStatus {
+                                    task_id: task_id.into_bytes(),
+                                    status_data: status.into(),
+                                }),
+                            }),
+                        })),
+                    };
+                    self.spawn_event(Event::SharedStateProposal(msg)).await;
+                }
             }
             (NodeType::Worker, net::EventOut::TasksExecute(mut tasks)) => {
                 for task in tasks.drain(..) {
@@ -503,6 +528,8 @@ impl Balthazar {
                             let mut offer = man::Offer::default();
                             offer.task_id = task_id.clone().into_bytes();
                             offer.worker = peer_id.clone().into_bytes();
+                            // TODO: our address
+                            offer.workers_manager = peer_id.clone().into_bytes();
                             offer.payment_address = Vec::from(local_address.as_bytes());
                             offer.worker_price = 1;
                             offer.network_price = 1;
@@ -526,7 +553,6 @@ impl Balthazar {
                 }
             }
             SharedStateEvent::Assigned { worker } => {
-                eprintln!("Assigned!");
                 let (job_id, _) = chain.jobs_get_task(&task_id, true).await?;
                 let other_data = chain.jobs_get_other_data(&job_id, true).await?;
                 let (timeout, _, _) = chain.jobs_get_parameters(&job_id, true).await?;
@@ -548,8 +574,8 @@ impl Balthazar {
                 .await;
             }
             SharedStateEvent::Unassigned {
-                worker,
-                workers_manager,
+                worker: _,
+                workers_manager: _,
             } => (),
         }
         Ok(())

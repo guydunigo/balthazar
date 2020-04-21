@@ -397,8 +397,8 @@ impl<'a> Chain<'a> {
             (
                 job_id_32,
                 job.timeout(),
-                job.max_failures(),
                 job.redundancy(),
+                job.max_failures(),
             ),
             *addr,
             Default::default(),
