@@ -73,7 +73,7 @@ impl StoragesWrapper {
     /// assert_eq!(storage_type, StorageType::Ipfs);
     ///
     /// ```
-    pub fn get_storage_type_based_on_address(&self, addr: &[u8]) -> StorageType {
+    pub fn get_storage_type_based_on_address(&self, addr: &str) -> StorageType {
         match Multiaddr::try_from(addr.to_owned()) {
             Ok(multiaddr) => match multiaddr.iter().next() {
                 Some(Protocol::P2p(_)) => StorageType::Ipfs,
@@ -84,7 +84,7 @@ impl StoragesWrapper {
     }
 
     /// Returns the [`StoreStorage`] corresponding to the [`get_storage_type_based_on_address`](`StoragesWrapper::get_storage_type_based_on_address`) answer.
-    pub fn get_storage_based_on_address(&self, addr: &[u8]) -> &dyn StoreStorage {
+    pub fn get_storage_based_on_address(&self, addr: &str) -> &dyn StoreStorage {
         let storage_type = self.get_storage_type_based_on_address(addr);
         self.storage_type_to_storage(&storage_type)
     }
@@ -93,11 +93,11 @@ impl StoragesWrapper {
 impl FetchStorage for StoragesWrapper {
     /// Tries to determine automatically the best [`StoreStorage`] to retrieve data at `addr`
     /// using [`get_storage_type_based_on_address`](`StoragesWrapper::get_storage_type_based_on_address`).
-    fn fetch_stream(&self, addr: &[u8]) -> BoxStream<Result<Bytes, Box<dyn Error + Send>>> {
+    fn fetch_stream(&self, addr: &str) -> BoxStream<Result<Bytes, Box<dyn Error + Send>>> {
         self.get_storage_based_on_address(addr).fetch_stream(addr)
     }
 
-    fn get_size(&self, addr: &[u8]) -> BoxFuture<Result<u64, Box<dyn Error + Send>>> {
+    fn get_size(&self, addr: &str) -> BoxFuture<Result<u64, Box<dyn Error + Send>>> {
         self.get_storage_based_on_address(addr).get_size(addr)
     }
 }
@@ -107,7 +107,7 @@ impl StoreStorage for StoragesWrapper {
     fn store_stream(
         &self,
         data_stream: GenericReader,
-    ) -> BoxFuture<Result<Vec<u8>, Box<dyn Error + Send>>> {
+    ) -> BoxFuture<Result<String, Box<dyn Error + Send>>> {
         self.default_storage().store_stream(data_stream)
     }
 }
@@ -116,15 +116,15 @@ impl StoreStorage for StoragesWrapper {
 mod tests {
     use super::*;
 
-    fn check_correct_type_based_on_address(addr: Vec<u8>, expected_type: StorageType) {
+    fn check_correct_type_based_on_address(addr: &str, expected_type: StorageType) {
         let wrapper = StoragesWrapper::default();
-        let storage_type = wrapper.get_storage_type_based_on_address(&addr);
+        let storage_type = wrapper.get_storage_type_based_on_address(&addr[..]);
         assert_eq!(storage_type, expected_type);
     }
 
     #[test]
     fn it_chooses_the_correct_storage_type_based_on_address() {
-        let addr = Vec::from(&b"/ipfs/QmPZ9gcCEpqKTo6aq61g2nXGUhM4iCL3ewB6LDXZCtioEB"[..]);
+        let addr = "/ipfs/QmPZ9gcCEpqKTo6aq61g2nXGUhM4iCL3ewB6LDXZCtioEB";
         check_correct_type_based_on_address(addr, StorageType::Ipfs);
     }
 }

@@ -475,7 +475,7 @@ impl std::convert::TryInto<(RunMode, BalthazarConfig)> for BalthazarArgs {
 
                 if let (Some(wasm), Some(args)) = (wasm_file_addr, args) {
                     config.set_wasm(Some((
-                        wasm.into_bytes(),
+                        wasm,
                         args.iter().map(|a| a.clone().into_bytes()).collect(),
                     )));
                 }

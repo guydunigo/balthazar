@@ -69,9 +69,9 @@ impl IpfsStorage {
 }
 
 impl FetchStorage for IpfsStorage {
-    fn fetch_stream(&self, addr: &[u8]) -> BoxStream<Result<Bytes, Box<dyn Error + Send>>> {
+    fn fetch_stream(&self, addr: &str) -> BoxStream<Result<Bytes, Box<dyn Error + Send>>> {
         self.ipfs_client
-            .cat(&String::from_utf8_lossy(addr)[..])
+            .cat(addr)
             .map_err(|e| {
                 let error: Box<dyn Error + Send> = Box::new(IpfsApiResponseError::from(e));
                 error
@@ -82,7 +82,7 @@ impl FetchStorage for IpfsStorage {
     // TODO: fetch downloads the file first, worst solution but only one found which returns
     // exactly correct size...
     // TODO: object_stat size isn't exact file size... how to do that without downloading data ?
-    fn get_size(&self, addr: &[u8]) -> BoxFuture<Result<u64, Box<dyn Error + Send>>> {
+    fn get_size(&self, addr: &str) -> BoxFuture<Result<u64, Box<dyn Error + Send>>> {
         // TODO: utterly ugly and disgusting :'P
         /*
         let addr = String::from_utf8_lossy(addr).to_string();
@@ -101,7 +101,7 @@ impl FetchStorage for IpfsStorage {
                 })
         }.boxed()
         */
-        let addr = Vec::from(addr);
+        let addr = String::from(addr);
         async move {
             self.fetch(&addr[..], 1_000_000)
                 .await
@@ -115,12 +115,12 @@ impl StoreStorage for IpfsStorage {
     fn store_stream(
         &self,
         data_stream: GenericReader,
-    ) -> BoxFuture<Result<Vec<u8>, Box<dyn Error + Send>>> {
+    ) -> BoxFuture<Result<String, Box<dyn Error + Send>>> {
         let new_client = self.inner().clone();
         async move {
             let res = new_client.add(data_stream).await;
             match res {
-                Ok(res) => Ok(format!("/ipfs/{}", res.name).into()),
+                Ok(res) => Ok(format!("/ipfs/{}", res.name)),
                 Err(error) => {
                     let error: Box<dyn Error + Send> = Box::new(IpfsApiResponseError::from(error));
                     Err(error)
@@ -138,11 +138,11 @@ mod tests {
     use std::fs;
     use tokio::runtime::Runtime;
 
-    const TEST_FILE: &[u8] = b"/ipfs/QmPZ9gcCEpqKTo6aq61g2nXGUhM4iCL3ewB6LDXZCtioEB";
-    // const TEST_FILE_2: &[u8] = b"/ipfs/QmXfbZ7H946MeecTWZqcdWKnPwudcqcokTFctJ5LeqMDK3";
+    const TEST_FILE: &str = "/ipfs/QmPZ9gcCEpqKTo6aq61g2nXGUhM4iCL3ewB6LDXZCtioEB";
+    // const TEST_FILE_2: &str = b"/ipfs/QmXfbZ7H946MeecTWZqcdWKnPwudcqcokTFctJ5LeqMDK3";
 
     fn get_test_file_name() -> String {
-        format!("{}{}", TEST_DIR, String::from_utf8_lossy(TEST_FILE))
+        format!("{}{}", TEST_DIR, TEST_FILE)
     }
 
     #[test]
@@ -151,7 +151,7 @@ mod tests {
 
         Runtime::new()
             .unwrap()
-            .block_on(storage.fetch(&TEST_FILE[..], 1_000_000))
+            .block_on(storage.fetch(TEST_FILE, 1_000_000))
             .unwrap();
     }
 

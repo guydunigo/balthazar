@@ -6,16 +6,11 @@
 extern crate async_ctrlc;
 
 use futures::{
-    channel::{
-        mpsc::{channel, Receiver, Sender},
-        oneshot,
-    },
-    future, select, FutureExt, SinkExt, Stream, StreamExt,
+    channel::mpsc::{channel, Sender},
+    future, join, select, FutureExt, SinkExt, StreamExt,
 };
 use std::{
     borrow::Cow,
-    collections::{HashMap, HashSet, VecDeque},
-    convert::TryFrom,
     fmt,
     future::Future,
     pin::Pin,
@@ -25,14 +20,13 @@ use std::{
 use tokio::{runtime::Runtime, sync::RwLock};
 
 use async_ctrlc::CtrlC;
-use chain::{Chain, JobsEvent};
+use chain::Chain;
 use misc::{
-    job::{try_bytes_to_address, Address, DefaultHash, JobId, ProgramKind, TaskId},
-    multihash::{Keccak256, Multihash},
-    shared_state::{SharedState, Task, TaskCompleteness},
+    job::{Address, DefaultHash, ProgramKind, TaskId},
+    multihash::Keccak256,
+    shared_state::{PeerId, SharedState},
     WorkerSpecs,
 };
-use net::PeerRc;
 use proto::{
     manager as man,
     worker::{TaskErrorKind, TaskExecute},
@@ -67,7 +61,7 @@ enum Event {
     SharedStateProposal(man::Proposal),
     SharedStateChange(TaskId, shared_state::Event),
     // ChainJobs(chain::JobsEvent),
-    Swarm(net::EventOut),
+    // Swarm(net::EventOut),
     Error(Error),
     Log { kind: LogKind, msg: String },
 }
@@ -88,7 +82,7 @@ enum LogKind {
     Manager,
     Blockchain,
     SharedState,
-    Error,
+    // Error,
 }
 
 impl fmt::Display for LogKind {
@@ -99,18 +93,21 @@ impl fmt::Display for LogKind {
             LogKind::Manager => "M",
             LogKind::Blockchain => "B",
             LogKind::SharedState => "T",
-            LogKind::Error => "E",
+            // LogKind::Error => "E",
         };
         write!(fmt, "{}", letter)
     }
 }
 
 #[derive(Clone)]
+#[allow(clippy::type_complexity)]
 struct Balthazar {
     config: Arc<BalthazarConfig>,
     inner_tx: Sender<Event>,
     swarm_in: Sender<net::EventIn>,
     shared_state: Arc<RwLock<SharedState>>,
+    // TODO: Avoid creating that when not used?
+    workers: Arc<RwLock<Vec<(PeerId, Option<TaskId>)>>>,
     // keypair: balthernet::identity::Keypair,
 }
 
@@ -125,6 +122,7 @@ impl Balthazar {
             inner_tx,
             swarm_in,
             shared_state: Arc::new(RwLock::new(SharedState::default())),
+            workers: Arc::new(RwLock::new(Vec::new())),
         }
     }
 
@@ -187,7 +185,14 @@ impl Balthazar {
         let balth = Balthazar::new(config, inner_tx, swarm_in);
 
         // TODO: concurrent ?
-        let channel_fut = inner_rx.for_each(|e| balth.clone().handle_event(e));
+        // TODO: looks dirty, is it ?
+        let mut stream = Box::pin(
+            inner_rx
+                .then(|e| balth.clone().handle_event(e))
+                .skip_while(|r| futures::future::ready(r.is_ok())),
+        );
+        let channel_fut = stream.next();
+
         let ctrlc_fut = balth.clone().handle_ctrlc();
         let swarm_fut = swarm_out.for_each(|e| balth.clone().handle_swarm_event(e));
 
@@ -196,13 +201,13 @@ impl Balthazar {
             select! {
                 res = chain_fut.fuse() => res?,
                 _ = swarm_fut.fuse() => (),
-                _ = channel_fut.fuse() => (),
+                res = channel_fut.fuse() => res.expect("Channel stream ended but there was no error.")?,
                 _ = ctrlc_fut.fuse() => (),
             }
         } else {
             select! {
                 _ = swarm_fut.fuse() => (),
-                _ = channel_fut.fuse() => (),
+                res = channel_fut.fuse() => res.expect("Channel stream ended but there was no error.")?,
                 _ = ctrlc_fut.fuse() => (),
             }
         }
@@ -229,14 +234,18 @@ impl Balthazar {
     }
 
     /// Handle all inner events.
-    async fn handle_event(self, event: Event) {
+    async fn handle_event(self, event: Event) -> Result<(), Error> {
         match event {
             Event::SharedStateProposal(p) => self.check_and_apply_proposal(p).await,
+            Event::SharedStateChange(task_id, event) => {
+                self.handle_shared_state_change(task_id, event).await?
+            }
             // Event::Swarm(e) => self.handle_swarm_event(e).await,
             // Event::ChainJobs(e) => self.handle_chain_event(e).await,
             Event::Log { .. } => eprintln!("{}", event),
             _ => unimplemented!(),
         }
+        Ok(())
     }
 
     /// Handle events coming out of smart-contracts.
@@ -248,7 +257,7 @@ impl Balthazar {
             .await?
             .for_each(|e| async {
                 match e {
-                    Ok(evt) => self.clone().handle_chain_event(evt, *addr).await,
+                    Ok(evt) => self.clone().handle_chain_event(evt, addr).await,
                     Err(e) => self.spawn_event(Event::Error(e.into())).await,
                 }
             })
@@ -260,7 +269,7 @@ impl Balthazar {
     /// Handle events coming out of Swarm.
     // TODO: update changes in the tasks in the SC which didn't come from us.
     // We only react to TaskPending and really expect the SC doesn't change otherwise...
-    async fn handle_chain_event(&self, event: chain::JobsEvent, local_address: Address) {
+    async fn handle_chain_event(&self, event: chain::JobsEvent, local_address: &Address) {
         self.spawn_log(LogKind::Blockchain, format!("{}", event))
             .await;
         if let chain::JobsEvent::TaskPending { task_id } = event {
@@ -293,46 +302,35 @@ impl Balthazar {
     async fn handle_swarm_event(self, event: net::EventOut) {
         match (self.config.node_type(), event) {
             (NodeType::Manager, net::EventOut::WorkerNew(peer_id)) => {
+                {
+                    let mut workers = self.workers.write().await;
+                    workers.push((peer_id.clone(), None));
+                }
                 self.spawn_log(
                     LogKind::Swarm,
                     format!("event: {:?}", net::EventOut::WorkerNew(peer_id.clone())),
                 )
                 .await;
                 if let Some((wasm, args)) = self.config.wasm() {
-                    let storage = StoragesWrapper::default();
-                    let program_data = storage.fetch(&wasm[..], 1_000_000).await.unwrap();
-                    let program_hash = DefaultHash::digest(&program_data[..]).into_bytes();
-                    let tasks = args
-                        .iter()
-                        .cloned()
-                        .enumerate()
-                        .map(|(i, argument)| TaskExecute {
-                            task_id: Keccak256::digest(&i.to_be_bytes()[..]).into_bytes(),
-                            program_addresses: vec![wasm.clone()],
-                            program_hash: program_hash.clone(),
-                            program_kind: ProgramKind::Wasm0m1n0.into(),
-                            argument,
-                            timeout: 100,
-                            max_network_usage: 100,
-                        })
-                        .collect();
-                    let args_str: Vec<Cow<str>> = args
-                        .iter()
-                        .map(|a| String::from_utf8_lossy(&a[..]))
-                        .collect();
-                    self.spawn_log(
-                        LogKind::Manager,
-                        format!(
-                            "Sending task `{}` with parameters {:?} to worker `{}`",
-                            String::from_utf8_lossy(wasm),
-                            args_str,
-                            peer_id
-                        ),
-                    )
-                    .await;
-                    self.send_msg_to_behaviour(net::EventIn::TasksExecute(peer_id, tasks))
-                        .await
+                    self.send_manual_task(peer_id, wasm.clone(), args).await;
                 }
+            }
+            (NodeType::Manager, net::EventOut::WorkerBye(peer_id)) => {
+                {
+                    let mut workers = self.workers.write().await;
+                    if let Some((id, _)) = workers
+                        .iter()
+                        .enumerate()
+                        .find(|(_, (worker_id, _))| *worker_id == peer_id)
+                    {
+                        workers.remove(id);
+                    }
+                }
+                self.spawn_log(
+                    LogKind::Swarm,
+                    format!("event: {:?}", net::EventOut::WorkerBye(peer_id.clone())),
+                )
+                .await;
             }
             (
                 NodeType::Manager,
@@ -362,8 +360,7 @@ impl Balthazar {
                     ))
                     .await;
                     let storage = StoragesWrapper::default();
-                    let string_program_address =
-                        String::from_utf8_lossy(&task.program_addresses[0][..]);
+                    let string_program_address = &task.program_addresses[0][..];
                     let string_argument = String::from_utf8_lossy(&task.argument[..]);
 
                     self.spawn_log(
@@ -479,5 +476,116 @@ impl Balthazar {
                     .await;
             }
         }
+    }
+
+    async fn handle_shared_state_change(
+        &self,
+        task_id: TaskId,
+        event: SharedStateEvent,
+    ) -> Result<(), Error> {
+        let chain = self.chain();
+        let local_address = chain.local_address()?;
+        match event {
+            SharedStateEvent::Pending => {
+                let (shared_state, workers) = join!(self.shared_state.read(), self.workers.read());
+
+                if workers.len() > 0 {
+                    let task = shared_state.tasks.get(&task_id).expect("Unknown task.");
+                    let nb_unassigned = task.get_nb_unassigned().expect("Task not incomplete.");
+
+                    let selected_offers: Vec<_> = workers
+                        .iter()
+                        .filter_map(
+                            |(peer_id, opt)| if opt.is_some() { None } else { Some(peer_id) },
+                        )
+                        .take(nb_unassigned)
+                        .map(|peer_id| {
+                            let mut offer = man::Offer::default();
+                            offer.task_id = task_id.clone().into_bytes();
+                            offer.worker = peer_id.clone().into_bytes();
+                            offer.payment_address = Vec::from(local_address.as_bytes());
+                            offer.worker_price = 1;
+                            offer.network_price = 1;
+                            offer
+                        })
+                        .collect();
+
+                    // TODO: check workers specs, for now we expect them all to have the same...
+                    let msg = man::Proposal {
+                        task_id: task_id.into_bytes(),
+                        payment_address: Vec::from(local_address.as_bytes()),
+                        proposal: Some(man::proposal::Proposal::Scheduling(
+                            man::ProposeScheduling {
+                                all_offers_senders: Vec::new(),
+                                all_offers: Vec::new(),
+                                selected_offers,
+                            },
+                        )),
+                    };
+                    self.spawn_event(Event::SharedStateProposal(msg)).await;
+                }
+            }
+            SharedStateEvent::Assigned { worker } => {
+                eprintln!("Assigned!");
+                let (job_id, _) = chain.jobs_get_task(&task_id, true).await?;
+                let other_data = chain.jobs_get_other_data(&job_id, true).await?;
+                let (timeout, _, _) = chain.jobs_get_parameters(&job_id, true).await?;
+                let (_, max_network_usage, _) =
+                    chain.jobs_get_worker_parameters(&job_id, true).await?;
+                let argument = chain.jobs_get_argument(&task_id, true).await?;
+                self.send_msg_to_behaviour(net::EventIn::TasksExecute(
+                    worker,
+                    vec![TaskExecute {
+                        task_id: task_id.into_bytes(),
+                        program_addresses: other_data.program_addresses,
+                        program_hash: other_data.program_hash,
+                        program_kind: other_data.program_kind,
+                        argument,
+                        timeout,
+                        max_network_usage,
+                    }],
+                ))
+                .await;
+            }
+            SharedStateEvent::Unassigned {
+                worker,
+                workers_manager,
+            } => (),
+        }
+        Ok(())
+    }
+
+    async fn send_manual_task(&self, peer_id: PeerId, wasm: String, args: &[Vec<u8>]) {
+        let storage = StoragesWrapper::default();
+        let program_data = storage.fetch(&wasm[..], 1_000_000).await.unwrap();
+        let program_hash = DefaultHash::digest(&program_data[..]).into_bytes();
+        let tasks = args
+            .iter()
+            .cloned()
+            .enumerate()
+            .map(|(i, argument)| TaskExecute {
+                task_id: Keccak256::digest(&i.to_be_bytes()[..]).into_bytes(),
+                program_addresses: vec![wasm.clone()],
+                program_hash: program_hash.clone(),
+                program_kind: ProgramKind::Wasm0m1n0.into(),
+                argument,
+                timeout: 100,
+                max_network_usage: 100,
+            })
+            .collect();
+        let args_str: Vec<Cow<str>> = args
+            .iter()
+            .map(|a| String::from_utf8_lossy(&a[..]))
+            .collect();
+        self.spawn_log(
+            LogKind::Manager,
+            format!(
+                "Sending task `{}` with parameters {:?} to worker `{}`",
+                wasm, args_str, peer_id
+            ),
+        )
+        .await;
+        self.send_msg_to_behaviour(net::EventIn::TasksExecute(peer_id, tasks))
+            .await
     }
 }

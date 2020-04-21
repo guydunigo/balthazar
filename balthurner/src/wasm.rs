@@ -290,7 +290,7 @@ impl Executor for WasmExecutor {
     /// the program and download it.
     fn download_program<'a>(
         &'a mut self,
-        address: &'a [u8],
+        address: &'a str,
         max_size: u64,
     ) -> BoxFuture<'a, Result<Vec<u8>, ()>> {
         // TODO: forward storage parameters

@@ -64,7 +64,7 @@ message ManagerPong {}
 message TasksExecute {
  message TaskExecute {
   bytes task_id = 1;
-  repeated bytes program_addresses = 2;
+  repeated string program_addresses = 2;
   bytes program_hash = 3;
   ProgramKind program_kind = 4;
   bytes argument = 5;

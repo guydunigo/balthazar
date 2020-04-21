@@ -39,7 +39,7 @@ impl HashId {
     }
 
     pub fn as_bytes(&self) -> &[u8] {
-        self.hash().digest()
+        self.hash().as_bytes()
     }
 
     /// From bytes of a multihash.
@@ -53,7 +53,7 @@ impl HashId {
 
     pub fn to_bytes32(&self) -> [u8; 32] {
         let mut res = [0; HASH_SIZE];
-        res.copy_from_slice(&self.hash().digest()[..HASH_SIZE]);
+        res.copy_from_slice(&self.hash().as_bytes()[..HASH_SIZE]);
         res
     }
 

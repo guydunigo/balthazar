@@ -82,6 +82,9 @@ impl Task {
     pub fn get_substate_mut(&mut self, worker: &PeerId) -> Option<&mut Assigned> {
         self.completeness.get_substate_mut(worker)
     }
+    pub fn get_nb_unassigned(&self) -> Option<usize> {
+        self.completeness.get_nb_unassigned()
+    }
 
     pub fn unassign(&mut self, worker: &PeerId) -> Option<Assigned> {
         self.completeness.unassign(worker)
