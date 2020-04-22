@@ -423,7 +423,7 @@ contract Jobs {
                                    new uint64[](0),
                                    new uint64[](0),
                                    */
-                                   TaskDefiniteErrorKind.Unknown,
+                                   TaskDefiniteErrorKind.TimedOut, // Don't care of the value
                                    true);
             emit TaskPending(task_id);
         }

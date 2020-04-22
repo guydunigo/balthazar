@@ -103,8 +103,9 @@ impl fmt::Display for LogKind {
 #[allow(clippy::type_complexity)]
 struct Balthazar {
     config: Arc<BalthazarConfig>,
-    inner_tx: Sender<Event>,
+    inner_in: Sender<Event>,
     swarm_in: Sender<net::EventIn>,
+    runner_in: Sender<worker::TaskExecute>,
     shared_state: Arc<RwLock<SharedState>>,
     // TODO: Avoid creating that when not used?
     workers: Arc<RwLock<Vec<(PeerId, Option<TaskId>)>>>,
@@ -114,13 +115,15 @@ struct Balthazar {
 impl Balthazar {
     fn new(
         config: BalthazarConfig,
-        inner_tx: Sender<Event>,
+        inner_in: Sender<Event>,
         swarm_in: Sender<net::EventIn>,
+        runner_in: Sender<worker::TaskExecute>,
     ) -> Self {
         Balthazar {
             config: Arc::new(config),
-            inner_tx,
+            inner_in,
             swarm_in,
+            runner_in,
             shared_state: Arc::new(RwLock::new(SharedState::default())),
             workers: Arc::new(RwLock::new(Vec::new())),
         }
@@ -176,37 +179,43 @@ impl Balthazar {
         let node_type = *config.node_type();
         println!("Starting as {:?}...", node_type);
 
-        let (inner_tx, inner_rx) = channel(CHANNEL_SIZE);
-
         let specs = WorkerSpecs::default();
         let keypair = balthernet::identity::Keypair::generate_secp256k1();
-        let (swarm_in, swarm_out) = net::get_swarm(keypair.clone(), config.net(), Some(&specs));
 
-        let balth = Balthazar::new(config, inner_tx, swarm_in);
+        let (swarm_in, swarm_out) = net::get_swarm(keypair.clone(), config.net(), Some(&specs));
+        let (inner_in, inner_out) = channel(CHANNEL_SIZE);
+        let (runner_in, runner_out) = channel(CHANNEL_SIZE);
+
+        let balth = Balthazar::new(config, inner_in, swarm_in, runner_in);
 
         // TODO: concurrent ?
         // TODO: looks dirty, is it ?
         let mut stream = Box::pin(
-            inner_rx
+            inner_out
                 .then(|e| balth.clone().handle_event(e))
                 .skip_while(|r| futures::future::ready(r.is_ok())),
         );
         let channel_fut = stream.next();
 
         let ctrlc_fut = balth.clone().handle_ctrlc();
+        // TODO: concurrent ?
         let swarm_fut = swarm_out.for_each(|e| balth.clone().handle_swarm_event(e));
+        // TODO: actually use concurrent?
+        let runner_fut = runner_out.for_each_concurrent(None, |t| balth.handle_runner(t));
 
         if let NodeType::Manager = node_type {
-            let chain_fut = balth.clone().handle_chain();
+            let chain_fut = balth.handle_chain();
             select! {
                 res = chain_fut.fuse() => res?,
                 _ = swarm_fut.fuse() => (),
+                _ = runner_fut.fuse() => (),
                 res = channel_fut.fuse() => res.expect("Channel stream ended but there was no error.")?,
                 _ = ctrlc_fut.fuse() => (),
             }
         } else {
             select! {
                 _ = swarm_fut.fuse() => (),
+                _ = runner_fut.fuse() => (),
                 res = channel_fut.fuse() => res.expect("Channel stream ended but there was no error.")?,
                 _ = ctrlc_fut.fuse() => (),
             }
@@ -218,7 +227,7 @@ impl Balthazar {
 
     // TODO: ref as mutable ? or just clone tx ?
     async fn spawn_event(&self, event: Event) {
-        let mut tx = self.inner_tx.clone();
+        let mut tx = self.inner_in.clone();
         if let Err(e) = tx.send(event).await {
             panic!("{:?}", Error::EventChannelError(e));
         }
@@ -249,7 +258,7 @@ impl Balthazar {
     }
 
     /// Handle events coming out of smart-contracts.
-    async fn handle_chain(self) -> Result<(), Error> {
+    async fn handle_chain(&self) -> Result<(), Error> {
         let chain = self.chain();
         let addr = chain.local_address()?;
         chain
@@ -298,7 +307,129 @@ impl Balthazar {
         }
     }
 
+    /// Delete known worker and if it were assigned, announce it unassigned.
+    async fn delete_worker(&self, peer_id: PeerId) {
+        let mut workers = self.workers.write().await;
+        if let Some((id, (_, assignment_opt))) = workers
+            .iter()
+            .enumerate()
+            .find(|(_, (worker_id, _))| *worker_id == peer_id)
+        {
+            // Declare any tasks it was doing as Aborted.
+            if let Some(task_id) = assignment_opt {
+                let shared_state = self.shared_state.read().await;
+
+                let chain = self.chain();
+                let local_address = chain.local_address().unwrap();
+
+                let task = shared_state.tasks.get(&task_id).expect("Unknown task.");
+
+                let msg = man::Proposal {
+                    task_id: task_id.clone().into_bytes(),
+                    payment_address: Vec::from(local_address.as_bytes()),
+                    proposal: Some(man::proposal::Proposal::Failure(man::ProposeFailure {
+                        new_nb_failures: task.nb_failures(),
+                        kind: Some(man::propose_failure::Kind::Worker(
+                            man::ProposeFailureWorker {
+                                original_message_sender: Vec::new(),
+                                original_message: Some(man::ManTaskStatus {
+                                    task_id: task_id.clone().into_bytes(),
+                                    worker: peer_id.clone().into_bytes(),
+                                    status: Some(worker::TaskStatus {
+                                        task_id: task_id.clone().into_bytes(),
+                                        status_data: Some(worker::task_status::StatusData::Error(
+                                            worker::TaskErrorKind::Aborted.into(),
+                                        )),
+                                    }),
+                                }),
+                            },
+                        )),
+                    })),
+                };
+                self.spawn_event(Event::SharedStateProposal(msg)).await;
+            }
+
+            workers.remove(id);
+        } else {
+            panic!("Unknown worker.");
+        }
+    }
+
+    /// Handle a new task status from a worker.
+    async fn handle_task_status(&self, peer_id: PeerId, task_id: TaskId, status: TaskStatus) {
+        match status {
+            TaskStatus::Completed(_) | TaskStatus::Error(_) => (),
+            _ => return, // No need for handling for now.
+        }
+
+        let mut workers = self.workers.write().await;
+        workers
+            .iter_mut()
+            .find_map(|(w, p)| if *w == peer_id { Some(p) } else { None })
+            .expect("Worker unknown.")
+            .take()
+            .take();
+
+        let chain = self.chain();
+        let local_address = chain.local_address().unwrap();
+
+        let proposal = match status {
+            TaskStatus::Completed(_) => man::proposal::Proposal::Completed(man::ProposeCompleted {
+                completion_signals_senders: Vec::new(),
+                completion_signals: Vec::new(),
+                selected_result: Some(man::ManTaskStatus {
+                    task_id: task_id.clone().into_bytes(),
+                    worker: peer_id.into_bytes(),
+                    status: Some(worker::TaskStatus {
+                        task_id: task_id.clone().into_bytes(),
+                        status_data: status.into(),
+                    }),
+                }),
+            }),
+            TaskStatus::Error(reason) => {
+                let shared_state = self.shared_state.read().await;
+
+                let task = shared_state.tasks.get(&task_id).expect("Unknown task.");
+                let nb_failures_diff = {
+                    use TaskErrorKind::*;
+
+                    match reason {
+                        Aborted | Unknown => 0,
+                        TimedOut | Download | Runtime => 1,
+                    }
+                };
+
+                man::proposal::Proposal::Failure(man::ProposeFailure {
+                    new_nb_failures: task.nb_failures() + nb_failures_diff,
+                    kind: Some(man::propose_failure::Kind::Worker(
+                        man::ProposeFailureWorker {
+                            original_message_sender: Vec::new(),
+                            original_message: Some(man::ManTaskStatus {
+                                task_id: task_id.clone().into_bytes(),
+                                worker: peer_id.into_bytes(),
+                                status: Some(worker::TaskStatus {
+                                    task_id: task_id.clone().into_bytes(),
+                                    status_data: status.into(),
+                                }),
+                            }),
+                        },
+                    )),
+                })
+            }
+            _ => unreachable!(),
+        };
+
+        let msg = man::Proposal {
+            task_id: task_id.into_bytes(),
+            payment_address: Vec::from(local_address.as_bytes()),
+            proposal: Some(proposal),
+        };
+        self.spawn_event(Event::SharedStateProposal(msg)).await;
+    }
+
     /// Handle events coming out of Swarm.
+    ///
+    /// > **Note:** Each action here should be very quick, otherwise it the whole swarm will pause.
     async fn handle_swarm_event(self, event: net::EventOut) {
         match (self.config.node_type(), event) {
             (NodeType::Manager, net::EventOut::WorkerNew(peer_id)) => {
@@ -315,63 +446,14 @@ impl Balthazar {
                     self.send_manual_task(peer_id, wasm.clone(), args).await;
                 }
             }
-            (NodeType::Manager, net::EventOut::WorkerBye(peer_id)) => {
-                {
-                    let mut workers = self.workers.write().await;
-                    if let Some((id, (_, assignment_opt))) = workers
-                        .iter()
-                        .enumerate()
-                        .find(|(_, (worker_id, _))| *worker_id == peer_id)
-                    {
-                        // Declare any tasks it was doing as Aborted.
-                        if let Some(task_id) = assignment_opt {
-                            let shared_state = self.shared_state.read().await;
-
-                            let chain = self.chain();
-                            let local_address = chain.local_address().unwrap();
-
-                            let task = shared_state.tasks.get(&task_id).expect("Unknown task.");
-
-                            let msg = man::Proposal {
-                                task_id: task_id.clone().into_bytes(),
-                                payment_address: Vec::from(local_address.as_bytes()),
-                                proposal: Some(man::proposal::Proposal::Failure(
-                                    man::ProposeFailure {
-                                        new_nb_failures: task.nb_failures(),
-                                        kind: Some(man::propose_failure::Kind::Worker(
-                                            man::ProposeFailureWorker {
-                                                original_message_sender: Vec::new(),
-                                                original_message: Some(man::ManTaskStatus {
-                                                    task_id: task_id.clone().into_bytes(),
-                                                    worker: peer_id.clone().into_bytes(),
-                                                    status: Some(worker::TaskStatus {
-                                                        task_id: task_id.clone().into_bytes(),
-                                                        status_data: Some(
-                                                            worker::task_status::StatusData::Error(
-                                                                worker::TaskErrorKind::Aborted
-                                                                    .into(),
-                                                            ),
-                                                        ),
-                                                    }),
-                                                }),
-                                            },
-                                        )),
-                                    },
-                                )),
-                            };
-                            self.spawn_event(Event::SharedStateProposal(msg)).await;
-                        }
-
-                        workers.remove(id);
-                    } else {
-                        panic!("Unknown worker.");
-                    }
-                }
+            (NodeType::Manager, net::EventOut::WorkerBye(peer_id))
+            | (NodeType::Manager, net::EventOut::WorkerTimedOut(peer_id)) => {
                 self.spawn_log(
                     LogKind::Swarm,
                     format!("event: {:?}", net::EventOut::WorkerBye(peer_id.clone())),
                 )
                 .await;
+                self.delete_worker(peer_id).await;
             }
             (
                 NodeType::Manager,
@@ -389,198 +471,16 @@ impl Balthazar {
                     ),
                 )
                 .await;
-                if let TaskStatus::Completed(_) = status {
-                    let mut workers = self.workers.write().await;
-                    workers
-                        .iter_mut()
-                        .find_map(|(w, p)| if *w == peer_id { Some(p) } else { None })
-                        .expect("Worker unknown.")
-                        .take()
-                        .take();
-                    let chain = self.chain();
-                    let local_address = chain.local_address().unwrap();
-                    let msg = man::Proposal {
-                        task_id: task_id.clone().into_bytes(),
-                        payment_address: Vec::from(local_address.as_bytes()),
-                        proposal: Some(man::proposal::Proposal::Completed(man::ProposeCompleted {
-                            completion_signals_senders: Vec::new(),
-                            completion_signals: Vec::new(),
-                            selected_result: Some(man::ManTaskStatus {
-                                task_id: task_id.clone().into_bytes(),
-                                worker: peer_id.into_bytes(),
-                                status: Some(worker::TaskStatus {
-                                    task_id: task_id.into_bytes(),
-                                    status_data: status.into(),
-                                }),
-                            }),
-                        })),
-                    };
-                    self.spawn_event(Event::SharedStateProposal(msg)).await;
-                } else if let TaskStatus::Error(reason) = status {
-                    let (shared_state, mut workers) =
-                        join!(self.shared_state.read(), self.workers.write());
-
-                    workers
-                        .iter_mut()
-                        .find_map(|(w, p)| if *w == peer_id { Some(p) } else { None })
-                        .expect("Worker unknown.")
-                        .take()
-                        .take();
-
-                    let chain = self.chain();
-                    let local_address = chain.local_address().unwrap();
-
-                    let task = shared_state.tasks.get(&task_id).expect("Unknown task.");
-                    let nb_failures_diff = {
-                        use TaskErrorKind::*;
-
-                        match reason {
-                            Aborted | Unknown => 0,
-                            TimedOut | Download | Runtime => 1,
-                        }
-                    };
-
-                    let msg = man::Proposal {
-                        task_id: task_id.clone().into_bytes(),
-                        payment_address: Vec::from(local_address.as_bytes()),
-                        proposal: Some(man::proposal::Proposal::Failure(man::ProposeFailure {
-                            new_nb_failures: task.nb_failures() + nb_failures_diff,
-                            kind: Some(man::propose_failure::Kind::Worker(
-                                man::ProposeFailureWorker {
-                                    original_message_sender: Vec::new(),
-                                    original_message: Some(man::ManTaskStatus {
-                                        task_id: task_id.clone().into_bytes(),
-                                        worker: peer_id.into_bytes(),
-                                        status: Some(worker::TaskStatus {
-                                            task_id: task_id.into_bytes(),
-                                            status_data: status.into(),
-                                        }),
-                                    }),
-                                },
-                            )),
-                        })),
-                    };
-                    self.spawn_event(Event::SharedStateProposal(msg)).await;
-                }
+                self.handle_task_status(peer_id, task_id, status).await;
             }
             (NodeType::Worker, net::EventOut::TasksExecute(mut tasks)) => {
+                let mut runner_in = self.runner_in.clone();
                 for task in tasks.drain(..) {
-                    // TODO: expect
-                    let task_id =
-                        TaskId::from_bytes(task.task_id).expect("not a correct multihash");
-                    self.send_msg_to_behaviour(net::EventIn::TaskStatus(
-                        task_id.clone(),
-                        TaskStatus::Pending,
-                    ))
-                    .await;
-                    let storage = StoragesWrapper::default();
-                    let string_program_address = &task.program_addresses[0][..];
-                    let string_argument = String::from_utf8_lossy(&task.argument[..]);
-
-                    self.spawn_log(
-                        LogKind::Worker,
-                        format!("will get program `{}`...", string_program_address),
-                    )
-                    .await;
-                    match storage
-                        .fetch(
-                            &task.program_addresses[0][..],
-                            storage
-                                .get_size(&task.program_addresses[0][..])
-                                .await
-                                .unwrap(),
-                        )
-                        .await
-                    {
-                        Ok(wasm) => {
-                            self.spawn_log(
-                                LogKind::Worker,
-                                format!("received program `{}`.", string_program_address),
-                            )
-                            .await;
-                            self.spawn_log(
-                                LogKind::Worker,
-                                format!(
-                                    "spawning wasm executor for `{}` with argument `{}`...",
-                                    string_program_address, string_argument,
-                                ),
-                            )
-                            .await;
-
-                            self.send_msg_to_behaviour(net::EventIn::TaskStatus(
-                                task_id.clone(),
-                                TaskStatus::Started(
-                                    SystemTime::now()
-                                        .duration_since(UNIX_EPOCH)
-                                        .unwrap()
-                                        .as_secs(),
-                                ),
-                            ))
-                            .await;
-
-                            match WasmExecutor::default()
-                                .run(
-                                    &wasm[..],
-                                    &task.argument[..],
-                                    task.timeout,
-                                    task.max_network_usage,
-                                )
-                                .0
-                                .await
-                            {
-                                Ok(result) => {
-                                    self.spawn_log(
-                                        LogKind::Worker,
-                                        format!(
-                                            "task result for `{}` with `{}`: `{:?}`",
-                                            string_program_address,
-                                            string_argument,
-                                            String::from_utf8_lossy(&result[..])
-                                        ),
-                                    )
-                                    .await;
-                                    self.send_msg_to_behaviour(net::EventIn::TaskStatus(
-                                        task_id.clone(),
-                                        TaskStatus::Completed(result),
-                                    ))
-                                    .await;
-                                }
-                                Err(error) => {
-                                    self.send_msg_to_behaviour(net::EventIn::TaskStatus(
-                                        task_id.clone(),
-                                        TaskStatus::Error(TaskErrorKind::Runtime),
-                                    ))
-                                    .await;
-                                    self.spawn_log(
-                                        LogKind::Worker,
-                                        format!(
-                                            "task error for `{}` with `{}`: `{:?}`",
-                                            string_program_address, string_argument, error
-                                        ),
-                                    )
-                                    .await;
-                                }
-                            }
-                        }
-                        Err(error) => {
-                            self.send_msg_to_behaviour(net::EventIn::TaskStatus(
-                                task_id.clone(),
-                                TaskStatus::Error(TaskErrorKind::Download),
-                            ))
-                            .await;
-                            self.spawn_log(
-                                LogKind::Worker,
-                                format!(
-                                    "error while fetching `{}`: `{:?}`",
-                                    string_program_address, error
-                                ),
-                            )
-                            .await;
-                        }
-                    }
+                    // TODO: or just spawn a new task for it?
+                    runner_in.send(task).await.expect("Runner channel closed?");
                 }
             }
-            // Muting those from the logs
+            // Muting those from the logging
             (_, net::EventOut::PeerConnected(_))
             | (_, net::EventOut::PeerDisconnected(_))
             | (_, net::EventOut::WorkerPong(_))
@@ -668,6 +568,121 @@ impl Balthazar {
             } => (),
         }
         Ok(())
+    }
+
+    async fn handle_runner(&self, task: TaskExecute) {
+        // TODO: expect
+        let task_id = TaskId::from_bytes(task.task_id).expect("not a correct multihash");
+        self.send_msg_to_behaviour(net::EventIn::TaskStatus(
+            task_id.clone(),
+            TaskStatus::Pending,
+        ))
+        .await;
+        let storage = StoragesWrapper::default();
+        let string_program_address = &task.program_addresses[0][..];
+        let string_argument = String::from_utf8_lossy(&task.argument[..]);
+
+        self.spawn_log(
+            LogKind::Worker,
+            format!("will get program `{}`...", string_program_address),
+        )
+        .await;
+        match storage
+            .fetch(
+                &task.program_addresses[0][..],
+                storage
+                    .get_size(&task.program_addresses[0][..])
+                    .await
+                    .unwrap(),
+            )
+            .await
+        {
+            Ok(wasm) => {
+                self.spawn_log(
+                    LogKind::Worker,
+                    format!("received program `{}`.", string_program_address),
+                )
+                .await;
+                self.spawn_log(
+                    LogKind::Worker,
+                    format!(
+                        "spawning wasm executor for `{}` with argument `{}`...",
+                        string_program_address, string_argument,
+                    ),
+                )
+                .await;
+
+                self.send_msg_to_behaviour(net::EventIn::TaskStatus(
+                    task_id.clone(),
+                    TaskStatus::Started(
+                        SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .unwrap()
+                            .as_secs(),
+                    ),
+                ))
+                .await;
+
+                match WasmExecutor::default()
+                    .run(
+                        &wasm[..],
+                        &task.argument[..],
+                        task.timeout,
+                        task.max_network_usage,
+                    )
+                    .0
+                    .await
+                {
+                    Ok(result) => {
+                        self.spawn_log(
+                            LogKind::Worker,
+                            format!(
+                                "task result for `{}` with `{}`: `{:?}`",
+                                string_program_address,
+                                string_argument,
+                                String::from_utf8_lossy(&result[..])
+                            ),
+                        )
+                        .await;
+                        self.send_msg_to_behaviour(net::EventIn::TaskStatus(
+                            task_id.clone(),
+                            TaskStatus::Completed(result),
+                        ))
+                        .await;
+                    }
+                    Err(error) => {
+                        self.send_msg_to_behaviour(net::EventIn::TaskStatus(
+                            task_id.clone(),
+                            TaskStatus::Error(TaskErrorKind::Runtime),
+                        ))
+                        .await;
+                        self.spawn_log(
+                            LogKind::Worker,
+                            format!(
+                                "task error for `{}` with `{}`: `{:?}`",
+                                string_program_address, string_argument, error
+                            ),
+                        )
+                        .await;
+                    }
+                }
+            }
+            Err(error) => {
+                self.send_msg_to_behaviour(net::EventIn::TaskStatus(
+                    task_id.clone(),
+                    TaskStatus::Error(TaskErrorKind::Download),
+                ))
+                .await;
+                self.spawn_log(
+                    LogKind::Worker,
+                    format!(
+                        "error while fetching `{}`: `{:?}`",
+                        string_program_address, error
+                    ),
+                )
+                .await;
+            }
+        }
     }
 
     async fn send_manual_task(&self, peer_id: PeerId, wasm: String, args: &[Vec<u8>]) {
