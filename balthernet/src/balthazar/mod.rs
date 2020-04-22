@@ -326,8 +326,32 @@ impl NetworkBehaviour for BalthBehaviour {
         );
     }
 
+    /*
+    use libp2p::core::connection::ConnectedPoint;
+    fn inject_connection_established(
+        &mut self,
+        peer_id: &PeerId,
+        conn: &ConnectionId,
+        point: &ConnectedPoint,
+    ) {
+        eprintln!("Connection est : {:?} {:?} {:?}", peer_id, conn, point);
+    }
+    fn inject_connection_closed(
+        &mut self,
+        peer_id: &PeerId,
+        conn: &ConnectionId,
+        point: &ConnectedPoint,
+    ) {
+        eprintln!("Connection closed : {:?} {:?} {:?}", peer_id, conn, point);
+    }
+    */
+
     fn inject_dial_failure(&mut self, peer_id: &PeerId) {
         eprintln!("ERR dial failure for : {:?}", peer_id);
+    }
+
+    fn inject_listener_closed(&mut self, id: ListenerId, reason: Result<(), &std::io::Error>) {
+        eprintln!("ERR listener closed {:?} : {:?}", id, reason);
     }
 
     fn inject_listener_error(&mut self, id: ListenerId, err: &(dyn error::Error + 'static)) {

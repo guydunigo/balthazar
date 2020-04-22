@@ -262,8 +262,9 @@ pub fn check_manager_worker_relationship(
         && last_ping.elapsed() >= manager_timeout
     {
         CheckManagerWorkerRelationshipAction::TimedOut
-    } else if *last_pong >= *last_ping // 0, we received an answer to the last ping
-                && last_pong.elapsed() > manager_check_interval
+    } else if last_pong.elapsed() > manager_check_interval
+        && last_ping.elapsed() > manager_check_interval
+    // && *last_pong >= *last_ping // 0, we received an answer to the last ping
     {
         *last_ping = Instant::now();
         CheckManagerWorkerRelationshipAction::Ping
