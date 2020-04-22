@@ -5,7 +5,11 @@ use misc::{
     job::{try_bytes_to_address, Address, TaskId},
     shared_state::{PeerId, SharedState, SubTasksState, Task, TaskCompleteness, WorkerPaymentInfo},
 };
-use proto::{manager as man, worker, worker::TaskErrorKind};
+use proto::{
+    manager as man,
+    manager::TaskDefiniteErrorKind,
+    worker::{self, TaskErrorKind},
+};
 use std::{cmp::Ordering, time::SystemTime};
 
 /// Events created when the shared state is modified...
@@ -48,7 +52,7 @@ enum StateChange {
         result: Vec<u8>,
     },
     DefinetelyFailed {
-        reason: TaskErrorKind,
+        reason: TaskDefiniteErrorKind,
     },
 }
 
@@ -397,7 +401,7 @@ impl Balthazar {
                 use TaskErrorKind::*;
 
                 let is_nb_failure_correct = match error {
-                    Aborted | Unknown => proposal.new_nb_failures == task.nb_failures(),
+                    Aborted => proposal.new_nb_failures == task.nb_failures(),
                     TimedOut | Download | Runtime => {
                         proposal.new_nb_failures == task.nb_failures() + 1
                     }
@@ -405,6 +409,7 @@ impl Balthazar {
                         return Err("Incorrect error kind in TaskStatus.".to_string());
                     }
                 };
+                let error = man::try_worker_error_to_definite_error(error);
                 (error, is_nb_failure_correct, Some(worker))
             }
             Some(man::FailureKind::Worker(_)) => {
@@ -423,8 +428,7 @@ impl Balthazar {
                 }
 
                 (
-                    // TODO: better error kind ?
-                    TaskErrorKind::Unknown,
+                    None,
                     proposal.new_nb_failures == task.nb_failures(),
                     Some(worker),
                 )
@@ -433,12 +437,12 @@ impl Balthazar {
                 return Err("Missing unanswered_ping.".to_string());
             }
             Some(man::FailureKind::Results(_)) => (
-                TaskErrorKind::IncorrectResult,
+                Some(TaskDefiniteErrorKind::IncorrectResult),
                 proposal.new_nb_failures == task.nb_failures() + 1,
                 None,
             ),
             Some(man::FailureKind::Specs(_)) => (
-                TaskErrorKind::IncorrectSpecification,
+                Some(TaskDefiniteErrorKind::IncorrectSpecification),
                 proposal.new_nb_failures >= max_failures,
                 None,
             ),
@@ -475,8 +479,12 @@ impl Balthazar {
         }
 
         // Definetely failed if too many failures:
-        if task.nb_failures() >= max_failures {
-            actions.push(StateChange::DefinetelyFailed { reason })
+        if proposal.new_nb_failures >= max_failures {
+            if let Some(reason) = reason {
+                actions.push(StateChange::DefinetelyFailed { reason })
+            } else {
+                panic!("`reason` is `None` but the `new_nb_failures` is too high and indicates a definitive failure, that should already be checked though.");
+            }
         }
 
         // Ok("Definitely failed, set as such in the Jobs SC.".to_string())

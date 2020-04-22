@@ -1,6 +1,6 @@
 use super::{try_convert_task_error_kind, Error};
 use misc::job::{JobId, TaskId, HASH_SIZE};
-use proto::worker::TaskErrorKind;
+use proto::manager::TaskDefiniteErrorKind;
 use std::{
     convert::{TryFrom, TryInto},
     fmt,
@@ -24,7 +24,7 @@ pub enum JobsEvent {
     },
     TaskDefinetelyFailed {
         task_id: TaskId,
-        reason: TaskErrorKind,
+        reason: TaskDefiniteErrorKind,
     },
     PendingMoneyChanged {
         account: Address,

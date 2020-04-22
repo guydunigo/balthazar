@@ -26,6 +26,22 @@ pub mod manager {
     include!(concat!(env!("OUT_DIR"), "/manager.rs"));
     pub use proposal::Proposal as ProposalKind;
     pub use propose_failure::Kind as FailureKind;
+
+    use super::worker::TaskErrorKind;
+
+    pub fn try_worker_error_to_definite_error(
+        error: TaskErrorKind,
+    ) -> Option<TaskDefiniteErrorKind> {
+        use TaskDefiniteErrorKind::*;
+
+        match error {
+            TaskErrorKind::TimedOut => Some(TimedOut),
+            TaskErrorKind::Download => Some(Download),
+            TaskErrorKind::Runtime => Some(Runtime),
+            TaskErrorKind::Aborted => Some(Aborted),
+            _ => None,
+        }
+    }
 }
 
 pub mod worker {

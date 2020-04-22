@@ -2,7 +2,7 @@
 extern crate libp2p;
 use super::job::{Address, TaskId};
 pub use libp2p::PeerId;
-use proto::worker::TaskErrorKind;
+use proto::manager::TaskDefiniteErrorKind;
 use std::{collections::HashMap, fmt, time::SystemTime};
 
 /// State shared between managers used for consensus to track the precise state of
@@ -101,7 +101,7 @@ impl Task {
     }
 
     // TODO: error and no panic!
-    pub fn set_definitely_failed(&mut self, reason: TaskErrorKind) {
+    pub fn set_definitely_failed(&mut self, reason: TaskDefiniteErrorKind) {
         if self.is_incomplete() {
             self.completeness = TaskCompleteness::DefinetelyFailed(reason)
         } else {
@@ -144,7 +144,7 @@ pub enum TaskCompleteness {
     Incomplete { substates: Vec<SubTasksState> },
     /// The task is definetely failed and won't be scheduled again.
     /// The reason is provided to explain.
-    DefinetelyFailed(TaskErrorKind),
+    DefinetelyFailed(TaskDefiniteErrorKind),
     /// The task was successfuly computed and here is the selected result.
     /// All involved parties are paid and the sender has been refunded from the
     /// remaining money for this task.

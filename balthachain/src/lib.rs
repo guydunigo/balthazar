@@ -20,7 +20,7 @@ use misc::{
     multihash::Multihash,
     shared_state::WorkerPaymentInfo,
 };
-use proto::{worker::TaskErrorKind, Message};
+use proto::{manager::TaskDefiniteErrorKind, Message};
 use std::{
     convert::{TryFrom, TryInto},
     fmt,
@@ -35,30 +35,30 @@ use web3::{
 /// Converts the integer value returned by the smart-contract into a [`TaskErrorKind`]
 /// enum.
 /// Returns [`None`] if the value is unknown.
-fn try_convert_task_error_kind(reason_nb: u64) -> Option<TaskErrorKind> {
+fn try_convert_task_error_kind(reason_nb: u64) -> Option<TaskDefiniteErrorKind> {
     match reason_nb {
-        0 => Some(TaskErrorKind::IncorrectSpecification),
-        1 => Some(TaskErrorKind::TimedOut),
-        2 => Some(TaskErrorKind::Download),
-        3 => Some(TaskErrorKind::Runtime),
-        4 => Some(TaskErrorKind::IncorrectResult),
-        5 => Some(TaskErrorKind::Unknown),
+        0 => Some(TaskDefiniteErrorKind::TimedOut),
+        1 => Some(TaskDefiniteErrorKind::Download),
+        2 => Some(TaskDefiniteErrorKind::Runtime),
+        3 => Some(TaskDefiniteErrorKind::IncorrectSpecification),
+        4 => Some(TaskDefiniteErrorKind::IncorrectResult),
         _ => None,
     }
 }
 
-/// Convert [`TaskErrorKind`] to integer for the smart-contract.
+/// Convert [`TaskDefiniteErrorKind`] to integer for the smart-contract.
 /// Returns [`None`] if the error can't be stored on the smart-contract
-/// (like [`TaskErrorKind::Aborted`]).
-fn convert_task_error_kind(reason: TaskErrorKind) -> Option<u64> {
+/// (like [`TaskDefiniteErrorKind::Aborted`]).
+fn convert_task_error_kind(reason: TaskDefiniteErrorKind) -> Option<u64> {
+    use TaskDefiniteErrorKind::*;
     match reason {
-        TaskErrorKind::IncorrectSpecification => Some(0),
-        TaskErrorKind::TimedOut => Some(1),
-        TaskErrorKind::Download => Some(2),
-        TaskErrorKind::Runtime => Some(3),
-        TaskErrorKind::IncorrectResult => Some(4),
-        TaskErrorKind::Unknown => Some(5),
-        TaskErrorKind::Aborted => None,
+        TimedOut => Some(0),
+        Download => Some(1),
+        Runtime => Some(2),
+        IncorrectSpecification => Some(3),
+        IncorrectResult => Some(4),
+        // TaskDefiniteErrorKind::Unknown => Some(5),
+        Aborted => None,
     }
 }
 
@@ -72,7 +72,7 @@ pub enum JobsCompleteness {
     /// remaining money for this task.
     Completed(Vec<u8>),
     /// The task is definetely failed and won't be scheduled again.
-    DefinetelyFailed(TaskErrorKind),
+    DefinetelyFailed(TaskDefiniteErrorKind),
 }
 
 impl fmt::Display for JobsCompleteness {
@@ -89,7 +89,7 @@ impl fmt::Display for JobsCompleteness {
 fn try_convert_tasks_state(
     state_nb: u64,
     result: Vec<u8>,
-    reason: TaskErrorKind,
+    reason: TaskDefiniteErrorKind,
 ) -> Option<JobsCompleteness> {
     match state_nb {
         0 => Some(JobsCompleteness::Incomplete),
@@ -916,7 +916,7 @@ impl<'a> Chain<'a> {
     pub async fn jobs_set_definitely_failed(
         &self,
         task_id: &TaskId,
-        reason: TaskErrorKind,
+        reason: TaskDefiniteErrorKind,
     ) -> Result<types::TransactionReceipt, Error> {
         let jobs = self.jobs()?;
         let addr = self.local_address()?;

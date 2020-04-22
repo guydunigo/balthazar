@@ -24,14 +24,12 @@ contract Jobs {
         DefinetelyFailed
     }
 
-    enum TaskErrorKind {
-        IncorrectSpecification,
+    enum TaskDefiniteErrorKind {
         TimedOut,
         Download,
         Runtime,
-        IncorrectResult,// ,
-        // Aborted,
-        Unknown
+        IncorrectSpecification,
+        IncorrectResult
     }
 
     struct Job {
@@ -69,7 +67,7 @@ contract Jobs {
         uint64[] network_prices;
         */
 
-        TaskErrorKind reason;
+        TaskDefiniteErrorKind reason;
 
         bool non_null;
     }
@@ -425,7 +423,7 @@ contract Jobs {
                                    new uint64[](0),
                                    new uint64[](0),
                                    */
-                                   TaskErrorKind.Unknown,
+                                   TaskDefiniteErrorKind.Unknown,
                                    true);
             emit TaskPending(task_id);
         }
@@ -448,7 +446,7 @@ contract Jobs {
         tasks[task_id].managers_addresses = addresses;
     }
 
-    function set_definitely_failed(bytes32 task_id, TaskErrorKind reason) public {
+    function set_definitely_failed(bytes32 task_id, TaskDefiniteErrorKind reason) public {
         require(msg.sender == oracle/*, "only the oracle can do that"*/);
         Task storage task = tasks[task_id];
         require(task.non_null/*, "unknown task"*/);
@@ -515,7 +513,7 @@ contract Jobs {
     // If it's DefinetelyFailed, only the failure reason, the second value is relevent.
     // If it's Incomplete, none of the other values mean anything.
     // Reverts if there is no task corresponding to `task_id`.
-    function get_task_state(bytes32 task_id) public view returns (TaskState, TaskErrorKind, bytes memory) {
+    function get_task_state(bytes32 task_id) public view returns (TaskState, TaskDefiniteErrorKind, bytes memory) {
         Task storage task = tasks[task_id];
         require(task.non_null/*, "unknown task"*/);
         return (task.state, task.reason, task.result);
@@ -547,7 +545,7 @@ contract Jobs {
     event JobNew(address sender, uint128 nonce);
     event TaskPending(bytes32 task_id);
     event TaskCompleted(bytes32 task_id, bytes result);
-    event TaskDefinetelyFailed(bytes32 task_id, TaskErrorKind reason);
+    event TaskDefinetelyFailed(bytes32 task_id, TaskDefiniteErrorKind reason);
     event PendingMoneyChanged(address account, uint new_val);
     event JobCompleted(bytes32 job_id);
 }

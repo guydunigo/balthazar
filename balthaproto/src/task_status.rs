@@ -17,17 +17,21 @@ impl fmt::Display for TaskStatus {
             TaskStatus::Pending => write!(f, "Pending"),
             // TODO: parse to real date
             TaskStatus::Started(timestamp) => write!(f, "Started on timestamp {}", timestamp),
+            /*
             TaskStatus::Error(TaskErrorKind::IncorrectSpecification) => {
                 write!(f, "Error: Task has a incorrect specifications.")
             }
+            */
             TaskStatus::Error(TaskErrorKind::TimedOut) => write!(f, "Error: Task has timed out."),
             TaskStatus::Error(TaskErrorKind::Download) => {
                 write!(f, "Error: Couln't download program.")
             }
             TaskStatus::Error(TaskErrorKind::Runtime) => write!(f, "Error during program runtime."),
+            /*
             TaskStatus::Error(TaskErrorKind::IncorrectResult) => {
                 write!(f, "Error: The result provided is incorrect.")
             }
+            */
             TaskStatus::Error(TaskErrorKind::Aborted) => write!(f, "Error: Program was aborted."),
             TaskStatus::Error(TaskErrorKind::Unknown) => {
                 write!(f, "An error occured but no description was provided.")

@@ -5,7 +5,7 @@ use misc::{
     multihash::Multihash,
     shared_state::WorkerPaymentInfo,
 };
-use proto::worker::TaskErrorKind;
+use proto::manager::TaskDefiniteErrorKind;
 use web3::types::{Address, BlockId, BlockNumber};
 
 #[derive(Clone, Debug)]
@@ -73,7 +73,7 @@ pub enum RunMode {
     /// There must be as many workers as job's `redundancy`.
     JobsSetDefinitelyFailed {
         task_id: TaskId,
-        reason: TaskErrorKind,
+        reason: TaskDefiniteErrorKind,
         managers: Vec<Address>,
     },
     /// Send a result and workers to the sc.

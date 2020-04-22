@@ -5,6 +5,19 @@ import "worker.proto";
 package manager;
 
 // ------------------------------------
+// Data types
+
+enum TaskDefiniteErrorKind {
+ TIMED_OUT = 0;
+ DOWNLOAD = 1;
+ RUNTIME = 2;
+ ABORTED = 3;
+ INCORRECT_SPECIFICATION = 10;
+ INCORRECT_RESULT = 11;
+ // UNKNOWN = 4;
+}
+
+// ------------------------------------
 // Messages
 
 message ManTaskStatus {

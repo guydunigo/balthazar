@@ -318,12 +318,53 @@ impl Balthazar {
             (NodeType::Manager, net::EventOut::WorkerBye(peer_id)) => {
                 {
                     let mut workers = self.workers.write().await;
-                    if let Some((id, _)) = workers
+                    if let Some((id, (_, assignment_opt))) = workers
                         .iter()
                         .enumerate()
                         .find(|(_, (worker_id, _))| *worker_id == peer_id)
                     {
+                        // Declare any tasks it was doing as Aborted.
+                        if let Some(task_id) = assignment_opt {
+                            let shared_state = self.shared_state.read().await;
+
+                            let chain = self.chain();
+                            let local_address = chain.local_address().unwrap();
+
+                            let task = shared_state.tasks.get(&task_id).expect("Unknown task.");
+
+                            let msg = man::Proposal {
+                                task_id: task_id.clone().into_bytes(),
+                                payment_address: Vec::from(local_address.as_bytes()),
+                                proposal: Some(man::proposal::Proposal::Failure(
+                                    man::ProposeFailure {
+                                        new_nb_failures: task.nb_failures(),
+                                        kind: Some(man::propose_failure::Kind::Worker(
+                                            man::ProposeFailureWorker {
+                                                original_message_sender: Vec::new(),
+                                                original_message: Some(man::ManTaskStatus {
+                                                    task_id: task_id.clone().into_bytes(),
+                                                    worker: peer_id.clone().into_bytes(),
+                                                    status: Some(worker::TaskStatus {
+                                                        task_id: task_id.clone().into_bytes(),
+                                                        status_data: Some(
+                                                            worker::task_status::StatusData::Error(
+                                                                worker::TaskErrorKind::Aborted
+                                                                    .into(),
+                                                            ),
+                                                        ),
+                                                    }),
+                                                }),
+                                            },
+                                        )),
+                                    },
+                                )),
+                            };
+                            self.spawn_event(Event::SharedStateProposal(msg)).await;
+                        }
+
                         workers.remove(id);
+                    } else {
+                        panic!("Unknown worker.");
                     }
                 }
                 self.spawn_log(
@@ -350,9 +391,12 @@ impl Balthazar {
                 .await;
                 if let TaskStatus::Completed(_) = status {
                     let mut workers = self.workers.write().await;
-                    workers.iter_mut()
-                        .find_map(|(w,p)| if *w == peer_id { Some(p) } else { None })
-                        .expect("Worker unknown.").take().take();
+                    workers
+                        .iter_mut()
+                        .find_map(|(w, p)| if *w == peer_id { Some(p) } else { None })
+                        .expect("Worker unknown.")
+                        .take()
+                        .take();
                     let chain = self.chain();
                     let local_address = chain.local_address().unwrap();
                     let msg = man::Proposal {
@@ -369,6 +413,51 @@ impl Balthazar {
                                     status_data: status.into(),
                                 }),
                             }),
+                        })),
+                    };
+                    self.spawn_event(Event::SharedStateProposal(msg)).await;
+                } else if let TaskStatus::Error(reason) = status {
+                    let (shared_state, mut workers) =
+                        join!(self.shared_state.read(), self.workers.write());
+
+                    workers
+                        .iter_mut()
+                        .find_map(|(w, p)| if *w == peer_id { Some(p) } else { None })
+                        .expect("Worker unknown.")
+                        .take()
+                        .take();
+
+                    let chain = self.chain();
+                    let local_address = chain.local_address().unwrap();
+
+                    let task = shared_state.tasks.get(&task_id).expect("Unknown task.");
+                    let nb_failures_diff = {
+                        use TaskErrorKind::*;
+
+                        match reason {
+                            Aborted | Unknown => 0,
+                            TimedOut | Download | Runtime => 1,
+                        }
+                    };
+
+                    let msg = man::Proposal {
+                        task_id: task_id.clone().into_bytes(),
+                        payment_address: Vec::from(local_address.as_bytes()),
+                        proposal: Some(man::proposal::Proposal::Failure(man::ProposeFailure {
+                            new_nb_failures: task.nb_failures() + nb_failures_diff,
+                            kind: Some(man::propose_failure::Kind::Worker(
+                                man::ProposeFailureWorker {
+                                    original_message_sender: Vec::new(),
+                                    original_message: Some(man::ManTaskStatus {
+                                        task_id: task_id.clone().into_bytes(),
+                                        worker: peer_id.into_bytes(),
+                                        status: Some(worker::TaskStatus {
+                                            task_id: task_id.into_bytes(),
+                                            status_data: status.into(),
+                                        }),
+                                    }),
+                                },
+                            )),
                         })),
                     };
                     self.spawn_event(Event::SharedStateProposal(msg)).await;

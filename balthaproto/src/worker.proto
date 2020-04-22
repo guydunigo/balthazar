@@ -22,13 +22,11 @@ enum ProgramKind {
 }
 
 enum TaskErrorKind {
- INCORRECT_SPECIFICATION = 0;
- TIMED_OUT = 1;
- DOWNLOAD = 2;
- RUNTIME = 3;
- INCORRECT_RESULT = 4;
- ABORTED = 5;
- UNKNOWN = 6;
+ TIMED_OUT = 0;
+ DOWNLOAD = 1;
+ RUNTIME = 2;
+ ABORTED = 3;
+ UNKNOWN = 4;
 }
 
 // ------------------------------------
