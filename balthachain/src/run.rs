@@ -40,6 +40,7 @@ pub enum RunMode {
         // min_memory: u64,
         // min_network_speed: u64,
         is_program_pure: bool,
+        lock: bool,
     },
     /// Remove a draft job.
     JobsDeleteDraft {
@@ -186,6 +187,7 @@ async fn run_async(mode: &RunMode, config: &ChainConfig) -> Result<(), Error> {
             // min_memory,
             // min_network_speed,
             is_program_pure,
+            lock,
         } => {
             let mut job = Job::new(
                 *program_kind,
@@ -215,7 +217,16 @@ async fn run_async(mode: &RunMode, config: &ChainConfig) -> Result<(), Error> {
 
             println!("{}", chain.jobs_get_job(&job_id, true).await?);
             println!("Draft stored as {} !", job_id);
-            println!("You might still need to send the money for it and set it as locked.");
+
+            if !lock {
+                println!("You might still need to send the money for it and set it as locked.");
+            } else {
+                chain
+                    .jobs_send_pending_money_local(job.calc_max_price().into())
+                    .await?;
+                chain.jobs_lock(&job_id).await?;
+                println!("{} set as pending for work.", job_id);
+            }
         }
         RunMode::JobsDeleteDraft { job_id } => {
             let job = chain.jobs_get_job(job_id, true).await?;

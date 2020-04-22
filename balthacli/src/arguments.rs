@@ -229,6 +229,8 @@ pub enum ChainJobsSub {
         // min_network_speed: u64,
         // #[clap(name = "pure", short, long)]
         // is_program_pure: bool,
+        #[clap(short, long)]
+        lock: bool,
     },
     /// Remove a draft job.
     Delete { job_id: JobId },
@@ -320,6 +322,7 @@ impl Into<chain::RunMode> for ChainSub {
                 // min_memory,
                 // min_network_speed,
                 // is_program_pure,
+                lock,
             }) => chain::RunMode::JobsCreateDraft {
                 program_kind: ProgramKind::Wasm0m1n0,
                 addresses,
@@ -338,6 +341,7 @@ impl Into<chain::RunMode> for ChainSub {
                 // min_memory,
                 // min_network_speed,
                 is_program_pure: true,
+                lock,
             },
             ChainSub::Jobs(ChainJobsSub::Delete { job_id }) => {
                 chain::RunMode::JobsDeleteDraft { job_id }
