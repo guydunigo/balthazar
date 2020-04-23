@@ -1,7 +1,4 @@
 //! Grouping module for all balthazar sub-modules.
-// TODO: remove allws
-// #![allow(unused_imports)]
-// #![allow(dead_code)]
 
 extern crate async_ctrlc;
 
@@ -38,6 +35,8 @@ use store::{FetchStorage, StoragesWrapper};
 use super::{BalthazarConfig, Error};
 mod shared_state;
 use shared_state::Event as SharedStateEvent;
+mod workers;
+use workers::*;
 
 const CHANNEL_SIZE: usize = 1024;
 
@@ -102,30 +101,35 @@ impl fmt::Display for LogKind {
 #[derive(Clone)]
 #[allow(clippy::type_complexity)]
 struct Balthazar {
+    // TODO: reference?
+    peer_id: PeerId,
+    // TODO: reference?
     config: Arc<BalthazarConfig>,
     inner_in: Sender<Event>,
     swarm_in: Sender<net::EventIn>,
     runner_in: Sender<worker::TaskExecute>,
     shared_state: Arc<RwLock<SharedState>>,
     // TODO: Avoid creating that when not used?
-    workers: Arc<RwLock<Vec<(PeerId, Option<TaskId>)>>>,
+    workers: Arc<RwLock<Workers>>,
     // keypair: balthernet::identity::Keypair,
 }
 
 impl Balthazar {
     fn new(
+        peer_id: PeerId,
         config: BalthazarConfig,
         inner_in: Sender<Event>,
         swarm_in: Sender<net::EventIn>,
         runner_in: Sender<worker::TaskExecute>,
     ) -> Self {
         Balthazar {
+            peer_id,
             config: Arc::new(config),
             inner_in,
             swarm_in,
             runner_in,
-            shared_state: Arc::new(RwLock::new(SharedState::default())),
-            workers: Arc::new(RwLock::new(Vec::new())),
+            shared_state: Default::default(),
+            workers: Default::default(),
         }
     }
 
@@ -133,41 +137,6 @@ impl Balthazar {
     fn chain(&self) -> Chain {
         Chain::new(self.config.chain())
     }
-
-    /*
-    /// Returns a worker who isn't computing anything.
-    /// Returns `None` if we are not a manager.
-    // TODO: race condition between returning PeerRc and next lock: peer gets busy again
-    async fn find_available_workers<'a>(&'a self) -> (impl 'a + std::ops::DerefMut<Target = VecDeque<(JobId, TaskId, Option<PeerRc>)>>,impl Iterator<Item=PeerRc>) {
-        let pending_tasks = self.pending_tasks().await;
-        let busy_peers_rc: Vec<_> = pending_tasks
-            .iter()
-            .filter_map(|(_, _, o)| if let Some(p) = o {
-                Some(p)
-            } else { None })
-            .collect();
-        let mut busy_peers = Vec::new();
-        for p in busy_peers_rc.iter() {
-            busy_peers.push(p.read().expect("couldn't lock on peer").peer_id.clone());
-        }
-
-        let (tx, rx) = oneshot::channel();
-        self.send_msg_to_behaviour(net::EventIn::GetWorkers(tx))
-            .await;
-        // TODO: expect
-        let workers = rx.await
-            .expect("Other end dropped without answer.")?;
-
-        let mut iter= Vec::new();
-        for w in workers.iter() {
-            if busy_peers.contains(&w.read().expect("couldn't lock on peer").peer_id) {
-                iter.push(w.clone());
-            }
-        }
-
-        iter.drain(..)
-    }
-    */
 
     async fn send_msg_to_behaviour(&self, event: net::EventIn) {
         if let Err(e) = self.swarm_in.clone().send(event).await {
@@ -186,7 +155,8 @@ impl Balthazar {
         let (inner_in, inner_out) = channel(CHANNEL_SIZE);
         let (runner_in, runner_out) = channel(CHANNEL_SIZE);
 
-        let balth = Balthazar::new(config, inner_in, swarm_in, runner_in);
+        let peer_id = keypair.public().into_peer_id();
+        let balth = Balthazar::new(peer_id, config, inner_in, swarm_in, runner_in);
 
         // TODO: concurrent ?
         // TODO: looks dirty, is it ?
@@ -310,46 +280,19 @@ impl Balthazar {
     /// Delete known worker and if it were assigned, announce it unassigned.
     async fn delete_worker(&self, peer_id: PeerId) {
         let mut workers = self.workers.write().await;
-        if let Some((id, (_, assignment_opt))) = workers
-            .iter()
-            .enumerate()
-            .find(|(_, (worker_id, _))| *worker_id == peer_id)
-        {
-            // Declare any tasks it was doing as Aborted.
-            if let Some(task_id) = assignment_opt {
-                let shared_state = self.shared_state.read().await;
-
-                let chain = self.chain();
-                let local_address = chain.local_address().unwrap();
-
-                let task = shared_state.tasks.get(&task_id).expect("Unknown task.");
-
-                let msg = man::Proposal {
-                    task_id: task_id.clone().into_bytes(),
-                    payment_address: Vec::from(local_address.as_bytes()),
-                    proposal: Some(man::proposal::Proposal::Failure(man::ProposeFailure {
-                        new_nb_failures: task.nb_failures(),
-                        kind: Some(man::propose_failure::Kind::Worker(
-                            man::ProposeFailureWorker {
-                                original_message_sender: Vec::new(),
-                                original_message: Some(man::ManTaskStatus {
-                                    task_id: task_id.clone().into_bytes(),
-                                    worker: peer_id.clone().into_bytes(),
-                                    status: Some(worker::TaskStatus {
-                                        task_id: task_id.clone().into_bytes(),
-                                        status_data: Some(worker::task_status::StatusData::Error(
-                                            worker::TaskErrorKind::Aborted.into(),
-                                        )),
-                                    }),
-                                }),
-                            },
-                        )),
-                    })),
-                };
-                self.spawn_event(Event::SharedStateProposal(msg)).await;
+        if let Some(mut assignments) = workers.remove(&peer_id) {
+            let shared_state = self.shared_state.read().await;
+            // Declare any assigned tasks it was doing as Aborted.
+            for task_id in assignments.drain(..).filter_map(|a| {
+                if let WorkerAssignment::Assigned(task_id) = a {
+                    Some(task_id)
+                } else {
+                    None
+                }
+            }) {
+                self.send_abord_proposal(&shared_state, &peer_id, &task_id)
+                    .await;
             }
-
-            workers.remove(id);
         } else {
             panic!("Unknown worker.");
         }
@@ -363,12 +306,10 @@ impl Balthazar {
         }
 
         let mut workers = self.workers.write().await;
-        workers
-            .iter_mut()
-            .find_map(|(w, p)| if *w == peer_id { Some(p) } else { None })
-            .expect("Worker unknown.")
-            .take()
-            .take();
+        if !workers.unassign_slot(&peer_id, &task_id) {
+            // TODO: not panic in case the worker sends a bad message...
+            panic!("Unknown or unassigned worker.");
+        }
 
         let chain = self.chain();
         let local_address = chain.local_address().unwrap();
@@ -435,7 +376,8 @@ impl Balthazar {
             (NodeType::Manager, net::EventOut::WorkerNew(peer_id)) => {
                 {
                     let mut workers = self.workers.write().await;
-                    workers.push((peer_id.clone(), None));
+                    // TODO: use workers specs.
+                    workers.push(peer_id.clone(), 1);
                 }
                 self.spawn_log(
                     LogKind::Swarm,
@@ -501,24 +443,35 @@ impl Balthazar {
         let local_address = chain.local_address()?;
         match event {
             SharedStateEvent::Pending => {
-                let (shared_state, workers) = join!(self.shared_state.read(), self.workers.read());
+                let (shared_state, mut workers) =
+                    join!(self.shared_state.read(), self.workers.write());
 
-                if workers.len() > 0 {
+                let unassigned_workers = workers.get_unassigned_workers_sorted();
+                if !unassigned_workers.is_empty() {
                     let task = shared_state.tasks.get(&task_id).expect("Unknown task.");
                     let nb_unassigned = task.get_nb_unassigned().expect("Task not incomplete.");
 
-                    let selected_offers: Vec<_> = workers
+                    // cloning is needed because each `unassigned_workers` is immutable ref,
+                    // but `workers.reserve_slot` requires a mutable one.
+                    // TODO: avoid cloning...
+                    let unassigned_workers: Vec<_> = unassigned_workers
                         .iter()
-                        .filter_map(
-                            |(peer_id, opt)| if opt.is_some() { None } else { Some(peer_id) },
-                        )
+                        .take(nb_unassigned)
+                        .map(|w| (*w).clone())
+                        .collect();
+                    for w in unassigned_workers.iter() {
+                        workers.reserve_slot(w);
+                    }
+
+                    let selected_offers: Vec<_> = unassigned_workers
+                        .iter()
                         .take(nb_unassigned)
                         .map(|peer_id| {
                             let mut offer = man::Offer::default();
                             offer.task_id = task_id.clone().into_bytes();
-                            offer.worker = peer_id.clone().into_bytes();
+                            offer.worker = (*peer_id).clone().into_bytes();
                             // TODO: our address
-                            offer.workers_manager = peer_id.clone().into_bytes();
+                            offer.workers_manager = self.peer_id.clone().into_bytes();
                             offer.payment_address = Vec::from(local_address.as_bytes());
                             offer.worker_price = 1;
                             offer.network_price = 1;
@@ -542,30 +495,40 @@ impl Balthazar {
                 }
             }
             SharedStateEvent::Assigned { worker } => {
-                let (job_id, _) = chain.jobs_get_task(&task_id, true).await?;
-                let other_data = chain.jobs_get_other_data(&job_id, true).await?;
-                let (timeout, _, _) = chain.jobs_get_parameters(&job_id, true).await?;
-                let (_, max_network_usage, _) =
-                    chain.jobs_get_worker_parameters(&job_id, true).await?;
-                let argument = chain.jobs_get_argument(&task_id, true).await?;
-                self.send_msg_to_behaviour(net::EventIn::TasksExecute(
-                    worker,
-                    vec![TaskExecute {
-                        task_id: task_id.into_bytes(),
-                        program_addresses: other_data.program_addresses,
-                        program_hash: other_data.program_hash,
-                        program_kind: other_data.program_kind,
-                        argument,
-                        timeout,
-                        max_network_usage,
-                    }],
-                ))
-                .await;
+                let mut workers = self.workers.write().await;
+                if !workers.assign_slot(&worker, task_id.clone()) {
+                    let shared_state = self.shared_state.read().await;
+                    self.send_abord_proposal(&shared_state, &worker, &task_id)
+                        .await;
+                } else {
+                    let (job_id, _) = chain.jobs_get_task(&task_id, true).await?;
+                    let other_data = chain.jobs_get_other_data(&job_id, true).await?;
+                    let (timeout, _, _) = chain.jobs_get_parameters(&job_id, true).await?;
+                    let (_, max_network_usage, _) =
+                        chain.jobs_get_worker_parameters(&job_id, true).await?;
+                    let argument = chain.jobs_get_argument(&task_id, true).await?;
+                    self.send_msg_to_behaviour(net::EventIn::TasksExecute(
+                        worker,
+                        vec![TaskExecute {
+                            task_id: task_id.into_bytes(),
+                            program_addresses: other_data.program_addresses,
+                            program_hash: other_data.program_hash,
+                            program_kind: other_data.program_kind,
+                            argument,
+                            timeout,
+                            max_network_usage,
+                        }],
+                    ))
+                    .await;
+                }
             }
             SharedStateEvent::Unassigned {
-                worker: _,
+                worker,
                 workers_manager: _,
-            } => (),
+            } => {
+                let mut workers = self.workers.write().await;
+                workers.unassign_slot(&worker, &task_id);
+            }
         }
         Ok(())
     }
@@ -717,5 +680,41 @@ impl Balthazar {
         .await;
         self.send_msg_to_behaviour(net::EventIn::TasksExecute(peer_id, tasks))
             .await
+    }
+
+    async fn send_abord_proposal(
+        &self,
+        shared_state: &impl std::ops::Deref<Target = SharedState>,
+        peer_id: &PeerId,
+        task_id: &TaskId,
+    ) {
+        let chain = self.chain();
+        let local_address = chain.local_address().unwrap();
+
+        let task = shared_state.tasks.get(&task_id).expect("Unknown task.");
+
+        let msg = man::Proposal {
+            task_id: task_id.clone().into_bytes(),
+            payment_address: Vec::from(local_address.as_bytes()),
+            proposal: Some(man::proposal::Proposal::Failure(man::ProposeFailure {
+                new_nb_failures: task.nb_failures(),
+                kind: Some(man::propose_failure::Kind::Worker(
+                    man::ProposeFailureWorker {
+                        original_message_sender: Vec::new(),
+                        original_message: Some(man::ManTaskStatus {
+                            task_id: task_id.clone().into_bytes(),
+                            worker: peer_id.clone().into_bytes(),
+                            status: Some(worker::TaskStatus {
+                                task_id: task_id.clone().into_bytes(),
+                                status_data: Some(worker::task_status::StatusData::Error(
+                                    worker::TaskErrorKind::Aborted.into(),
+                                )),
+                            }),
+                        }),
+                    },
+                )),
+            })),
+        };
+        self.spawn_event(Event::SharedStateProposal(msg)).await;
     }
 }

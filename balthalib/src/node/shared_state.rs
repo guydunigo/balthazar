@@ -443,7 +443,7 @@ impl Balthazar {
             ),
             Some(man::FailureKind::Specs(_)) => (
                 Some(TaskDefiniteErrorKind::IncorrectSpecification),
-                proposal.new_nb_failures >= max_failures,
+                proposal.new_nb_failures > max_failures,
                 None,
             ),
             None => {
@@ -479,7 +479,7 @@ impl Balthazar {
         }
 
         // Definetely failed if too many failures:
-        if proposal.new_nb_failures >= max_failures {
+        if proposal.new_nb_failures > max_failures {
             if let Some(reason) = reason {
                 actions.push(StateChange::DefinetelyFailed { reason })
             } else {

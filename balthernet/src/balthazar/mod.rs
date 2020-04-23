@@ -346,9 +346,11 @@ impl NetworkBehaviour for BalthBehaviour {
     }
     */
 
+    /*
     fn inject_dial_failure(&mut self, peer_id: &PeerId) {
         eprintln!("ERR dial failure for : {:?}", peer_id);
     }
+    */
 
     fn inject_listener_closed(&mut self, id: ListenerId, reason: Result<(), &std::io::Error>) {
         eprintln!("ERR listener closed {:?} : {:?}", id, reason);
