@@ -2,7 +2,7 @@
 use super::{Balthazar, LogKind};
 
 use misc::{
-    job::{try_bytes_to_address, Address, TaskId},
+    job::{try_bytes_to_address, Address, Job, JobId, TaskId},
     shared_state::{PeerId, SharedState, SubTasksState, Task, TaskCompleteness, WorkerPaymentInfo},
 };
 use proto::{
@@ -33,7 +33,9 @@ pub enum Event {
 // TODO: delete task to free memory?
 enum StateChange {
     Create {
-        redundancy: u64,
+        job_id: JobId,
+        arg_id: u128,
+        job: Option<Job>,
     },
     Checked {
         worker: PeerId,
@@ -130,11 +132,27 @@ impl Balthazar {
         workers_address: Address,
         action: StateChange,
     ) -> Result<(), String> {
-        if let StateChange::Create { redundancy } = action {
+        if let StateChange::Create {
+            job_id,
+            arg_id,
+            job,
+        } = action
+        {
+            let redundancy = if let Some(job) = job {
+                shared_state.jobs.entry(job_id.clone()).or_insert(job)
+            } else {
+                shared_state
+                    .jobs
+                    .get(&job_id)
+                    .expect("Job unknown but not provided.")
+            }
+            .redundancy();
+
             // TODO: check it wasn't existing ? No it isn't supposed to...
-            shared_state
-                .tasks
-                .insert(task_id.clone(), Task::new(task_id.clone(), redundancy));
+            shared_state.tasks.insert(
+                task_id.clone(),
+                Task::new(task_id.clone(), job_id, arg_id, redundancy),
+            );
 
             for _ in 0..redundancy {
                 self.spawn_shared_state_change(task_id.clone(), Event::Pending)
@@ -213,11 +231,12 @@ impl Balthazar {
                     unreachable!("Just set.");
                 };
 
-                self.chain()
+                let chain = self.chain();
+                chain
                     .jobs_set_managers(&task_id, task.managers_addresses())
                     .await
                     .map_err(|err| format!("Couldn't set managers on the Jobs SC: {}", err))?;
-                self.chain()
+                chain
                     .jobs_set_completed(&task_id, result, payment_info)
                     .await
                     .map_err(|err| format!("Couldn't set completed on the Jobs SC: {}", err))?;
@@ -319,30 +338,31 @@ impl Balthazar {
         if shared_state.tasks.contains_key(task_id) {
             Err("Task already known.".to_string())
         } else {
-            let redundancy = {
-                let chain = self.chain();
-                // TODO: make it one call only...
-                let (job_id, _) = chain.jobs_get_task(&task_id, true).await.map_err(|err| {
+            let chain = self.chain();
+            // TODO: make it one call only...
+            let (job_id, arg_id) = chain.jobs_get_task(&task_id, true).await.map_err(|err| {
+                format!(
+                    "Problem fetchin task `{}` from Jobs smart-contract: {}",
+                    task_id, err
+                )
+            })?;
+            let job = if !shared_state.jobs.contains_key(&job_id) {
+                Some(chain.jobs_get_job(&job_id, true).await.map_err(|err| {
                     format!(
-                        "Problem fetchin task `{}` from Jobs smart-contract: {}",
-                        task_id, err
+                        "Problem fetching job `{}` in Jobs smart-contract: {}",
+                        job_id, err
                     )
-                })?;
-                let (_, redundancy, _) =
-                    chain
-                        .jobs_get_parameters(&job_id, true)
-                        .await
-                        .map_err(|err| {
-                            format!(
-                            "Problem fetching redundancy for job `{}` in Jobs smart-contract: {}",
-                            job_id, err
-                        )
-                        })?;
-                redundancy
+                })?)
+            } else {
+                None
             };
 
             // Ok("Task registered.".to_string())
-            Ok(vec![StateChange::Create { redundancy }])
+            Ok(vec![StateChange::Create {
+                job_id,
+                arg_id,
+                job,
+            }])
         }
     }
 
@@ -355,27 +375,11 @@ impl Balthazar {
     ) -> Result<Vec<StateChange>, String> {
         let task = check_task_is_known(shared_state, task_id)?;
 
-        let max_failures = {
-            let chain = self.chain();
-            // TODO: make it one call only...
-            let (job_id, _) = chain.jobs_get_task(&task_id, true).await.map_err(|err| {
-                format!(
-                    "Problem fetching task `{}` from Jobs smart-contract: {}",
-                    task_id, err
-                )
-            })?;
-            let (_, _, max_failures) =
-                chain
-                    .jobs_get_parameters(&job_id, true)
-                    .await
-                    .map_err(|err| {
-                        format!(
-                            "Problem fetching max_failures for job `{}` in Jobs smart-contract: {}",
-                            job_id, err
-                        )
-                    })?;
-            max_failures
-        };
+        let max_failures = shared_state
+            .jobs
+            .get(task.job_id())
+            .expect("Job not already fetched...")
+            .max_failures();
 
         // If worker_to_unassign is None, unassign all workers.
         let (reason, correct_val, worker_to_unassign) = match proposal.kind {
@@ -504,7 +508,11 @@ impl Balthazar {
         let nb_unassigned = task
             .completeness()
             .get_nb_unassigned()
-            .expect("We should have already checked this by now.");
+            .ok_or_else(|| "Task not unassigned.".to_string())?;
+        if nb_unassigned == 0 {
+            return Err("Task is already fully assigned.".to_string());
+        }
+
         let mut offers_filtered = Vec::new();
         for o in proposal.selected_offers.drain(..).take(nb_unassigned) {
             if &o.task_id[..] != task_id.as_bytes() {
@@ -554,21 +562,14 @@ impl Balthazar {
         if let Some(substate) = task.get_substate(&worker) {
             let min_check_interval = {
                 let chain = self.chain();
-                // TODO: make it one call only...
-                let (job_id, _) = chain.jobs_get_task(&task_id, true).await.map_err(|err| {
-                    format!(
-                        "Problem fetchin task `{}` from Jobs smart-contract: {}",
-                        task_id, err
-                    )
-                })?;
                 let (min_check_interval, _) =
                     chain
-                        .jobs_get_management_parameters(&job_id, true)
+                        .jobs_get_management_parameters(task.job_id(), true)
                         .await
                         .map_err(|err| {
                             format!(
                             "Problem fetching min_check_interval for job `{}` in Jobs smart-contract: {}",
-                            job_id, err
+                            task.job_id(), err
                         )
                         })?;
                 min_check_interval
@@ -598,6 +599,7 @@ impl Balthazar {
         task_id: &TaskId,
         proposal: man::ProposeCompleted,
     ) -> Result<Vec<StateChange>, String> {
+        eprintln!("bbb");
         let task = check_task_is_known(shared_state, task_id)?;
         if !task.is_incomplete() {
             return Err("Task already no more incomplete.".to_string());
@@ -645,6 +647,7 @@ impl Balthazar {
             return Err("TaskStatus not corresponding to this task.".to_string());
         }
 
+        eprintln!("ccc");
         Ok(vec![StateChange::Complete { result }])
     }
 }

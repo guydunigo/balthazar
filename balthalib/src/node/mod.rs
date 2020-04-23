@@ -133,9 +133,15 @@ impl Balthazar {
         }
     }
 
-    // TODO: re-create it each time ?
+    // TODO: don't re-create it, it opens a new connection each time...
     fn chain(&self) -> Chain {
         Chain::new(self.config.chain())
+    }
+
+    fn ethereum_address(&self) -> Result<&misc::job::Address, chain::Error> {
+        self.config.chain().ethereum_address()
+            .as_ref()
+            .ok_or(chain::Error::MissingLocalAddress)
     }
 
     async fn send_msg_to_behaviour(&self, event: net::EventIn) {
@@ -215,22 +221,34 @@ impl Balthazar {
     /// Handle all inner events.
     async fn handle_event(self, event: Event) -> Result<(), Error> {
         match event {
-            Event::SharedStateProposal(p) => self.check_and_apply_proposal(p).await,
+            Event::SharedStateProposal(p) => {
+                eprintln!("Event::SharedStateProposal");
+                self.check_and_apply_proposal(p).await},
             Event::SharedStateChange(task_id, event) => {
+                eprintln!("Event::SharedStateChange");
                 self.handle_shared_state_change(task_id, event).await?
             }
             // Event::Swarm(e) => self.handle_swarm_event(e).await,
             // Event::ChainJobs(e) => self.handle_chain_event(e).await,
-            Event::Log { .. } => eprintln!("{}", event),
+            Event::Log { .. } => {
+                eprintln!("Event::Log");
+                eprintln!("{}", event)
+            },
             _ => unimplemented!(),
         }
+
+        if let NodeType::Manager = self.config.node_type() {
+                eprintln!("propose_assignements");
+            self.propose_assignements().await?;
+        }
+                eprintln!("Done");
         Ok(())
     }
 
     /// Handle events coming out of smart-contracts.
     async fn handle_chain(&self) -> Result<(), Error> {
         let chain = self.chain();
-        let addr = chain.local_address()?;
+        let addr = self.ethereum_address()?;
         chain
             .jobs_subscribe()
             .await?
@@ -248,13 +266,13 @@ impl Balthazar {
     /// Handle events coming out of Swarm.
     // TODO: update changes in the tasks in the SC which didn't come from us.
     // We only react to TaskPending and really expect the SC doesn't change otherwise...
-    async fn handle_chain_event(&self, event: chain::JobsEvent, local_address: &Address) {
+    async fn handle_chain_event(&self, event: chain::JobsEvent, ethereum_address: &Address) {
         self.spawn_log(LogKind::Blockchain, format!("{}", event))
             .await;
         if let chain::JobsEvent::TaskPending { task_id } = event {
             let msg = man::Proposal {
                 task_id: task_id.into_bytes(),
-                payment_address: Vec::from(local_address.as_bytes()),
+                payment_address: Vec::from(ethereum_address.as_bytes()),
                 proposal: Some(man::proposal::Proposal::NewTask(man::ProposeNewTask {})),
             };
             self.spawn_event(Event::SharedStateProposal(msg)).await;
@@ -311,8 +329,7 @@ impl Balthazar {
             panic!("Unknown or unassigned worker.");
         }
 
-        let chain = self.chain();
-        let local_address = chain.local_address().unwrap();
+        let ethereum_address = self.ethereum_address().unwrap();
 
         let proposal = match status {
             TaskStatus::Completed(_) => man::proposal::Proposal::Completed(man::ProposeCompleted {
@@ -362,7 +379,7 @@ impl Balthazar {
 
         let msg = man::Proposal {
             task_id: task_id.into_bytes(),
-            payment_address: Vec::from(local_address.as_bytes()),
+            payment_address: Vec::from(ethereum_address.as_bytes()),
             proposal: Some(proposal),
         };
         self.spawn_event(Event::SharedStateProposal(msg)).await;
@@ -405,6 +422,7 @@ impl Balthazar {
                     status,
                 },
             ) => {
+                eprintln!("41");
                 self.spawn_log(
                     LogKind::Manager,
                     format!(
@@ -413,7 +431,9 @@ impl Balthazar {
                     ),
                 )
                 .await;
+                eprintln!("4");
                 self.handle_task_status(peer_id, task_id, status).await;
+                eprintln!("5");
             }
             (NodeType::Worker, net::EventOut::TasksExecute(mut tasks)) => {
                 let mut runner_in = self.runner_in.clone();
@@ -439,84 +459,30 @@ impl Balthazar {
         task_id: TaskId,
         event: SharedStateEvent,
     ) -> Result<(), Error> {
-        let chain = self.chain();
-        let local_address = chain.local_address()?;
         match event {
-            SharedStateEvent::Pending => {
+            SharedStateEvent::Pending => (),
+            SharedStateEvent::Assigned { worker } => {
                 let (shared_state, mut workers) =
                     join!(self.shared_state.read(), self.workers.write());
-
-                let unassigned_workers = workers.get_unassigned_workers_sorted();
-                if !unassigned_workers.is_empty() {
-                    let task = shared_state.tasks.get(&task_id).expect("Unknown task.");
-                    let nb_unassigned = task.get_nb_unassigned().expect("Task not incomplete.");
-
-                    // cloning is needed because each `unassigned_workers` is immutable ref,
-                    // but `workers.reserve_slot` requires a mutable one.
-                    // TODO: avoid cloning...
-                    let unassigned_workers: Vec<_> = unassigned_workers
-                        .iter()
-                        .take(nb_unassigned)
-                        .map(|w| (*w).clone())
-                        .collect();
-                    for w in unassigned_workers.iter() {
-                        workers.reserve_slot(w);
-                    }
-
-                    let selected_offers: Vec<_> = unassigned_workers
-                        .iter()
-                        .take(nb_unassigned)
-                        .map(|peer_id| {
-                            let mut offer = man::Offer::default();
-                            offer.task_id = task_id.clone().into_bytes();
-                            offer.worker = (*peer_id).clone().into_bytes();
-                            // TODO: our address
-                            offer.workers_manager = self.peer_id.clone().into_bytes();
-                            offer.payment_address = Vec::from(local_address.as_bytes());
-                            offer.worker_price = 1;
-                            offer.network_price = 1;
-                            offer
-                        })
-                        .collect();
-
-                    // TODO: check workers specs, for now we expect them all to have the same...
-                    let msg = man::Proposal {
-                        task_id: task_id.into_bytes(),
-                        payment_address: Vec::from(local_address.as_bytes()),
-                        proposal: Some(man::proposal::Proposal::Scheduling(
-                            man::ProposeScheduling {
-                                all_offers_senders: Vec::new(),
-                                all_offers: Vec::new(),
-                                selected_offers,
-                            },
-                        )),
-                    };
-                    self.spawn_event(Event::SharedStateProposal(msg)).await;
-                }
-            }
-            SharedStateEvent::Assigned { worker } => {
-                let mut workers = self.workers.write().await;
                 if !workers.assign_slot(&worker, task_id.clone()) {
-                    let shared_state = self.shared_state.read().await;
                     self.send_abord_proposal(&shared_state, &worker, &task_id)
                         .await;
                 } else {
-                    let (job_id, _) = chain.jobs_get_task(&task_id, true).await?;
-                    let other_data = chain.jobs_get_other_data(&job_id, true).await?;
-                    let (timeout, _, _) = chain.jobs_get_parameters(&job_id, true).await?;
-                    let (_, max_network_usage, _) =
-                        chain.jobs_get_worker_parameters(&job_id, true).await?;
-                    let argument = chain.jobs_get_argument(&task_id, true).await?;
+                    let job = shared_state.get_job_from_task_id(&task_id).unwrap();
+                    let argument = {
+                        let task = shared_state.tasks.get(&task_id).unwrap();
+                        job.arguments()[task.arg_id() as usize].to_vec()
+                    };
                     self.send_msg_to_behaviour(net::EventIn::TasksExecute(
                         worker,
                         vec![TaskExecute {
                             task_id: task_id.into_bytes(),
-                            program_addresses: other_data.program_addresses,
-                            program_hash: other_data.program_hash,
-                            program_kind: other_data.program_kind,
+                            program_addresses: job.program_addresses().to_vec(),
+                            program_hash: job.program_hash().clone().into(),
+                            program_kind: job.program_kind().clone().into(),
                             argument,
-                            timeout,
-                            max_network_usage,
+                            timeout: job.timeout(),
+                            max_network_usage: job.max_network_usage(),
                         }],
                     ))
                     .await;
@@ -688,14 +654,13 @@ impl Balthazar {
         peer_id: &PeerId,
         task_id: &TaskId,
     ) {
-        let chain = self.chain();
-        let local_address = chain.local_address().unwrap();
+        let ethereum_address = self.ethereum_address().unwrap();
 
         let task = shared_state.tasks.get(&task_id).expect("Unknown task.");
 
         let msg = man::Proposal {
             task_id: task_id.clone().into_bytes(),
-            payment_address: Vec::from(local_address.as_bytes()),
+            payment_address: Vec::from(ethereum_address.as_bytes()),
             proposal: Some(man::proposal::Proposal::Failure(man::ProposeFailure {
                 new_nb_failures: task.nb_failures(),
                 kind: Some(man::propose_failure::Kind::Worker(
@@ -716,5 +681,74 @@ impl Balthazar {
             })),
         };
         self.spawn_event(Event::SharedStateProposal(msg)).await;
+    }
+
+    // TODO: avoid creating too many proposals...
+    // TODO: find a way to know when a pending can go back to available...
+    async fn propose_assignements(&self) -> Result<(), Error> {
+        eprintln!("0");
+        let ethereum_address = self.ethereum_address()?;
+
+        eprintln!("1");
+        let (shared_state, mut workers) = join!(self.shared_state.read(), self.workers.write());
+        eprintln!("2");
+        // eprintln!("{:?}", shared_state.get_nb_unassigned_per_task());
+        if !workers.get_unassigned_workers().is_empty() {
+        eprintln!("3");
+            for (task_id, nb_unassigned) in shared_state.get_nb_unassigned_per_task().drain(..) {
+        eprintln!("4");
+                let unassigned_workers = workers.get_unassigned_workers_sorted();
+                // eprintln!("{:?}", unassigned_workers);
+                if !unassigned_workers.is_empty() {
+        eprintln!("5");
+                    // cloning is needed because each `unassigned_workers` is immutable ref,
+                    // but `workers.reserve_slot` requires a mutable one.
+                    // TODO: avoid cloning...
+                    let unassigned_workers: Vec<_> = unassigned_workers
+                        .iter()
+                        .take(nb_unassigned)
+                        .map(|w| (*w).clone())
+                        .collect();
+                    for w in unassigned_workers.iter() {
+        eprintln!("6");
+                        workers.reserve_slot(w);
+                    }
+
+                    let selected_offers: Vec<_> = unassigned_workers
+                        .iter()
+                        .take(nb_unassigned)
+                        .map(|peer_id| {
+                            let mut offer = man::Offer::default();
+                            offer.task_id = task_id.clone().into_bytes();
+                            offer.worker = (*peer_id).clone().into_bytes();
+                            // TODO: our address
+                            offer.workers_manager = self.peer_id.clone().into_bytes();
+                            offer.payment_address = Vec::from(ethereum_address.as_bytes());
+                            offer.worker_price = 1;
+                            offer.network_price = 1;
+                            offer
+                        })
+                        .collect();
+        eprintln!("7");
+
+                    // TODO: check workers specs, for now we expect them all to have the same...
+                    let msg = man::Proposal {
+                        task_id: task_id.clone().into_bytes(),
+                        payment_address: Vec::from(ethereum_address.as_bytes()),
+                        proposal: Some(man::proposal::Proposal::Scheduling(
+                            man::ProposeScheduling {
+                                all_offers_senders: Vec::new(),
+                                all_offers: Vec::new(),
+                                selected_offers,
+                            },
+                        )),
+                    };
+        eprintln!("8");
+                    self.spawn_event(Event::SharedStateProposal(msg)).await;
+        eprintln!("9");
+                }
+            }
+        }
+        Ok(())
     }
 }

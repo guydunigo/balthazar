@@ -36,6 +36,7 @@ impl WorkerAssignment {
         }
     }
 
+    /*
     pub fn is_assigned(&self) -> bool {
         if let WorkerAssignment::Assigned(_) = self {
             true
@@ -43,6 +44,7 @@ impl WorkerAssignment {
             false
         }
     }
+    */
 }
 
 #[derive(Debug, Clone)]
@@ -78,9 +80,11 @@ impl Worker {
         self.assignments
     }
 
+    /*
     pub fn get_nb_slots(&self) -> usize {
         self.assignments().len()
     }
+    */
 
     pub fn get_nb_available_slots(&self) -> usize {
         self.assignments()
@@ -93,12 +97,14 @@ impl Worker {
         self.assignments().iter().filter(|a| a.is_pending()).count()
     }
 
+    /*
     pub fn get_nb_assigned_slots(&self) -> usize {
         self.assignments()
             .iter()
             .filter(|a| a.is_assigned())
             .count()
     }
+    */
 
     /// Sets an [`WorkerAssignment::Available`] to a [`WorkerAssignment::Pending`]
     /// and returns [`true`].
@@ -112,6 +118,7 @@ impl Worker {
         }
     }
 
+    /*
     /// Sets an [`WorkerAssignment::Pending`] to a [`WorkerAssignment::Available`]
     /// and returns [`true`].
     /// If there's no more available slot, returns [`false`]
@@ -123,6 +130,7 @@ impl Worker {
             false
         }
     }
+    */
 
     /// Assign an empty slot to a task.
     /// Tries first to take a [`WorkerAssignment::Pending`],
@@ -199,6 +207,7 @@ impl Workers {
     }
 
     /// Find workers wich have a slot not in [`WorkerAssignment::Assigned`] state.
+    // TODO: return Iterator?
     pub fn get_unassigned_workers(&self) -> Vec<&PeerId> {
         self.workers
             .iter()
@@ -211,6 +220,7 @@ impl Workers {
     /// placing the ones having [`WorkerAssignment::Available`] slots before the
     /// ones in having only [`WorkerAssignment::Pending`] ones.
     // TODO: more complex using nb assigned and all...
+    // TODO: return Iterator?
     pub fn get_unassigned_workers_sorted(&self) -> Vec<&PeerId> {
         let mut workers = self.get_unassigned_workers();
         workers.sort_by(|a, b| {
@@ -238,6 +248,7 @@ impl Workers {
         }
     }
 
+    /*
     pub fn unreserve_slot(&mut self, peer_id: &PeerId) -> bool {
         if let Some(val) = self.get_worker_mut(peer_id).map(|w| w.unreserve_slot()) {
             val
@@ -245,6 +256,7 @@ impl Workers {
             false
         }
     }
+    */
 
     pub fn assign_slot(&mut self, peer_id: &PeerId, task_id: TaskId) -> bool {
         if let Some(val) = self.get_worker_mut(peer_id).map(|w| w.assign_slot(task_id)) {

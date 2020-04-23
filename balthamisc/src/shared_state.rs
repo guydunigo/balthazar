@@ -1,6 +1,6 @@
 // TODO: Display
 extern crate libp2p;
-use super::job::{Address, TaskId};
+use super::job::{Address, Job, JobId, TaskId};
 pub use libp2p::PeerId;
 use proto::manager::TaskDefiniteErrorKind;
 use std::{collections::HashMap, fmt, time::SystemTime};
@@ -10,6 +10,9 @@ use std::{collections::HashMap, fmt, time::SystemTime};
 #[derive(Clone, Debug, Default)]
 pub struct SharedState {
     pub tasks: HashMap<TaskId, Task>,
+    // TODO: maybe not download and store the whole job, but each parameter individually
+    // when needed...
+    pub jobs: HashMap<JobId, Job>,
     // TODO: store/cache jobs ?
     // TODO: store messages ?
 }
@@ -24,6 +27,23 @@ impl fmt::Display for SharedState {
     }
 }
 
+impl SharedState {
+    // TODO: return Iterator?
+    pub fn get_nb_unassigned_per_task(&self) -> Vec<(&TaskId, usize)> {
+        self.tasks
+            .values()
+            .filter_map(|t| t.get_nb_unassigned().map(|nb| (t.task_id(), nb)))
+            .collect()
+    }
+
+    pub fn get_job_from_task_id(&self, task_id: &TaskId) -> Option<&Job> {
+        self.tasks
+            .get(task_id)
+            .map(|t| self.jobs.get(t.job_id()))
+            .flatten()
+    }
+}
+
 /// Representation of a task with all information relevant for the shared state.
 #[derive(Clone, Debug)]
 pub struct Task {
@@ -31,20 +51,32 @@ pub struct Task {
     nb_failures: u64,
     managers_addresses: Vec<Address>,
     completeness: TaskCompleteness,
+    job_id: JobId,
+    arg_id: u128,
 }
 
 impl Task {
-    pub fn new(task_id: TaskId, redundancy: u64) -> Self {
+    pub fn new(task_id: TaskId, job_id: JobId, arg_id: u128, redundancy: u64) -> Self {
         Task {
             task_id,
             nb_failures: 0,
             managers_addresses: Vec::new(),
             completeness: TaskCompleteness::new(redundancy),
+            job_id,
+            arg_id,
         }
     }
 
     pub fn task_id(&self) -> &TaskId {
         &self.task_id
+    }
+
+    pub fn job_id(&self) -> &JobId {
+        &self.job_id
+    }
+
+    pub fn arg_id(&self) -> u128 {
+        self.arg_id
     }
 
     pub fn nb_failures(&self) -> u64 {

@@ -150,7 +150,7 @@ pub const MIN_MAN_PRICE: u64 = 1;
 pub const DEFAULT_PURITY: bool = false;
 
 /// Description of a Job.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Job {
     program_kind: ProgramKind,
     program_addresses: Vec<String>,

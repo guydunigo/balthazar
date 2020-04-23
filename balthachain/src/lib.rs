@@ -32,8 +32,8 @@ use web3::{
     Web3,
 };
 
-/// Converts the integer value returned by the smart-contract into a [`TaskErrorKind`]
-/// enum.
+/// Converts the integer value returned by the smart-contract into a
+/// [`TaskDefiniteErrorKind`] enum.
 /// Returns [`None`] if the value is unknown.
 fn try_convert_task_error_kind(reason_nb: u64) -> Option<TaskDefiniteErrorKind> {
     match reason_nb {
