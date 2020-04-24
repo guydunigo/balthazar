@@ -1,4 +1,4 @@
-use misc::{job::TaskId, shared_state::PeerId};
+use misc::{job::TaskId, shared_state::PeerId, WorkerSpecs};
 use std::cmp::Ordering;
 
 // TODO: place Pending at the end of the list...
@@ -51,16 +51,18 @@ impl WorkerAssignment {
 pub struct Worker {
     peer_id: PeerId,
     assignments: Vec<WorkerAssignment>,
+    specs: WorkerSpecs,
     // TODO: workers specs
 }
 
 impl Worker {
-    pub fn new(peer_id: PeerId, cpu_count: u64) -> Self {
-        let mut assignments = Vec::with_capacity(cpu_count as usize);
-        assignments.resize_with(cpu_count as usize, Default::default);
+    pub fn new(peer_id: PeerId, specs: WorkerSpecs) -> Self {
+        let mut assignments = Vec::with_capacity(specs.cpu_count() as usize);
+        assignments.resize_with(specs.cpu_count() as usize, Default::default);
         Worker {
             peer_id,
             assignments,
+            specs,
         }
     }
 
@@ -201,9 +203,9 @@ pub struct Workers {
 }
 
 impl Workers {
-    pub fn push(&mut self, peer_id: PeerId, cpu_count: u64) {
+    pub fn push(&mut self, peer_id: PeerId, specs: WorkerSpecs) {
         if self.get_worker(&peer_id).is_none() {
-            self.workers.push(Worker::new(peer_id, cpu_count));
+            self.workers.push(Worker::new(peer_id, specs));
         } else {
             // TODO: or panic! ?
             eprintln!("Worker already known!");
@@ -249,6 +251,7 @@ impl Workers {
     /// ones in having only [`WorkerAssignment::Pending`] ones.
     // TODO: more complex using nb assigned and all...
     // TODO: return Iterator?
+    // TODO: check sorted is in right order...
     pub fn get_unassigned_workers_sorted(&self) -> Vec<&PeerId> {
         let mut workers = self.get_unassigned_workers();
         workers.sort_by(|a, b| {

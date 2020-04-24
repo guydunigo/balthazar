@@ -158,13 +158,15 @@ impl Balthazar {
         println!("Starting as {:?}...", node_type);
 
         let specs = WorkerSpecs::default();
+
         let keypair = balthernet::identity::Keypair::generate_secp256k1();
+        let peer_id = keypair.public().into_peer_id();
+        println!("Peer Id: {}", peer_id);
 
         let (swarm_in, swarm_out) = net::get_swarm(keypair.clone(), config.net(), Some(&specs));
         let (inner_in, inner_out) = channel(CHANNEL_SIZE);
         let (runner_in, runner_out) = channel(CHANNEL_SIZE);
 
-        let peer_id = keypair.public().into_peer_id();
         let balth = Balthazar::new(peer_id, config, inner_in, swarm_in, runner_in);
 
         // TODO: concurrent ?
@@ -390,15 +392,17 @@ impl Balthazar {
     /// > **Note:** Each action here should be very quick, otherwise it the whole swarm will pause.
     async fn handle_swarm_event(self, event: net::EventOut) {
         match (self.config.node_type(), event) {
-            (NodeType::Manager, net::EventOut::WorkerNew(peer_id)) => {
+            (NodeType::Manager, net::EventOut::WorkerNew(peer_id, specs)) => {
                 {
                     let mut workers = self.workers.write().await;
-                    // TODO: use workers specs.
-                    workers.push(peer_id.clone(), 1);
+                    workers.push(peer_id.clone(), specs.clone());
                 }
                 self.spawn_log(
                     LogKind::Swarm,
-                    format!("event: {:?}", net::EventOut::WorkerNew(peer_id.clone())),
+                    format!(
+                        "event: {:?}",
+                        net::EventOut::WorkerNew(peer_id.clone(), specs)
+                    ),
                 )
                 .await;
                 if let Some((wasm, args)) = self.config.wasm() {
@@ -564,7 +568,7 @@ impl Balthazar {
                         self.spawn_log(
                             LogKind::Worker,
                             format!(
-                                "task result for `{}` with `{}`: `{:?}`",
+                                "task result for `{}` with `{}`: `{}`",
                                 string_program_address,
                                 string_argument,
                                 String::from_utf8_lossy(&result[..])

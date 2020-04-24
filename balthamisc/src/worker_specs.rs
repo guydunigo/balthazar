@@ -1,3 +1,4 @@
+extern crate num_cpus;
 use proto::worker::ProgramKind;
 
 /// Technical specifications of a worker useful to estimate its performance
@@ -21,10 +22,12 @@ pub struct WorkerSpecs {
 }
 
 impl WorkerSpecs {
+    /// For `cpu_count`, if set to [`None`] will try to detect automatically
+    /// the amount of available logical CPUs.
     pub fn new(
         worker_price: u64,
         network_price: u64,
-        cpu_count: u64,
+        cpu_count: Option<u64>,
         memory: u64,
         network_speed: u64,
         supported_program_kinds: Vec<ProgramKind>,
@@ -32,7 +35,11 @@ impl WorkerSpecs {
         WorkerSpecs {
             worker_price,
             network_price,
-            cpu_count,
+            cpu_count: if let Some(cpu_count) = cpu_count {
+                cpu_count
+            } else {
+                num_cpus::get() as u64
+            },
             memory,
             network_speed,
             supported_program_kinds,
@@ -97,13 +104,13 @@ impl WorkerSpecs {
 
 impl Default for WorkerSpecs {
     fn default() -> Self {
+        /*
         WorkerSpecs {
             // TODO: based on market average  ?
             worker_price: 10,
             // TODO: based on market average  ?
             network_price: 10,
-            // TODO: auto detect
-            cpu_count: 4,
+            cpu_count: cpu_count::get() as u64,
             // TODO: auto detect / dynamic ?
             // TODO: use file size library for correct unit handling
             memory: 1024,
@@ -112,5 +119,7 @@ impl Default for WorkerSpecs {
             // TODO: auto detect based on availability of Docker...
             supported_program_kinds: vec![ProgramKind::Wasm0m1n0],
         }
+        */
+        WorkerSpecs::new(10, 10, None, 1024, 10, vec![ProgramKind::Wasm0m1n0])
     }
 }

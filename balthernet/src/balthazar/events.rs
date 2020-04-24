@@ -39,7 +39,8 @@ pub enum EventOut {
     /// Events created by [`Balthandler`] which are not handled directly in [`BalthBehaviour`]
     Handler(PeerId, HandlerOut<QueryId>),
     /// A new worker is now managed by us.
-    WorkerNew(PeerId),
+    // TODO: specs directly or by ref?
+    WorkerNew(PeerId, WorkerSpecs),
     /// When in a relationship, on of our workers answered a ping request, so the
     /// relationship still holds.
     WorkerPong(PeerId),
@@ -388,12 +389,13 @@ pub fn manager_request(
             peer_rc.write().unwrap().node_type
         {
             // TODO: what should be done if some specs are already known ?
-            *specs_opt = Some(worker_specs);
+            // TODO: avoid cloning ?
+            *specs_opt = Some(worker_specs.clone());
             data.workers.insert(
                 peer_id.clone(),
                 (peer_rc.clone(), Instant::now(), Instant::now()),
             );
-            behaviour.inject_generate_event(EventOut::WorkerNew(peer_id));
+            behaviour.inject_generate_event(EventOut::WorkerNew(peer_id, worker_specs));
             HandlerIn::ManagerAnswer {
                 accepted: true,
                 request_id,

@@ -509,7 +509,7 @@ fn process_request<TUserData>(
                 worker_specs: WorkerSpecs::new(
                     worker_price,
                     network_price,
-                    cpu_count,
+                    Some(cpu_count),
                     memory,
                     network_speed,
                     supported_program_kinds

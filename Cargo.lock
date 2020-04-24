@@ -216,6 +216,7 @@ dependencies = [
  "libp2p",
  "multibase",
  "multihash",
+ "num_cpus",
  "parity-multiaddr 0.8.0",
  "tokio 0.2.18",
 ]

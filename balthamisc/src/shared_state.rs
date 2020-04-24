@@ -29,10 +29,13 @@ impl fmt::Display for SharedState {
 
 impl SharedState {
     // TODO: return Iterator?
+    /// Returns the number of unassigned replicas per task,
+    /// returning only the non-null ones.
     pub fn get_nb_unassigned_per_task(&self) -> Vec<(&TaskId, usize)> {
         self.tasks
             .values()
             .filter_map(|t| t.get_nb_unassigned().map(|nb| (t.task_id(), nb)))
+            .filter(|(_, nb)| *nb > 0)
             .collect()
     }
 
