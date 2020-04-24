@@ -1,5 +1,5 @@
-use super::{config::ChainConfig, Chain, Error, JobsEventKind};
-use futures::{executor::block_on, future, StreamExt};
+use super::{config::ChainConfig, Chain, Error, JobsEvent, JobsEventKind};
+use futures::{executor::block_on, StreamExt};
 use misc::{
     job::{Job, JobId, ProgramKind, TaskId},
     multihash::Multihash,
@@ -18,7 +18,7 @@ pub enum RunMode {
     JobsCounterInc,
     */
     /// Subscribe to Jobs smart contract given events or if none are provided, all of them.
-    JobsSubscribe(Vec<JobsEventKind>),
+    JobsSubscribe(Vec<JobsEventKind>, Option<usize>),
     /// List all Jobs smart contract events.
     JobsEvents,
     /// Create draft job and return the cost to pay.
@@ -142,27 +142,36 @@ async fn run_async(mode: &RunMode, config: &ChainConfig) -> Result<(), Error> {
             println!("Counter increased.");
         }
         */
-        RunMode::JobsSubscribe(events) => {
+        RunMode::JobsSubscribe(events, nb) => {
+            async fn for_each(e: Result<JobsEvent, Error>) {
+                match e {
+                    Ok(evt) => println!("{}", evt),
+                    Err(_) => println!("{:?}", e),
+                }
+            }
+
+            let nb = if let Some(nb) = nb {
+                *nb
+            } else {
+                // TODO: not very clean but shouldn't be hit anytime soon...
+                usize::MAX
+            };
+
             if events.is_empty() {
-                let stream = Box::new(chain.jobs_subscribe().await?);
-                stream
-                    .for_each(|e| {
-                        match e {
-                            Ok(evt) => println!("{}", evt),
-                            Err(_) => println!("{:?}", e),
-                        }
-                        future::ready(())
-                    })
+                chain
+                    .jobs_subscribe()
+                    .await?
+                    .take(nb)
+                    .for_each(for_each)
                     .await;
             } else {
-                let stream = chain.jobs_subscribe_to_event_kinds(&events[..]).await?;
-                stream
-                    .for_each(|e| {
-                        println!("{:?}", e);
-                        future::ready(())
-                    })
+                chain
+                    .jobs_subscribe_to_event_kinds(&events[..])
+                    .await?
+                    .take(nb)
+                    .for_each(for_each)
                     .await;
-            }
+            };
         }
         RunMode::JobsEvents => {
             for evt in chain.jobs_events()? {

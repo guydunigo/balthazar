@@ -3,7 +3,7 @@
 #![allow(clippy::redundant_clone)]
 extern crate parity_multiaddr as multiaddr;
 
-use clap::{arg_enum, Clap};
+use clap::Clap;
 // TODO: use uniform Multiaddr
 use lib::{
     chain::{self, JobsEventKind},
@@ -15,7 +15,7 @@ use lib::{
     net::Multiaddr as Libp2pMultiaddr,
     proto::{NodeType, NodeTypeContainer},
     store::ipfs::IpfsStorageCreationError,
-    store::{Multiaddr, StorageType},
+    store::Multiaddr,
     BalthazarConfig, RunMode,
 };
 use std::{
@@ -23,7 +23,6 @@ use std::{
     io,
     io::{stdin, Read},
     path::PathBuf,
-    str::FromStr,
 };
 
 #[derive(Debug)]
@@ -200,7 +199,12 @@ pub enum ChainJobsSub {
     },
     */
     /// Subscribe to contract's events.
-    Subscribe { events_names: Vec<JobsEventKind> },
+    Subscribe {
+        events_names: Vec<JobsEventKind>,
+        /// Maximum number of events get before exiting.
+        #[clap(name = "take", short, long)]
+        nb: Option<usize>,
+    },
     /// List events and their parameters.
     Events,
     /// Create a new draft.
@@ -301,8 +305,8 @@ impl Into<chain::RunMode> for ChainSub {
                 inc: true,
             }) => chain::RunMode::JobsCounterInc,
             */
-            ChainSub::Jobs(ChainJobsSub::Subscribe { events_names }) => {
-                chain::RunMode::JobsSubscribe(events_names)
+            ChainSub::Jobs(ChainJobsSub::Subscribe { events_names, nb }) => {
+                chain::RunMode::JobsSubscribe(events_names, nb)
             }
             ChainSub::Jobs(ChainJobsSub::Events) => chain::RunMode::JobsEvents,
             ChainSub::Jobs(ChainJobsSub::Draft {
@@ -417,14 +421,16 @@ pub struct BalthazarArgs {
     /// Address to connect to a running IPFS daemon, default: address in file `~/.ipfs/api` or `/ip4/127.0.0.1/5001`.
     #[clap(short, long)]
     ipfs_api: Option<Multiaddr>,
+    /*
     /// Storage to use as default for storing files, as well as for getting files when source
     /// couldn't be determined.
+    // TODO: update that.
     #[clap(short = "s", long, case_insensitive(true),
         possible_values(&DefaultStorageArg::variants()),
         parse(try_from_str = try_parse_default_storage),
     )]
     default_storage: Option<StorageType>,
-
+    */
     /// The websocket address to connect the Ethereum json RPC endpoint.
     /// Default to `ws://localhost:8546`.
     #[clap(short, long)]
@@ -502,9 +508,11 @@ impl std::convert::TryInto<(RunMode, BalthazarConfig)> for BalthazarArgs {
             if let Some(ipfs_api) = self.ipfs_api {
                 store.set_ipfs_api(Some(ipfs_api))?;
             }
+            /*
             if let Some(default_storage) = self.default_storage {
                 store.set_default_storage(default_storage);
             }
+            */
         }
         {
             let chain = config.chain_mut();
@@ -529,6 +537,7 @@ impl std::convert::TryInto<(RunMode, BalthazarConfig)> for BalthazarArgs {
     }
 }
 
+/*
 arg_enum! {
     #[derive(PartialEq, Debug, Clone, Copy)]
     pub enum BestMethod {
@@ -546,12 +555,12 @@ impl Into<JobBestMethod> for BestMethod {
         }
     }
 }
+*/
 
-arg_enum! {
-    #[derive(PartialEq, Debug)]
-    pub enum DefaultStorageArg {
-        Ipfs,
-    }
+/*
+#[derive(Clap, PartialEq, Debug, Clone, Copy)]
+pub enum DefaultStorageArg {
+    Ipfs,
 }
 
 impl Into<StorageType> for DefaultStorageArg {
@@ -562,9 +571,11 @@ impl Into<StorageType> for DefaultStorageArg {
     }
 }
 
-fn try_parse_default_storage(s: &str) -> Result<StorageType, String> {
-    DefaultStorageArg::from_str(s).map(|a| a.into())
+fn try_parse_default_storage(s: &str) -> Result<StorageType, clap::Error> {
+    // DefaultStorageArg::from_str(s).map(|a| a.into())
+    DefaultStorageArg::try_parse_from([s].iter()).map(|a| a.into())
 }
+*/
 
 fn try_parse_workers(s: &str) -> Result<(Address, u64, u64), String> {
     let mut iter = s.split(',');
