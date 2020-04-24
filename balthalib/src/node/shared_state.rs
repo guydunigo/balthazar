@@ -599,7 +599,6 @@ impl Balthazar {
         task_id: &TaskId,
         proposal: man::ProposeCompleted,
     ) -> Result<Vec<StateChange>, String> {
-        eprintln!("bbb");
         let task = check_task_is_known(shared_state, task_id)?;
         if !task.is_incomplete() {
             return Err("Task already no more incomplete.".to_string());
@@ -647,7 +646,6 @@ impl Balthazar {
             return Err("TaskStatus not corresponding to this task.".to_string());
         }
 
-        eprintln!("ccc");
         Ok(vec![StateChange::Complete { result }])
     }
 }

@@ -7,13 +7,13 @@ use std::{collections::HashMap, fmt, time::SystemTime};
 
 /// State shared between managers used for consensus to track the precise state of
 /// every tasks from creation to completion.
+// TODO: delete jobs (and maybe tasks) when completed.
 #[derive(Clone, Debug, Default)]
 pub struct SharedState {
     pub tasks: HashMap<TaskId, Task>,
     // TODO: maybe not download and store the whole job, but each parameter individually
     // when needed...
     pub jobs: HashMap<JobId, Job>,
-    // TODO: store/cache jobs ?
     // TODO: store messages ?
 }
 

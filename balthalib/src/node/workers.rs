@@ -132,6 +132,14 @@ impl Worker {
     }
     */
 
+    /// Sets all [`WorkerAssignment::Pending`] slots to a [`WorkerAssignment::Available`].
+    pub fn unreserve_all_slots(&mut self) {
+        self.assignments_mut()
+            .iter_mut()
+            .filter(|a| a.is_pending())
+            .for_each(|a| *a = WorkerAssignment::Available);
+    }
+
     /// Assign an empty slot to a task.
     /// Tries first to take a [`WorkerAssignment::Pending`],
     /// and then take tries to find a [`WorkerAssignment::Available`].
@@ -165,6 +173,26 @@ impl Worker {
             false
         }
     }
+
+    /*
+    /// Sets all [`WorkerAssignment::Assign`] to a [`WorkerAssignment::Available`]
+    /// and the list of all unassigned tasks.
+    pub fn unassign_all_slots(&mut self) -> Vec<TaskId> {
+        self.assignments_mut()
+            .iter_mut()
+            .filter_map(|a| {
+                if let WorkerAssignment::Assigned(task_id) = a {
+                    let task_id = task_id.clone();
+                    *a = WorkerAssignment::Available;
+                    // TODO: not clone.
+                    Some(task_id)
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+    */
 }
 
 #[derive(Debug, Clone, Default)]
@@ -257,6 +285,14 @@ impl Workers {
         }
     }
     */
+
+    /// Sets all [`WorkerAssignment::Pending`] slots for all workers
+    /// to a [`WorkerAssignment::Available`].
+    pub fn unreserve_all_slots(&mut self) {
+        self.workers
+            .iter_mut()
+            .for_each(|w| w.unreserve_all_slots());
+    }
 
     pub fn assign_slot(&mut self, peer_id: &PeerId, task_id: TaskId) -> bool {
         if let Some(val) = self.get_worker_mut(peer_id).map(|w| w.assign_slot(task_id)) {

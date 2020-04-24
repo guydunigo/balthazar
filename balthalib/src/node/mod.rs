@@ -12,9 +12,9 @@ use std::{
     future::Future,
     pin::Pin,
     sync::Arc,
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
-use tokio::{runtime::Runtime, sync::RwLock};
+use tokio::{runtime::Runtime, sync::RwLock, time::interval};
 
 use async_ctrlc::CtrlC;
 use chain::Chain;
@@ -39,6 +39,7 @@ mod workers;
 use workers::*;
 
 const CHANNEL_SIZE: usize = 1024;
+const SHARED_STATE_CHECK_INTERVAL: Duration = Duration::from_millis(500);
 
 pub fn run(config: BalthazarConfig) -> Result<(), Error> {
     Runtime::new().unwrap().block_on(Balthazar::run(config))
@@ -81,7 +82,7 @@ enum LogKind {
     Manager,
     Blockchain,
     SharedState,
-    // Error,
+    Error,
 }
 
 impl fmt::Display for LogKind {
@@ -92,7 +93,7 @@ impl fmt::Display for LogKind {
             LogKind::Manager => "M",
             LogKind::Blockchain => "B",
             LogKind::SharedState => "T",
-            // LogKind::Error => "E",
+            LogKind::Error => "E",
         };
         write!(fmt, "{}", letter)
     }
@@ -139,7 +140,9 @@ impl Balthazar {
     }
 
     fn ethereum_address(&self) -> Result<&misc::job::Address, chain::Error> {
-        self.config.chain().ethereum_address()
+        self.config
+            .chain()
+            .ethereum_address()
             .as_ref()
             .ok_or(chain::Error::MissingLocalAddress)
     }
@@ -181,12 +184,21 @@ impl Balthazar {
 
         if let NodeType::Manager = node_type {
             let chain_fut = balth.handle_chain();
+            let shared_state_check = interval(SHARED_STATE_CHECK_INTERVAL).for_each(|_| async {
+                let balth = balth.clone();
+                if let Err(err) = balth.propose_assignements().await {
+                    balth
+                        .spawn_log(LogKind::Error, format!("Propose assignments: {}", err))
+                        .await;
+                }
+            });
             select! {
-                res = chain_fut.fuse() => res?,
                 _ = swarm_fut.fuse() => (),
                 _ = runner_fut.fuse() => (),
                 res = channel_fut.fuse() => res.expect("Channel stream ended but there was no error.")?,
                 _ = ctrlc_fut.fuse() => (),
+                res = chain_fut.fuse() => res?,
+                _ = shared_state_check.fuse() => (),
             }
         } else {
             select! {
@@ -221,27 +233,15 @@ impl Balthazar {
     /// Handle all inner events.
     async fn handle_event(self, event: Event) -> Result<(), Error> {
         match event {
-            Event::SharedStateProposal(p) => {
-                eprintln!("Event::SharedStateProposal");
-                self.check_and_apply_proposal(p).await},
+            Event::SharedStateProposal(p) => self.check_and_apply_proposal(p).await,
             Event::SharedStateChange(task_id, event) => {
-                eprintln!("Event::SharedStateChange");
                 self.handle_shared_state_change(task_id, event).await?
             }
             // Event::Swarm(e) => self.handle_swarm_event(e).await,
             // Event::ChainJobs(e) => self.handle_chain_event(e).await,
-            Event::Log { .. } => {
-                eprintln!("Event::Log");
-                eprintln!("{}", event)
-            },
+            Event::Log { .. } => eprintln!("{}", event),
             _ => unimplemented!(),
         }
-
-        if let NodeType::Manager = self.config.node_type() {
-                eprintln!("propose_assignements");
-            self.propose_assignements().await?;
-        }
-                eprintln!("Done");
         Ok(())
     }
 
@@ -422,7 +422,6 @@ impl Balthazar {
                     status,
                 },
             ) => {
-                eprintln!("41");
                 self.spawn_log(
                     LogKind::Manager,
                     format!(
@@ -431,9 +430,7 @@ impl Balthazar {
                     ),
                 )
                 .await;
-                eprintln!("4");
                 self.handle_task_status(peer_id, task_id, status).await;
-                eprintln!("5");
             }
             (NodeType::Worker, net::EventOut::TasksExecute(mut tasks)) => {
                 let mut runner_in = self.runner_in.clone();
@@ -492,6 +489,7 @@ impl Balthazar {
                 worker,
                 workers_manager: _,
             } => {
+                // TODO: send abord to worker.
                 let mut workers = self.workers.write().await;
                 workers.unassign_slot(&worker, &task_id);
             }
@@ -686,21 +684,18 @@ impl Balthazar {
     // TODO: avoid creating too many proposals...
     // TODO: find a way to know when a pending can go back to available...
     async fn propose_assignements(&self) -> Result<(), Error> {
-        eprintln!("0");
         let ethereum_address = self.ethereum_address()?;
 
-        eprintln!("1");
         let (shared_state, mut workers) = join!(self.shared_state.read(), self.workers.write());
-        eprintln!("2");
-        // eprintln!("{:?}", shared_state.get_nb_unassigned_per_task());
         if !workers.get_unassigned_workers().is_empty() {
-        eprintln!("3");
+            // We consider that between two calls, all (or nearly) proposals have been
+            // accepted or rejected, so all pending workers can go back to available.
+            workers.unreserve_all_slots();
+
             for (task_id, nb_unassigned) in shared_state.get_nb_unassigned_per_task().drain(..) {
-        eprintln!("4");
                 let unassigned_workers = workers.get_unassigned_workers_sorted();
-                // eprintln!("{:?}", unassigned_workers);
+                eprintln!("{:?}", unassigned_workers);
                 if !unassigned_workers.is_empty() {
-        eprintln!("5");
                     // cloning is needed because each `unassigned_workers` is immutable ref,
                     // but `workers.reserve_slot` requires a mutable one.
                     // TODO: avoid cloning...
@@ -710,7 +705,6 @@ impl Balthazar {
                         .map(|w| (*w).clone())
                         .collect();
                     for w in unassigned_workers.iter() {
-        eprintln!("6");
                         workers.reserve_slot(w);
                     }
 
@@ -729,7 +723,6 @@ impl Balthazar {
                             offer
                         })
                         .collect();
-        eprintln!("7");
 
                     // TODO: check workers specs, for now we expect them all to have the same...
                     let msg = man::Proposal {
@@ -743,9 +736,7 @@ impl Balthazar {
                             },
                         )),
                     };
-        eprintln!("8");
                     self.spawn_event(Event::SharedStateProposal(msg)).await;
-        eprintln!("9");
                 }
             }
         }
