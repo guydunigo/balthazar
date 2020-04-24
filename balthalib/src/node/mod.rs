@@ -698,7 +698,6 @@ impl Balthazar {
 
             for (task_id, nb_unassigned) in shared_state.get_nb_unassigned_per_task().drain(..) {
                 let unassigned_workers = workers.get_unassigned_workers_sorted();
-                eprintln!("{:?}", unassigned_workers);
                 if !unassigned_workers.is_empty() {
                     // cloning is needed because each `unassigned_workers` is immutable ref,
                     // but `workers.reserve_slot` requires a mutable one.
