@@ -193,34 +193,49 @@ pub trait Executor {
 
 pub fn run(
     wasm_program: Vec<u8>,
-    arg: Vec<u8>,
+    args: Vec<Vec<u8>>,
     nb_times: usize,
 ) -> ExecutorResult<(), wasm::Error> {
     let inst_read = Instant::now();
     let nb_times = if nb_times == 0 { 1 } else { nb_times };
     let mut exec = WasmExecutor::default();
 
-    let result = exec.run_sync(&wasm_program[..], &arg[..], 10, 0)?;
-    // TODO: store all results
-    for _ in 0..(nb_times - 1) {
-        exec.run_sync(&wasm_program[..], &arg[..], 10, 0)?;
+    let mut results = Vec::with_capacity(args.len());
+
+    for arg in args.iter() {
+        let result = exec.run_sync(&wasm_program[..], &arg[..], 10, 0)?;
+        // TODO: store all results
+        for _ in 0..(nb_times - 1) {
+            exec.run_sync(&wasm_program[..], &arg[..], 10, 0)?;
+        }
+        let inst_res = Instant::now();
+
+        println!(
+            "{} gives {}",
+            String::from_utf8_lossy(&arg[..]),
+            String::from_utf8_lossy(&result[..])
+        );
+        println!(
+            "times:\n- running all {}ms\n- running average {}ms",
+            (inst_res - inst_read).as_millis(),
+            (inst_res - inst_read).as_millis() / (nb_times as u128),
+        );
+        results.push((arg, result));
     }
-    let inst_res = Instant::now();
 
-    println!(
-        "{:?} gives {:?}",
-        String::from_utf8_lossy(&arg[..]),
-        String::from_utf8_lossy(&result[..])
-    );
-    println!(
-        "times:\n- running all {}ms\n- running average {}ms",
-        (inst_res - inst_read).as_millis(),
-        (inst_res - inst_read).as_millis() / (nb_times as u128),
-    );
-
-    print!("Testing...");
-    let test_result = exec.test_sync(&wasm_program[..], &arg[..], &vec![result][..], 10)?;
-    println!(" {}", test_result);
+    for (arg, result) in results.drain(..) {
+        print!(
+            "Testing {} : {}... ",
+            String::from_utf8_lossy(&arg[..]),
+            String::from_utf8_lossy(&result[..])
+        );
+        let test_result = exec.test_sync(&wasm_program[..], &arg[..], &vec![result][..], 10)?;
+        if test_result == 0 {
+            println!("passed.");
+        } else {
+            println!("failed.");
+        }
+    }
 
     Ok(())
 }

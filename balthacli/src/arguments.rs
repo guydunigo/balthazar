@@ -70,15 +70,17 @@ pub enum Subcommand {
         /// Provide a wasm program that will be passed to workers.
         wasm_file_path: PathBuf,
         /// Arguments to pass to the program.
-        args: String,
+        args: Vec<String>,
         /// Number of times to run the program.
+        #[clap(name = "repeat", short, long)]
         nb_times: Option<usize>,
     },
     /// Run the balthwasm program natively.
     Native {
         /// Arguments to pass to the program.
-        args: String,
+        args: Vec<String>,
         /// Number of times to run the program.
+        #[clap(name = "repeat", short, long)]
         nb_times: Option<usize>,
     },
     /// Miscelanous tools
@@ -97,13 +99,17 @@ impl std::convert::TryInto<RunMode> for Subcommand {
                 wasm_file_path,
                 args,
                 nb_times,
-            } => RunMode::Executor(
-                read(wasm_file_path).map_err(ParseArgsError::WasmProgramFileReadError)?,
-                args.clone().into_bytes(),
-                nb_times.unwrap_or(1),
-            ),
+            } => {
+                let args = args.clone().drain(..).map(|a| a.into_bytes()).collect();
+                RunMode::Executor(
+                    read(wasm_file_path).map_err(ParseArgsError::WasmProgramFileReadError)?,
+                    args,
+                    nb_times.unwrap_or(1),
+                )
+            }
             Subcommand::Native { args, nb_times } => {
-                RunMode::Native(args.clone().into_bytes(), nb_times.unwrap_or(1))
+                let args = args.clone().drain(..).map(|a| a.into_bytes()).collect();
+                RunMode::Native(args, nb_times.unwrap_or(1))
             }
             // TODO: not clone, use references
             Subcommand::Misc(mode) => {
