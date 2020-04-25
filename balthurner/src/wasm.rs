@@ -177,6 +177,7 @@ impl Handle for WasmHandle {
 pub struct WasmExecutor {
     enabled: bool,
     storage: StoragesWrapper,
+    // TODO: empty cache sometimes ?
     cache: HashMap<Multihash, Arc<Module>>,
 }
 
@@ -286,6 +287,7 @@ impl WasmExecutor {
     // TODO: or use static lazy library?
     #[allow(clippy::map_entry)]
     fn compile(&mut self, program: &[u8]) -> Result<Arc<Module>, CompileError> {
+        // TODO: hash the value?
         let hash = DefaultHash::digest(&program[..]);
         let module = if !self.cache.contains_key(&hash) {
             let module = Arc::new(compile(&program[..])?);

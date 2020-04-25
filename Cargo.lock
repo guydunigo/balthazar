@@ -218,7 +218,7 @@ dependencies = [
  "balthurner",
  "balthwasm",
  "futures 0.3.4",
- "tokio 0.2.18",
+ "tokio 0.2.19",
 ]
 
 [[package]]
@@ -233,7 +233,7 @@ dependencies = [
  "multihash",
  "num_cpus",
  "parity-multiaddr 0.8.0",
- "tokio 0.2.18",
+ "tokio 0.2.19",
 ]
 
 [[package]]
@@ -258,7 +258,7 @@ dependencies = [
  "http 0.2.1",
  "ipfs-api",
  "parity-multiaddr 0.8.0",
- "tokio 0.2.18",
+ "tokio 0.2.19",
 ]
 
 [[package]]
@@ -269,7 +269,7 @@ dependencies = [
  "balthaproto",
  "futures 0.3.4",
  "libp2p",
- "tokio 0.2.18",
+ "tokio 0.2.19",
  "void",
 ]
 
@@ -511,7 +511,7 @@ checksum = "4785bdd1c96b2a846b2bd7cc02e86b6b3dbf14e7e53446c4f54c92a361040822"
 [[package]]
 name = "clap"
 version = "3.0.0-beta.1"
-source = "git+https://github.com/clap-rs/clap/#7b5e2cf89769a3f92275892f8edb4d97295a4257"
+source = "git+https://github.com/clap-rs/clap/#c1b010501659834b651b57332255c063486fa814"
 dependencies = [
  "atty",
  "bitflags 1.2.1",
@@ -529,7 +529,7 @@ dependencies = [
 [[package]]
 name = "clap_derive"
 version = "3.0.0-beta.1"
-source = "git+https://github.com/clap-rs/clap/#7b5e2cf89769a3f92275892f8edb4d97295a4257"
+source = "git+https://github.com/clap-rs/clap/#c1b010501659834b651b57332255c063486fa814"
 dependencies = [
  "heck",
  "proc-macro-error",
@@ -1272,7 +1272,7 @@ dependencies = [
  "indexmap",
  "log 0.4.8",
  "slab 0.4.2",
- "tokio 0.2.18",
+ "tokio 0.2.19",
  "tokio-util 0.3.1",
 ]
 
@@ -1439,7 +1439,7 @@ dependencies = [
  "net2",
  "pin-project",
  "time",
- "tokio 0.2.18",
+ "tokio 0.2.19",
  "tower-service",
  "want 0.3.0",
 ]
@@ -1479,7 +1479,7 @@ dependencies = [
  "bytes 0.5.4",
  "hyper 0.13.5",
  "native-tls",
- "tokio 0.2.18",
+ "tokio 0.2.19",
  "tokio-tls 0.3.0",
 ]
 
@@ -1606,7 +1606,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_urlencoded 0.6.1",
- "tokio 0.2.18",
+ "tokio 0.2.19",
  "tokio-util 0.2.0",
  "walkdir",
 ]
@@ -3493,9 +3493,9 @@ dependencies = [
 
 [[package]]
 name = "tokio"
-version = "0.2.18"
+version = "0.2.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34ef16d072d2b6dc8b4a56c70f5c5ced1a37752116f8e7c1e80c659aa7cb6713"
+checksum = "7d9c43f1bb96970e153bcbae39a65e249ccb942bd9d36dbdf086024920417c9c"
 dependencies = [
  "bytes 0.5.4",
  "fnv",
@@ -3691,7 +3691,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7bde02a3a5291395f59b06ec6945a3077602fac2b07eeeaf0dee2122f3619828"
 dependencies = [
  "native-tls",
- "tokio 0.2.18",
+ "tokio 0.2.19",
 ]
 
 [[package]]
@@ -3755,7 +3755,7 @@ dependencies = [
  "futures-sink",
  "log 0.4.8",
  "pin-project-lite",
- "tokio 0.2.18",
+ "tokio 0.2.19",
 ]
 
 [[package]]
@@ -3769,7 +3769,7 @@ dependencies = [
  "futures-sink",
  "log 0.4.8",
  "pin-project-lite",
- "tokio 0.2.18",
+ "tokio 0.2.19",
 ]
 
 [[package]]

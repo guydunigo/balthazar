@@ -51,7 +51,7 @@ pub enum Error {
     JobNotOurs(JobId),
     /// Local address isn't the oracle, so it can't perform the operation.
     LocalAddressNotOracle(Address, Address),
-    /// [`TaskErrorKind`] is not compatible with the Jobs smart-contract.
+    /// [`TaskDefiniteErrorKind`] is not compatible with the Jobs smart-contract.
     TaskErrorKindNotCompatibleWithJobs(TaskDefiniteErrorKind),
 }
 
