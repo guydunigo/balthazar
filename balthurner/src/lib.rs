@@ -197,12 +197,13 @@ pub fn run(
     nb_times: usize,
 ) -> ExecutorResult<(), wasm::Error> {
     let inst_read = Instant::now();
-    let nb_times = if nb_times == 0 { 1 } else { nb_times };
     let mut exec = WasmExecutor::default();
 
     let mut results = Vec::with_capacity(args.len());
 
     for arg in args.iter() {
+        let inst_read = Instant::now();
+        let nb_times = if nb_times == 0 { 1 } else { nb_times };
         let result = exec.run_sync(&wasm_program[..], &arg[..], 10, 0)?;
         // TODO: store all results
         for _ in 0..(nb_times - 1) {
@@ -222,6 +223,13 @@ pub fn run(
         );
         results.push((arg, result));
     }
+
+    let inst_res = Instant::now();
+    println!(
+        "Total:\n- running all {}ms\n- running average {}ms",
+        (inst_res - inst_read).as_millis(),
+        (inst_res - inst_read).as_millis() / ((args.len() * nb_times) as u128),
+    );
 
     for (arg, result) in results.drain(..) {
         print!(

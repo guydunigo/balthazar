@@ -1,12 +1,13 @@
 use std::time::Instant;
 
 pub fn run(args: Vec<Vec<u8>>, nb_times: usize) -> Result<(), i64> {
-    let inst_read = Instant::now();
     let nb_times = if nb_times == 0 { 1 } else { nb_times };
 
     let mut results = Vec::with_capacity(args.len());
 
+    let inst_read = Instant::now();
     for arg in args.iter() {
+        let inst_read = Instant::now();
         let result = wasm::my_run(arg.clone())?;
         for _ in 0..(nb_times - 1) {
             wasm::my_run(arg.clone())?;
@@ -27,9 +28,8 @@ pub fn run(args: Vec<Vec<u8>>, nb_times: usize) -> Result<(), i64> {
     }
 
     let inst_res = Instant::now();
-    println!("Total:");
     println!(
-        "times:\n- running all {}ms\n- running average {}ms",
+        "Total:\n- running all {}ms\n- running average {}ms",
         (inst_res - inst_read).as_millis(),
         (inst_res - inst_read).as_millis() / ((args.len() * nb_times) as u128),
     );

@@ -1,13 +1,16 @@
 extern crate balthastore as store;
 
-use futures::future::{BoxFuture, FutureExt, TryFutureExt};
-use misc::{spawn_thread_async, SpawnThreadError};
+use futures::future::{ready, BoxFuture, FutureExt, TryFutureExt};
+use misc::{job::DefaultHash, multihash::Multihash, spawn_thread_async, SpawnThreadError};
 use std::{
+    collections::HashMap,
     fmt,
     sync::{Arc, RwLock},
 };
 use store::{FetchStorage, StoragesWrapper};
-use wasmer_runtime::{imports, instantiate, Array, Ctx, Func, Instance, WasmPtr};
+use wasmer_runtime::{
+    compile, error::CompileError, imports, Array, Ctx, Func, Instance, Module, WasmPtr,
+};
 
 use super::{Executor, ExecutorError, ExecutorResult, Handle};
 pub use wasmer_runtime::error;
@@ -20,6 +23,8 @@ pub enum Error {
     PoisonError,
     /// Error when spawning the separate thread for the executor, see [`SpawnThreadError`].
     SpawnThreadError(SpawnThreadError),
+    /// Error compiling the wasm module.
+    CompileError(CompileError),
 }
 
 impl fmt::Display for Error {
@@ -172,6 +177,7 @@ impl Handle for WasmHandle {
 pub struct WasmExecutor {
     enabled: bool,
     storage: StoragesWrapper,
+    cache: HashMap<Multihash, Arc<Module>>,
 }
 
 impl WasmExecutor {
@@ -181,7 +187,11 @@ impl WasmExecutor {
     }
     */
 
-    fn get_instance(wasm: &[u8], argument: Vec<u8>, run_test: RunTest) -> error::Result<Instance> {
+    fn get_instance(
+        module: &Module,
+        argument: Vec<u8>,
+        run_test: RunTest,
+    ) -> error::Result<Instance> {
         // TODO: overflow ?
         let argument_len = argument.len() as u32;
         let (results_len, results_lens, results, result) = match run_test {
@@ -226,7 +236,7 @@ impl WasmExecutor {
             },
         };
 
-        let instance = instantiate(&wasm[..], &import_objects)?;
+        let instance = module.instantiate(&import_objects)?;
         Ok(instance)
     }
 
@@ -234,18 +244,17 @@ impl WasmExecutor {
     fn get_run_fn(
         instance: &Instance,
     ) -> error::Result<Func<'_, host_abi::WasmArgs, host_abi::WasmResult>> {
-        instance.func("run").map_err(|e| e.into())
+        instance.exports.get("run").map_err(|e| e.into())
     }
 
     /// Get a reference to the `test` function of the Wasm program.
     fn get_test_fn(
         instance: &Instance,
     ) -> error::Result<Func<'_, host_abi::WasmArgs, host_abi::WasmResult>> {
-        instance.func("test").map_err(|e| e.into())
+        instance.exports.get("test").map_err(|e| e.into())
     }
 
     fn spawn_wasm_call_async<'a, 'b, F, Output>(
-        program: &'a [u8],
         argument: &'a [u8],
         f: F,
     ) -> (
@@ -253,16 +262,15 @@ impl WasmExecutor {
         <Self as Executor>::Handle,
     )
     where
-        F: FnOnce(Vec<u8>, Vec<u8>) -> ExecutorResult<Output, <Self as Executor>::Error>,
+        F: FnOnce(Vec<u8>) -> ExecutorResult<Output, <Self as Executor>::Error>,
         F: Send + 'static,
         Output: Send + 'static,
     {
         // TODO: Find a way to not copy the whole data (pass ref or pointer) ?
-        let program = Vec::from(program);
         let argument = Vec::from(argument);
 
         let result_fut = async move {
-            let result = spawn_thread_async(move || f(program, argument)).await;
+            let result = spawn_thread_async(move || f(argument)).await;
 
             match result {
                 Ok(Ok(val)) => Ok(val),
@@ -272,6 +280,22 @@ impl WasmExecutor {
         }
         .boxed();
         (result_fut, WasmHandle::default())
+    }
+
+    /// Compiles the program or returns the cached version.
+    // TODO: or use static lazy library?
+    #[allow(clippy::map_entry)]
+    fn compile(&mut self, program: &[u8]) -> Result<Arc<Module>, CompileError> {
+        let hash = DefaultHash::digest(&program[..]);
+        let module = if !self.cache.contains_key(&hash) {
+            let module = Arc::new(compile(&program[..])?);
+            self.cache.insert(hash, module.clone());
+            module
+        } else {
+            self.cache.get(&hash).expect("Just checked.").clone()
+        };
+
+        Ok(module)
     }
 }
 
@@ -313,11 +337,18 @@ impl Executor for WasmExecutor {
         BoxFuture<ExecutorResult<Vec<u8>, Self::Error>>,
         Self::Handle,
     ) {
-        Self::spawn_wasm_call_async(program, argument, |program, argument| {
+        let module = match self.compile(&program[..]) {
+            Ok(m) => m,
+            Err(err) => {
+                return (ready(Err(err.into())).boxed(), WasmHandle::default());
+            }
+        };
+
+        Self::spawn_wasm_call_async(argument, move |argument| {
             let encoded_res = Arc::new(RwLock::new(Vec::new()));
 
             let instance =
-                Self::get_instance(&program[..], argument, RunTest::Run(encoded_res.clone()))?;
+                Self::get_instance(&module, argument, RunTest::Run(encoded_res.clone()))?;
             let run = Self::get_run_fn(&instance)?;
 
             match run.call().map(host_abi::wasm_to_result) {
@@ -335,10 +366,17 @@ impl Executor for WasmExecutor {
         results: &[Vec<u8>],
         _timeout: u64,
     ) -> (BoxFuture<ExecutorResult<i64, Self::Error>>, Self::Handle) {
+        let module = match self.compile(&program[..]) {
+            Ok(m) => m,
+            Err(err) => {
+                return (ready(Err(err.into())).boxed(), WasmHandle::default());
+            }
+        };
+
         // TODO: avoid copying
         let results = Vec::from(results);
-        Self::spawn_wasm_call_async(program, argument, move |program, argument| {
-            let instance = Self::get_instance(&program[..], argument, RunTest::Test(results))?;
+        Self::spawn_wasm_call_async(argument, move |argument| {
+            let instance = Self::get_instance(&module, argument, RunTest::Test(results))?;
             let test = Self::get_test_fn(&instance)?;
 
             match test.call().map(host_abi::wasm_to_result) {
