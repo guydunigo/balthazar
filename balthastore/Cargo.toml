@@ -11,6 +11,6 @@ ipfs-api = "0.7.1"
 futures = "0.3.4"
 http = "0.2.1"
 bytes = "0.5.4"
-tokio = { version = "0.2.17", features = ["fs"] }
+tokio = { version = "0.2.19", features = ["fs"] }
 parity-multiaddr = "0.8.0"
 either = "1.5.3"
