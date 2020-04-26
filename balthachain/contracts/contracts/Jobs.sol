@@ -308,12 +308,18 @@ contract Jobs {
         return job.arguments;
     }
     // Reverts if the provided array is empty.
-    function set_arguments(bytes32 job_id, bytes[] memory val) public {
+    function reset_arguments(bytes32 job_id) public {
+        Job storage job = jobs[job_id];
+        check_is_our_draft(job);
+        delete job.arguments;
+        job.arguments = new bytes[](0);
+    }
+    function push_argument(bytes32 job_id, bytes memory val) public {
         require(val.length > 0/*, "empty array"*/);
         Job storage job = jobs[job_id];
         check_is_our_draft(job);
 
-        job.arguments = val;
+        job.arguments.push(val);
     }
 
     // Reverts if there is no job corresponding to `job_id`.
@@ -437,13 +443,13 @@ contract Jobs {
     // ------------------------------------
     // Functions which require proper consensus.
 
-    function set_managers(bytes32 task_id, address[] memory addresses) public {
+    function push_manager(bytes32 task_id, address manager) public {
         require(tasks[task_id].non_null/*, "unknown task"*/);
         require(msg.sender == oracle/*, "only the oracle can do that"*/);
         require(tasks[task_id].state == TaskState.Incomplete/*, "task already complete or failed"*/);
-        require(addresses.length <= 4 + jobs[tasks[task_id].job_id].timeout - jobs[tasks[task_id].job_id].min_checking_interval/*, too many managers registered*/);
+        require(tasks[task_id].managers_addresses.length < 4 + jobs[tasks[task_id].job_id].timeout - jobs[tasks[task_id].job_id].min_checking_interval/*, too many managers registered*/);
 
-        tasks[task_id].managers_addresses = addresses;
+        tasks[task_id].managers_addresses.push(manager);
     }
 
     function set_definitely_failed(bytes32 task_id, TaskDefiniteErrorKind reason) public {
@@ -466,6 +472,7 @@ contract Jobs {
         }
     }
 
+    // TODO: be careful of maximum data which can be sent here...
     function set_completed(bytes32 task_id, bytes memory result, address[] memory workers_addresses, uint64[] memory worker_prices, uint64[] memory network_prices) public {
         require(msg.sender == oracle/*, "only the oracle can do that"*/);
         // TODO: really check everything or trust oracle ?

@@ -418,14 +418,16 @@ impl<'a> Chain<'a> {
         );
         Compat01As03::new(fut).await?;
 
-        let fut = jobs.call_with_confirmations(
-            "set_arguments",
-            (job_id_32, Vec::from(job.arguments())),
-            *addr,
-            Default::default(),
-            0,
-        );
-        Compat01As03::new(fut).await?;
+        for arg in job.arguments().iter() {
+            let fut = jobs.call_with_confirmations(
+                "push_argument",
+                (job_id_32, arg.clone()),
+                *addr,
+                Default::default(),
+                0,
+            );
+            Compat01As03::new(fut).await?;
+        }
 
         let fut = jobs.call_with_confirmations(
             "set_worker_parameters",
@@ -890,20 +892,24 @@ impl<'a> Chain<'a> {
         &self,
         task_id: &TaskId,
         managers: &[Address],
-    ) -> Result<types::TransactionReceipt, Error> {
+    ) -> Result<Vec<types::TransactionReceipt>, Error> {
         let jobs = self.jobs()?;
         let addr = self.local_address()?;
         let oracle = self.jobs_oracle().await?;
 
         if oracle == *addr && self.jobs_is_task_non_null(task_id).await? {
-            let fut = jobs.call_with_confirmations(
-                "set_managers",
-                (task_id.to_bytes32(), Vec::from(managers)),
-                *addr,
-                Default::default(),
-                0,
-            );
-            Ok(Compat01As03::new(fut).await?)
+            let mut res = Vec::new();
+            for manager in managers.iter() {
+                let fut = jobs.call_with_confirmations(
+                    "push_manager",
+                    (task_id.to_bytes32(), *manager),
+                    *addr,
+                    Default::default(),
+                    0,
+                );
+                res.push(Compat01As03::new(fut).await?);
+            }
+            Ok(res)
         } else {
             Err(Error::LocalAddressNotOracle(*addr, oracle))
         }
