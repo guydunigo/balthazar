@@ -111,7 +111,7 @@ async fn run_async(mode: &RunMode, config: &ChainConfig) -> Result<(), Error> {
             let val = chain.block(block_id.clone()).await?;
 
             if let Some(val) = val {
-                println!("Latest block information for `{:?}`:\n{:?}", block_id, val);
+                println!("Latest block information for `{:?}`:\n{:#?}", block_id, val);
             } else {
                 println!("No block found for `{:?}`", block_id);
             }
