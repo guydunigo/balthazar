@@ -14,6 +14,6 @@ balthachain = { path = "../balthachain" }
 balthaproto = { path = "../balthaproto" }
 balthamisc = { path = "../balthamisc" }
 balthwasm = { path = "../balthwasm" }
-tokio = { version = "0.2.18", features = ["sync"] }
+tokio = { version = "0.2.19", features = ["sync"] }
 futures = "0.3.4"
 async-ctrlc = "1.0.0"
