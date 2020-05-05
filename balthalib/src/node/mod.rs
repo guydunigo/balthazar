@@ -4,13 +4,11 @@ extern crate async_ctrlc;
 
 use futures::{
     channel::mpsc::{channel, Sender},
-    future, join, select, FutureExt, SinkExt, StreamExt,
+    join, select, FutureExt, SinkExt, StreamExt,
 };
 use std::{
     borrow::Cow,
     fmt,
-    future::Future,
-    pin::Pin,
     sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -283,16 +281,15 @@ impl Balthazar {
 
     /// Handle Interruption event when Ctrl+C is pressed.
     async fn handle_ctrlc(self) {
-        // TODO: dirty, make it an actual stream...
-        let mut ctrlc = CtrlC::new().expect("cannot create Ctrl+C handler?");
-        {
-            future::poll_fn(|ctx| CtrlC::poll(Pin::new(&mut ctrlc), ctx)).await;
+        let mut ctrlc = CtrlC::new()
+            .expect("cannot create Ctrl+C handler?")
+            .take(2);
+        if ctrlc.next().await.is_some() {
             eprintln!("Ctrl+C pressed, breaking relationships... :'(");
 
             self.send_msg_to_behaviour(net::EventIn::Bye).await;
         }
-        {
-            future::poll_fn(|ctx| CtrlC::poll(Pin::new(&mut ctrlc), ctx)).await;
+        if ctrlc.next().await.is_some() {
             eprintln!("Ctrl+C pressed a second time, definetely quitting...");
         }
     }
