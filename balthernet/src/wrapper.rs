@@ -5,7 +5,10 @@ use libp2p::{
     gossipsub::{Gossipsub, GossipsubConfig, GossipsubEvent, Topic},
     // identify::{Identify, IdentifyEvent},
     identity::PublicKey,
-    kad::{record::store::MemoryStore, Kademlia, KademliaEvent, PutRecordOk, Record},
+    kad::{
+        record::{store::MemoryStore, Key},
+        Kademlia, KademliaEvent, PutRecordOk, Record,
+    },
     mdns::{Mdns, MdnsEvent},
     ping::{Ping, PingEvent},
     swarm::{
@@ -29,6 +32,12 @@ use super::{
 
 // TODO: better name...
 const PUBSUB_TOPIC: &str = "balthazar";
+fn get_topic() -> Topic {
+    Topic::new(String::from(PUBSUB_TOPIC))
+}
+fn get_kad_key() -> Key {
+    Key::new(&PUBSUB_TOPIC)
+}
 
 /// Use several [`NetworkBehaviour`](`libp2p::swarm::NetworkBehaviour`) at the same time.
 #[derive(NetworkBehaviour)]
@@ -56,14 +65,18 @@ impl BalthBehavioursWrapper {
     ) -> (Self, Sender<balthazar::EventIn>) {
         let local_peer_id = pub_key.into_peer_id();
         let store = MemoryStore::new(local_peer_id.clone());
+        // TODO: only for manager ? maybe use it also to find workers?
+        let mut kademlia = Kademlia::new(local_peer_id.clone(), store);
 
         // TODO: only for manager ?
-        let mut gossipsub = Gossipsub::new(local_peer_id.clone(), GossipsubConfig::default());
+        let mut gossipsub = Gossipsub::new(local_peer_id, GossipsubConfig::default());
         if let NodeTypeContainer::Manager(_) = node_type_conf {
-            let success = gossipsub.subscribe(Topic::new(String::from(PUBSUB_TOPIC)));
+            let success = gossipsub.subscribe(get_topic());
             if !success {
                 unreachable!("Gossipsub couldn't subscribe, but we supposedly aren't already.");
             }
+            // TODO: use Kademlia `get_providers` to find other managers
+            kademlia.start_providing(get_kad_key());
         }
 
         let (balthbehaviour, tx) =
@@ -74,7 +87,7 @@ impl BalthBehavioursWrapper {
                 balthbehaviour,
                 mdns: Mdns::new().expect("Couldn't create a Mdns NetworkBehaviour"),
                 ping: Ping::default(),
-                kademlia: Kademlia::new(local_peer_id, store),
+                kademlia,
                 // TODO: better versions
                 // identify: Identify::new("1.0".to_string(), "3.0".to_string(), pub_key),
                 gossipsub,
