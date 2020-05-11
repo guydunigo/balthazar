@@ -281,9 +281,7 @@ impl Balthazar {
 
     /// Handle Interruption event when Ctrl+C is pressed.
     async fn handle_ctrlc(self) {
-        let mut ctrlc = CtrlC::new()
-            .expect("cannot create Ctrl+C handler?")
-            .take(2);
+        let mut ctrlc = CtrlC::new().expect("cannot create Ctrl+C handler?").take(2);
         if ctrlc.next().await.is_some() {
             eprintln!("Ctrl+C pressed, breaking relationships... :'(");
 

@@ -47,6 +47,15 @@ impl<M, W> NodeTypeContainer<M, W> {
             NodeTypeContainer::Worker(w) => NodeTypeContainer::Worker(f(&w)),
         }
     }
+
+    /*
+    pub fn to_node_type(&self) -> NodeType {
+        match self {
+            NodeTypeContainer::Manager(_) => NodeType::Manager,
+            NodeTypeContainer::Worker(_) => NodeType::Worker,
+        }
+    }
+    */
 }
 
 impl<M, W> fmt::Display for NodeTypeContainer<M, W> {

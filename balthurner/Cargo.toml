@@ -9,7 +9,7 @@ edition = "2018"
 [dependencies]
 balthastore = { path = "../balthastore" }
 balthamisc = { path = "../balthamisc" }
-futures = "0.3.4"
+futures = "0.3.5"
 
 [dependencies.wasmer-runtime]
 version = "0.16.2"

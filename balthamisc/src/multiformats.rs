@@ -73,12 +73,15 @@ pub fn run(mode: &RunMode) -> Result<(), Error> {
             println!("{}", encoded);
         }
         RunMode::Check(hash, data) => {
+            /*
             let algo = hash
                 .algorithm()
                 .hasher()
                 .expect("The provided multihash has been computed with an unknown hash algorithm.");
 
             let hashed_data = algo.digest(&data[..]);
+            */
+            let hashed_data = hash.algorithm().digest(&data[..]);
 
             if *hash == hashed_data {
                 println!("Match");

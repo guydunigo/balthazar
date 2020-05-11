@@ -2,6 +2,7 @@
 //! [`NetworkBehaviour`](`libp2p::swarm::NetworkBehaviour`) at the same time.
 use futures::channel::mpsc::Sender;
 use libp2p::{
+    gossipsub::{Gossipsub, GossipsubConfig, GossipsubEvent, Topic},
     // identify::{Identify, IdentifyEvent},
     identity::PublicKey,
     kad::{record::store::MemoryStore, Kademlia, KademliaEvent, PutRecordOk, Record},
@@ -26,6 +27,9 @@ use super::{
     ManagerConfig, WorkerConfig,
 };
 
+// TODO: better name...
+const PUBSUB_TOPIC: &str = "balthazar";
+
 /// Use several [`NetworkBehaviour`](`libp2p::swarm::NetworkBehaviour`) at the same time.
 #[derive(NetworkBehaviour)]
 #[behaviour(poll_method = "poll")]
@@ -34,8 +38,9 @@ pub struct BalthBehavioursWrapper {
     balthbehaviour: BalthBehaviour,
     mdns: Mdns,
     ping: Ping,
-    kademlia: Kademlia<MemoryStore>,
-    // identify: Identify<TSubstream>,
+    kademlia: Kademlia<MemoryStore>, // TODO: look at MemoryStore
+    // identify: Identify,
+    gossipsub: Gossipsub,
     #[behaviour(ignore)]
     events: VecDeque<balthazar::EventOut>,
 }
@@ -51,6 +56,16 @@ impl BalthBehavioursWrapper {
     ) -> (Self, Sender<balthazar::EventIn>) {
         let local_peer_id = pub_key.into_peer_id();
         let store = MemoryStore::new(local_peer_id.clone());
+
+        // TODO: only for manager ?
+        let mut gossipsub = Gossipsub::new(local_peer_id.clone(), GossipsubConfig::default());
+        if let NodeTypeContainer::Manager(_) = node_type_conf {
+            let success = gossipsub.subscribe(Topic::new(String::from(PUBSUB_TOPIC)));
+            if !success {
+                unreachable!("Gossipsub couldn't subscribe, but we supposedly aren't already.");
+            }
+        }
+
         let (balthbehaviour, tx) =
             BalthBehaviour::new(node_type_conf, manager_check_interval, manager_timeout);
 
@@ -60,7 +75,9 @@ impl BalthBehavioursWrapper {
                 mdns: Mdns::new().expect("Couldn't create a Mdns NetworkBehaviour"),
                 ping: Ping::default(),
                 kademlia: Kademlia::new(local_peer_id, store),
+                // TODO: better versions
                 // identify: Identify::new("1.0".to_string(), "3.0".to_string(), pub_key),
+                gossipsub,
                 events: Default::default(),
             },
             tx,
@@ -143,8 +160,7 @@ impl NetworkBehaviourEventProcess<PingEvent> for BalthBehavioursWrapper {
 }
 
 /*
-impl NetworkBehaviourEventProcess<IdentifyEvent> for BalthBehavioursWrapper
-{
+impl NetworkBehaviourEventProcess<IdentifyEvent> for BalthBehavioursWrapper {
     // Called when `mdns` produces an event.
     fn inject_event(&mut self, event: IdentifyEvent) {
         if let IdentifyEvent::Received {
@@ -160,3 +176,32 @@ impl NetworkBehaviourEventProcess<IdentifyEvent> for BalthBehavioursWrapper
     }
 }
 */
+
+impl NetworkBehaviourEventProcess<GossipsubEvent> for BalthBehavioursWrapper {
+    fn inject_event(&mut self, event: GossipsubEvent) {
+        if let GossipsubEvent::Message(peer_id, msg_id, msg) = event {
+            println!(
+                "Pubsub: message `{:?}` from `{:?}`: {:?}",
+                peer_id, msg_id, msg
+            );
+        }
+        /*
+        match event {
+            GossipsubEvent::Message(peer_id, msg_id, msg) => {
+                println!(
+                    "Pubsub: message `{:?}` from `{:?}`: {:?}",
+                    peer_id, msg_id, msg
+                );
+            }
+            GossipsubEvent::Subscribed { peer_id, topic } => println!(
+                "Pubsub: Peer `{:?}` subscribed to topic `{:?}`",
+                peer_id, topic
+            ),
+            GossipsubEvent::Unsubscribed { peer_id, topic } => println!(
+                "Pubsub: Peer `{:?}` unsubscribed to topic `{:?}`",
+                peer_id, topic
+            ),
+        }
+        */
+    }
+}

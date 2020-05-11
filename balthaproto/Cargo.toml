@@ -11,7 +11,7 @@ bytes = "0.5.4"
 prost = "0.6.1"
 futures_codec = "0.4.0"
 # libp2p = "0.16.2"
-futures = "0.3.4"
+futures = "0.3.5"
 
 [dependencies.libp2p]
 version = "0.18.1"
