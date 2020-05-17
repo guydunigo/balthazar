@@ -7,7 +7,7 @@ use libp2p::{
     identity::PublicKey,
     kad::{
         record::{store::MemoryStore, Key},
-        Kademlia, KademliaEvent, PutRecordOk, Record,
+        Kademlia, KademliaEvent,
     },
     mdns::{Mdns, MdnsEvent},
     ping::{Ping, PingEvent},
@@ -135,6 +135,8 @@ impl NetworkBehaviourEventProcess<KademliaEvent> for BalthBehavioursWrapper {
     // Called when `kademlia` produces an event.
     fn inject_event(&mut self, message: KademliaEvent) {
         match message {
+            /*
+            // TODO: not really useful now?
             KademliaEvent::GetRecordResult(Ok(result)) => {
                 for Record { key, value, .. } in result.records {
                     println!(
@@ -156,7 +158,11 @@ impl NetworkBehaviourEventProcess<KademliaEvent> for BalthBehavioursWrapper {
             KademliaEvent::PutRecordResult(Err(err)) => {
                 eprintln!("Failed to put record: {:?}", err);
             }
-            _ => {}
+            */
+            KademliaEvent::StartProvidingResult(r) => {
+                eprintln!("Start providing result: {:?}", r);
+            }
+            _ => eprintln!("Kademlia: {:?}", message),
         }
     }
 }
