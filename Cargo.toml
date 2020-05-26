@@ -25,5 +25,6 @@ clap = { git = "https://github.com/clap-rs/clap/" }
 # libp2p = { git = "https://github.com/guydunigo/rust-libp2p" }
 # libp2p = { path = "../my_rust-libp2p" }
 # web3 = { git = "https://github.com/tomusdrw/rust-web3" }
+# web3 = { path = "../rust-web3" }
 # multihash = { git = "https://github.com/multiformats/rust-multihash" }
 # ipfs-api = { path = "../rust-ipfs-api/ipfs-api" }

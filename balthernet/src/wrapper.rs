@@ -7,7 +7,7 @@ use libp2p::{
     identity::PublicKey,
     kad::{
         record::{store::MemoryStore, Key},
-        Kademlia, KademliaEvent,
+        Kademlia, KademliaEvent, QueryResult,
     },
     mdns::{Mdns, MdnsEvent},
     ping::{Ping, PingEvent},
@@ -76,7 +76,8 @@ impl BalthBehavioursWrapper {
                 unreachable!("Gossipsub couldn't subscribe, but we supposedly aren't already.");
             }
             // TODO: use Kademlia `get_providers` to find other managers
-            kademlia.start_providing(get_kad_key());
+            // TODO: track queryids and no unwrap...
+            kademlia.start_providing(get_kad_key()).unwrap();
         }
 
         let (balthbehaviour, tx) =
@@ -159,7 +160,10 @@ impl NetworkBehaviourEventProcess<KademliaEvent> for BalthBehavioursWrapper {
                 eprintln!("Failed to put record: {:?}", err);
             }
             */
-            KademliaEvent::StartProvidingResult(r) => {
+            KademliaEvent::QueryResult {
+                result: QueryResult::StartProviding(r),
+                ..
+            } => {
                 eprintln!("Start providing result: {:?}", r);
             }
             _ => eprintln!("Kademlia: {:?}", message),

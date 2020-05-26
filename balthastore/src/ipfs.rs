@@ -8,7 +8,7 @@ use bytes::Bytes;
 use either::Either;
 use futures::{future::BoxFuture, stream::BoxStream, FutureExt, StreamExt, TryStreamExt};
 use http::uri::InvalidUri;
-use ipfs_api::{response, IpfsClient};
+use ipfs_api::{response, IpfsClient, TryFromUri};
 use multiaddr::Multiaddr;
 use std::{error::Error, fmt};
 
@@ -53,7 +53,7 @@ impl IpfsStorage {
             try_internet_multiaddr_to_usual_format(listen_addr).map_err(Either::Right)?;
         let http_addr = format!("http://{}", usual_addr);
         Ok(IpfsStorage {
-            ipfs_client: IpfsClient::new_from_uri(&http_addr[..]).map_err(Either::Left)?,
+            ipfs_client: TryFromUri::from_str(&http_addr[..]).map_err(Either::Left)?,
         })
     }
 
