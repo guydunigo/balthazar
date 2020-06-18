@@ -2,6 +2,7 @@
 
 extern crate async_ctrlc;
 
+use async_ctrlc::CtrlC;
 use futures::{
     channel::mpsc::{channel, Sender},
     join, select, FutureExt, SinkExt, StreamExt,
@@ -14,7 +15,6 @@ use std::{
 };
 use tokio::{runtime::Runtime, sync::RwLock, time::interval};
 
-use async_ctrlc::CtrlC;
 use chain::Chain;
 use misc::{
     job::{Address, DefaultHash, ProgramKind, TaskId},
@@ -105,7 +105,7 @@ struct Balthazar {
     // TODO: reference?
     config: Arc<BalthazarConfig>,
     inner_in: Sender<Event>,
-    swarm_in: Sender<net::EventIn>,
+    swarm_in: net::InputHandle,
     runner_in: Sender<worker::TaskExecute>,
     shared_state: Arc<RwLock<SharedState>>,
     // TODO: Avoid creating that when not used?
@@ -118,7 +118,7 @@ impl Balthazar {
         peer_id: PeerId,
         config: BalthazarConfig,
         inner_in: Sender<Event>,
-        swarm_in: Sender<net::EventIn>,
+        swarm_in: net::InputHandle,
         runner_in: Sender<worker::TaskExecute>,
     ) -> Self {
         Balthazar {
@@ -143,12 +143,6 @@ impl Balthazar {
             .ethereum_address()
             .as_ref()
             .ok_or(chain::Error::MissingLocalAddress)
-    }
-
-    async fn send_msg_to_behaviour(&self, event: net::EventIn) {
-        if let Err(e) = self.swarm_in.clone().send(event).await {
-            panic!("Swarm channel error: {:?}", Error::SwarmChannelError(e));
-        }
     }
 
     pub async fn run(config: BalthazarConfig) -> Result<(), Error> {
@@ -233,7 +227,10 @@ impl Balthazar {
     /// Handle all inner events.
     async fn handle_event(self, event: Event) -> Result<(), Error> {
         match event {
-            Event::SharedStateProposal(p) => self.check_and_apply_proposal(p).await,
+            Event::SharedStateProposal(p) => {
+                self.swarm_in.clone().send_to_managers(p.clone().into()).await;
+                self.check_and_apply_proposal(p).await
+            },
             Event::SharedStateChange(task_id, event) => {
                 self.handle_shared_state_change(task_id, event).await?
             }
@@ -280,12 +277,12 @@ impl Balthazar {
     }
 
     /// Handle Interruption event when Ctrl+C is pressed.
-    async fn handle_ctrlc(self) {
+    async fn handle_ctrlc(mut self) {
         let mut ctrlc = CtrlC::new().expect("cannot create Ctrl+C handler?").take(2);
         if ctrlc.next().await.is_some() {
             eprintln!("Ctrl+C pressed, breaking relationships... :'(");
 
-            self.send_msg_to_behaviour(net::EventIn::Bye).await;
+            self.swarm_in.send_to_behaviour(net::EventIn::Bye).await;
         }
         if ctrlc.next().await.is_some() {
             eprintln!("Ctrl+C pressed a second time, definetely quitting...");
@@ -450,6 +447,7 @@ impl Balthazar {
         }
     }
 
+    /// Something changed in the shared state and we are going to have a look if we can handle it.
     async fn handle_shared_state_change(
         &self,
         task_id: TaskId,
@@ -469,19 +467,21 @@ impl Balthazar {
                         let task = shared_state.tasks.get(&task_id).unwrap();
                         job.arguments()[task.arg_id() as usize].to_vec()
                     };
-                    self.send_msg_to_behaviour(net::EventIn::TasksExecute(
-                        worker,
-                        vec![TaskExecute {
-                            task_id: task_id.into_bytes(),
-                            program_addresses: job.program_addresses().to_vec(),
-                            program_hash: job.program_hash().clone().into(),
-                            program_kind: job.program_kind().clone().into(),
-                            argument,
-                            timeout: job.timeout(),
-                            max_network_usage: job.max_network_usage(),
-                        }],
-                    ))
-                    .await;
+                    self.swarm_in
+                        .clone()
+                        .send_to_behaviour(net::EventIn::TasksExecute(
+                            worker,
+                            vec![TaskExecute {
+                                task_id: task_id.into_bytes(),
+                                program_addresses: job.program_addresses().to_vec(),
+                                program_hash: job.program_hash().clone().into(),
+                                program_kind: job.program_kind().clone().into(),
+                                argument,
+                                timeout: job.timeout(),
+                                max_network_usage: job.max_network_usage(),
+                            }],
+                        ))
+                        .await;
                 }
             }
             SharedStateEvent::Unassigned {
@@ -499,11 +499,13 @@ impl Balthazar {
     async fn handle_runner(&self, task: TaskExecute) {
         // TODO: expect
         let task_id = TaskId::from_bytes(task.task_id).expect("not a correct multihash");
-        self.send_msg_to_behaviour(net::EventIn::TaskStatus(
-            task_id.clone(),
-            TaskStatus::Pending,
-        ))
-        .await;
+        self.swarm_in
+            .clone()
+            .send_to_behaviour(net::EventIn::TaskStatus(
+                task_id.clone(),
+                TaskStatus::Pending,
+            ))
+            .await;
         let storage = StoragesWrapper::default();
         let string_program_address = &task.program_addresses[0][..];
         let string_argument = String::from_utf8_lossy(&task.argument[..]);
@@ -538,16 +540,18 @@ impl Balthazar {
                 )
                 .await;
 
-                self.send_msg_to_behaviour(net::EventIn::TaskStatus(
-                    task_id.clone(),
-                    TaskStatus::Started(
-                        SystemTime::now()
-                            .duration_since(UNIX_EPOCH)
-                            .unwrap()
-                            .as_secs(),
-                    ),
-                ))
-                .await;
+                self.swarm_in
+                    .clone()
+                    .send_to_behaviour(net::EventIn::TaskStatus(
+                        task_id.clone(),
+                        TaskStatus::Started(
+                            SystemTime::now()
+                                .duration_since(UNIX_EPOCH)
+                                .unwrap()
+                                .as_secs(),
+                        ),
+                    ))
+                    .await;
 
                 match WasmExecutor::default()
                     .run(
@@ -570,18 +574,22 @@ impl Balthazar {
                             ),
                         )
                         .await;
-                        self.send_msg_to_behaviour(net::EventIn::TaskStatus(
-                            task_id.clone(),
-                            TaskStatus::Completed(result),
-                        ))
-                        .await;
+                        self.swarm_in
+                            .clone()
+                            .send_to_behaviour(net::EventIn::TaskStatus(
+                                task_id.clone(),
+                                TaskStatus::Completed(result),
+                            ))
+                            .await;
                     }
                     Err(error) => {
-                        self.send_msg_to_behaviour(net::EventIn::TaskStatus(
-                            task_id.clone(),
-                            TaskStatus::Error(TaskErrorKind::Runtime),
-                        ))
-                        .await;
+                        self.swarm_in
+                            .clone()
+                            .send_to_behaviour(net::EventIn::TaskStatus(
+                                task_id.clone(),
+                                TaskStatus::Error(TaskErrorKind::Runtime),
+                            ))
+                            .await;
                         self.spawn_log(
                             LogKind::Worker,
                             format!(
@@ -594,11 +602,13 @@ impl Balthazar {
                 }
             }
             Err(error) => {
-                self.send_msg_to_behaviour(net::EventIn::TaskStatus(
-                    task_id.clone(),
-                    TaskStatus::Error(TaskErrorKind::Download),
-                ))
-                .await;
+                self.swarm_in
+                    .clone()
+                    .send_to_behaviour(net::EventIn::TaskStatus(
+                        task_id.clone(),
+                        TaskStatus::Error(TaskErrorKind::Download),
+                    ))
+                    .await;
                 self.spawn_log(
                     LogKind::Worker,
                     format!(
@@ -641,7 +651,9 @@ impl Balthazar {
             ),
         )
         .await;
-        self.send_msg_to_behaviour(net::EventIn::TasksExecute(peer_id, tasks))
+        self.swarm_in
+            .clone()
+            .send_to_behaviour(net::EventIn::TasksExecute(peer_id, tasks))
             .await
     }
 

@@ -1,6 +1,9 @@
 //! Provides [`BalthBehavioursWrapper`] to use several
 //! [`NetworkBehaviour`](`libp2p::swarm::NetworkBehaviour`) at the same time.
-use futures::channel::mpsc::Sender;
+use futures::{
+    channel::mpsc::{channel, Receiver, Sender},
+    SinkExt, Stream,
+};
 use libp2p::{
     gossipsub::{Gossipsub, GossipsubConfig, GossipsubEvent, Topic},
     // identify::{Identify, IdentifyEvent},
@@ -18,9 +21,10 @@ use libp2p::{
     NetworkBehaviour,
 };
 use misc::WorkerSpecs;
-use proto::NodeTypeContainer;
+use proto::{manager, NodeTypeContainer, Message};
 use std::{
     collections::VecDeque,
+    pin::Pin,
     task::{Context, Poll},
     time::Duration,
 };
@@ -30,6 +34,8 @@ use super::{
     ManagerConfig, WorkerConfig,
 };
 
+const CHANNEL_SIZE: usize = 1024;
+
 // TODO: better name...
 const PUBSUB_TOPIC: &str = "balthazar";
 fn get_topic() -> Topic {
@@ -37,6 +43,40 @@ fn get_topic() -> Topic {
 }
 fn get_kad_key() -> Key {
     Key::new(&PUBSUB_TOPIC)
+}
+
+/// Events internal to [`BalthBehavioursWrapper`], hidden to outside Balthernet.
+#[derive(Debug)]
+enum EventIn {
+    BalthBehaviour(balthazar::EventIn),
+    ManagerMulticast(manager::ManagerMsgWrapper),
+}
+
+// TODO: better way to communicate with it ?
+/// Handle to communicate towards the networking part.
+#[derive(Clone, Debug)]
+pub struct InputHandle {
+    tx: Sender<EventIn>,
+}
+
+impl InputHandle {
+    pub async fn send_to_managers(&mut self, msg: manager::ManagerMsgWrapper) {
+        if let Err(e) = self.tx.send(EventIn::ManagerMulticast(msg)).await {
+            panic!(
+                "Balthernet input channel error while sending message to managers: {:?}",
+                e
+            );
+        }
+    }
+
+    pub async fn send_to_behaviour(&mut self, event: balthazar::EventIn) {
+        if let Err(e) = self.tx.send(EventIn::BalthBehaviour(event)).await {
+            panic!(
+                "Balthernet input channel error while sending event to behaviour: {:?}",
+                e
+            );
+        }
+    }
 }
 
 /// Use several [`NetworkBehaviour`](`libp2p::swarm::NetworkBehaviour`) at the same time.
@@ -52,6 +92,10 @@ pub struct BalthBehavioursWrapper {
     gossipsub: Gossipsub,
     #[behaviour(ignore)]
     events: VecDeque<balthazar::EventOut>,
+    #[behaviour(ignore)]
+    inbound_rx: Receiver<EventIn>,
+    #[behaviour(ignore)]
+    managers_topic: Topic,
 }
 
 impl BalthBehavioursWrapper {
@@ -62,16 +106,20 @@ impl BalthBehavioursWrapper {
         manager_check_interval: Duration,
         manager_timeout: Duration,
         pub_key: PublicKey,
-    ) -> (Self, Sender<balthazar::EventIn>) {
+    ) -> (Self, InputHandle) {
+        let (tx, inbound_rx) = channel(CHANNEL_SIZE);
+        let managers_topic = get_topic();
+
         let local_peer_id = pub_key.into_peer_id();
         let store = MemoryStore::new(local_peer_id.clone());
         // TODO: only for manager ? maybe use it also to find workers?
         let mut kademlia = Kademlia::new(local_peer_id.clone(), store);
 
         // TODO: only for manager ?
+        // TODO: check message before propagating
         let mut gossipsub = Gossipsub::new(local_peer_id, GossipsubConfig::default());
         if let NodeTypeContainer::Manager(_) = node_type_conf {
-            let success = gossipsub.subscribe(get_topic());
+            let success = gossipsub.subscribe(managers_topic.clone());
             if !success {
                 unreachable!("Gossipsub couldn't subscribe, but we supposedly aren't already.");
             }
@@ -80,27 +128,29 @@ impl BalthBehavioursWrapper {
             kademlia.start_providing(get_kad_key()).unwrap();
         }
 
-        let (balthbehaviour, tx) =
+        let balthbehaviour =
             BalthBehaviour::new(node_type_conf, manager_check_interval, manager_timeout);
 
         (
             BalthBehavioursWrapper {
                 balthbehaviour,
-                mdns: Mdns::new().expect("Couldn't create a Mdns NetworkBehaviour"),
+                mdns: Mdns::new().expect("Couldn't create a mDNS NetworkBehaviour"),
                 ping: Ping::default(),
                 kademlia,
                 // TODO: better versions
                 // identify: Identify::new("1.0".to_string(), "3.0".to_string(), pub_key),
                 gossipsub,
                 events: Default::default(),
+                inbound_rx,
+                managers_topic,
             },
-            tx,
+            InputHandle { tx },
         )
     }
 
     fn poll(
         &mut self,
-        _cx: &mut Context,
+        cx: &mut Context,
         _params: &mut impl PollParameters,
         ) -> Poll<NetworkBehaviourAction<<<<Self as NetworkBehaviour>::ProtocolsHandler as IntoProtocolsHandler>::Handler as ProtocolsHandler>::InEvent, <Self as NetworkBehaviour>::OutEvent>>
     // ) -> Poll<NetworkBehaviourAction<HandlerIn<QueryId>, <Self as NetworkBehaviour>::OutEvent>>
@@ -108,6 +158,27 @@ impl BalthBehavioursWrapper {
         if let Some(e) = self.events.pop_back() {
             Poll::Ready(NetworkBehaviourAction::GenerateEvent(e))
         } else {
+            // Reads the inbound channel to handle events:
+            while let Poll::Ready(event_opt) = Stream::poll_next(Pin::new(&mut self.inbound_rx), cx)
+            {
+                match event_opt {
+                    Some(EventIn::BalthBehaviour(event)) => {
+                        // TODO: return directly here the result?
+                        self.balthbehaviour.handle_event_in(event);
+                    }
+                    Some(EventIn::ManagerMulticast(msg)) => {
+                        let mut buf = Vec::new();
+                        msg.encode_length_delimited(&mut buf).expect("Could not encode manager message, buffer is a Vec and should have sufficient capacity.");
+                        self.gossipsub.publish(&self.managers_topic, buf)
+                    },
+                    None => self.balthbehaviour.handle_event_in(balthazar::EventIn::Bye),
+                }
+                /*
+                if action.is_ready() {
+                    return action;
+                }
+                */
+            }
             Poll::Pending
         }
     }

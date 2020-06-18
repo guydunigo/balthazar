@@ -16,7 +16,7 @@ extern crate libp2p;
 extern crate tokio;
 extern crate void;
 
-use futures::{channel::mpsc::Sender, stream, Stream, StreamExt};
+use futures::{stream, Stream, StreamExt};
 use libp2p::build_tcp_ws_secio_mplex_yamux;
 /// To avoid importing the whole libp2p crate in another one...
 pub use libp2p::{identity, Multiaddr};
@@ -33,7 +33,7 @@ pub use balthazar::{
     EventIn, EventOut, PeerRc,
 };
 pub use config::*;
-pub use wrapper::BalthBehavioursWrapper;
+pub use wrapper::{BalthBehavioursWrapper, InputHandle};
 
 // TODO: Better interface with wrapper object
 // TODO: NodeType containing manager to try ?
@@ -43,10 +43,7 @@ pub fn get_swarm<'a>(
     keypair: Keypair,
     config: &'a NetConfig,
     worker_specs: Option<&'a WorkerSpecs>,
-) -> (
-    Sender<balthazar::EventIn>,
-    impl Stream<Item = balthazar::EventOut>,
-) {
+) -> (InputHandle, impl Stream<Item = balthazar::EventOut>) {
     let keypair_public = keypair.public();
     let peer_id = keypair_public.into_peer_id();
     let (net_behaviour, tx) = BalthBehavioursWrapper::new(

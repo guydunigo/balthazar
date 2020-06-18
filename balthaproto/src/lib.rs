@@ -42,6 +42,14 @@ pub mod manager {
             _ => None,
         }
     }
+
+    impl From<Proposal> for ManagerMsgWrapper {
+        fn from(src: Proposal) -> Self {
+            ManagerMsgWrapper {
+                msg: Some(manager_msg_wrapper::Msg::Proposal(src)),
+            }
+        }
+    }
 }
 
 pub mod worker {

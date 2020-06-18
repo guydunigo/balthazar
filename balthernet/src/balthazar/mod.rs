@@ -11,13 +11,7 @@
 //! Have a look at the [`handler`] module description to make the necessary updates.
 //!
 //! When extending [`HandlerOut`], update the `handler_event` function.
-use futures::{
-    channel::{
-        mpsc::{channel, Receiver, Sender},
-        oneshot,
-    },
-    Stream,
-};
+use futures::channel::oneshot;
 use libp2p::{
     core::connection::{ConnectionId, ListenerId},
     swarm::{
@@ -32,7 +26,6 @@ use std::{
     collections::{HashMap, HashSet, VecDeque},
     error,
     fmt::Debug,
-    pin::Pin,
     sync::{Arc, RwLock},
     task::{Context, Poll},
     time::{Duration, Instant},
@@ -49,8 +42,6 @@ use misc::WorkerSpecs;
 use proto::{NodeType, NodeTypeContainer, TaskStatus};
 
 pub type PeerRc = Arc<RwLock<Peer>>;
-
-const CHANNEL_SIZE: usize = 1024;
 
 /// Event injected into [`BalthBehaviour`] from either [`Balthandler`] and from outside (other
 /// [`NetworkBehaviour`]s, etc.
@@ -74,7 +65,6 @@ pub type QueryId = usize;
 
 /// The [`NetworkBehaviour`] to manage the networking of the **Balthazar** node.
 pub struct BalthBehaviour {
-    inbound_rx: Receiver<EventIn>,
     // TODO: should the node_type be kept here, what happens if it changes elsewhere?
     node_type_data: NodeTypeData,
     peers: HashMap<PeerId, PeerRc>,
@@ -92,16 +82,12 @@ pub struct BalthBehaviour {
 }
 
 impl BalthBehaviour {
-    /// Creates a new [`BalthBehaviour`] and returns a [`Sender`] channel to communicate with it from
-    /// the exterior of the Swarm.
     pub fn new(
         // TODO: refererences?
         node_type_conf: NodeTypeContainer<ManagerConfig, (WorkerConfig, WorkerSpecs)>,
         manager_check_interval: Duration,
         manager_timeout: Duration,
-    ) -> (Self, Sender<EventIn>) {
-        let (tx, inbound_rx) = channel(CHANNEL_SIZE);
-
+    ) -> Self {
         let node_type_data = match node_type_conf {
             NodeTypeContainer::Manager(config) => NodeTypeData::Manager(ManagerData {
                 config,
@@ -114,20 +100,16 @@ impl BalthBehaviour {
             }),
         };
 
-        (
-            BalthBehaviour {
-                inbound_rx,
-                node_type_data,
-                peers: HashMap::new(),
-                events: VecDeque::new(),
-                next_query_unique_id: 0,
-                manager_check_interval,
-                manager_timeout,
-                delays: DelayQueue::new(),
-                is_shutting_down: false,
-            },
-            tx,
-        )
+        BalthBehaviour {
+            node_type_data,
+            peers: HashMap::new(),
+            events: VecDeque::new(),
+            next_query_unique_id: 0,
+            manager_check_interval,
+            manager_timeout,
+            delays: DelayQueue::new(),
+            is_shutting_down: false,
+        }
     }
 
     /// If we are a worker: checks if given peer is our manager,
@@ -249,6 +231,130 @@ impl BalthBehaviour {
             }
         } else {
             NetworkBehaviourAction::GenerateEvent(EventOut::MsgDropped(peer_id, event))
+        }
+    }
+
+    pub fn handle_event_in(&mut self, event: EventIn) {
+        let action = match event {
+            EventIn::Ping => Poll::Ready(NetworkBehaviourAction::GenerateEvent(EventOut::Pong)),
+            EventIn::Handler(peer_id, event) => {
+                Poll::Ready(NetworkBehaviourAction::NotifyHandler {
+                    handler: NotifyHandler::Any,
+                    peer_id,
+                    event,
+                })
+            }
+            EventIn::TasksExecute(peer_id, tasks) => {
+                let event = HandlerIn::TasksExecute {
+                    tasks,
+                    user_data: self.next_query_unique_id(),
+                };
+                Poll::Ready(self.send_to_peer_or_dial(peer_id, event))
+            }
+            EventIn::TasksPing(peer_id, task_ids) => {
+                let event = HandlerIn::TasksPing {
+                    task_ids,
+                    user_data: self.next_query_unique_id(),
+                };
+                Poll::Ready(self.send_to_peer_or_dial(peer_id, event))
+            }
+            EventIn::TasksPong {
+                statuses,
+                request_id,
+            } => {
+                if let NodeTypeData::Worker(WorkerData {
+                    manager: Some((manager, _, _)),
+                    ..
+                }) = &self.node_type_data
+                {
+                    Poll::Ready(NetworkBehaviourAction::NotifyHandler {
+                        handler: NotifyHandler::Any,
+                        peer_id: manager.read().unwrap().peer_id.clone(),
+                        event: HandlerIn::TasksPong {
+                            statuses,
+                            request_id,
+                        },
+                    })
+                } else {
+                    Poll::Ready(NetworkBehaviourAction::GenerateEvent(EventOut::NoManager(
+                        EventIn::TasksPong {
+                            statuses,
+                            request_id,
+                        },
+                    )))
+                }
+            }
+            EventIn::TaskStatus(task_id, status) => {
+                if let NodeTypeData::Worker(WorkerData {
+                    manager: Some((manager, _, _)),
+                    ..
+                }) = &self.node_type_data
+                {
+                    let peer_id = manager.clone().read().unwrap().peer_id.clone();
+                    let event = HandlerIn::TaskStatus {
+                        task_id,
+                        status,
+                        user_data: self.next_query_unique_id(),
+                    };
+                    Poll::Ready(self.send_to_peer_or_dial(peer_id, event))
+                } else {
+                    Poll::Ready(NetworkBehaviourAction::GenerateEvent(EventOut::NoManager(
+                        EventIn::TaskStatus(task_id, status),
+                    )))
+                }
+            }
+            EventIn::GetWorkers(oneshot) => {
+                let w = if let NodeTypeData::Manager(data) = &self.node_type_data {
+                    Some(data.workers.values().map(|(w, _, _)| w).cloned().collect())
+                } else {
+                    None
+                };
+                // TODO: expect
+                oneshot
+                    .send(w)
+                    .expect("problem with sending answer through the oneshot.");
+
+                Poll::Pending
+            }
+            // TODO: close the swarm and prevent any other in-connections
+            // TODO: find a way to notify balthalib when we're done sending bye
+            // TODO: special message ?
+            // TODO: ExtendedSwarm::remove_listener ?
+            EventIn::Bye => {
+                let mut peer_ids = match &mut self.node_type_data {
+                    NodeTypeData::Manager(ManagerData { workers, .. }) => {
+                        workers.keys().cloned().collect()
+                    }
+                    NodeTypeData::Worker(WorkerData { manager, .. }) => {
+                        if let Some((peer, _, _)) = manager.take() {
+                            vec![peer.read().unwrap().peer_id.clone()]
+                        } else {
+                            Vec::new()
+                        }
+                    }
+                };
+                for id in peer_ids.drain(..) {
+                    let user_data = self.next_query_unique_id();
+                    self.inject_send_to_peer_or_dial_event(id, HandlerIn::ManagerBye { user_data });
+                }
+                self.is_shutting_down = true;
+                Poll::Pending
+            }
+        };
+
+        // If we're shutting down and trying to send a message, won't send it:
+        let action =
+            if let Poll::Ready(NetworkBehaviourAction::NotifyHandler { peer_id, event, .. }) =
+                action
+            {
+                Poll::Ready(self.send_to_peer(peer_id, event))
+            } else {
+                action
+            };
+
+        if let Poll::Ready(action) = action {
+            self.events
+                .push_front(InternalEvent::NetworkBehaviourAction(action));
         }
     }
 
@@ -449,136 +555,6 @@ impl NetworkBehaviour for BalthBehaviour {
                     }
                     Continuing => (),
                 }
-            }
-        }
-
-        // Reads the inbound channel to handle events:
-        while let Poll::Ready(event_opt) = Stream::poll_next(Pin::new(&mut self.inbound_rx), cx) {
-            let action = match event_opt {
-                Some(EventIn::Ping) => {
-                    Poll::Ready(NetworkBehaviourAction::GenerateEvent(EventOut::Pong))
-                }
-                Some(EventIn::Handler(peer_id, event)) => {
-                    Poll::Ready(NetworkBehaviourAction::NotifyHandler {
-                        handler: NotifyHandler::Any,
-                        peer_id,
-                        event,
-                    })
-                }
-                Some(EventIn::TasksExecute(peer_id, tasks)) => {
-                    let event = HandlerIn::TasksExecute {
-                        tasks,
-                        user_data: self.next_query_unique_id(),
-                    };
-                    Poll::Ready(self.send_to_peer_or_dial(peer_id, event))
-                }
-                Some(EventIn::TasksPing(peer_id, task_ids)) => {
-                    let event = HandlerIn::TasksPing {
-                        task_ids,
-                        user_data: self.next_query_unique_id(),
-                    };
-                    Poll::Ready(self.send_to_peer_or_dial(peer_id, event))
-                }
-                Some(EventIn::TasksPong {
-                    statuses,
-                    request_id,
-                }) => {
-                    if let NodeTypeData::Worker(WorkerData {
-                        manager: Some((manager, _, _)),
-                        ..
-                    }) = &self.node_type_data
-                    {
-                        Poll::Ready(NetworkBehaviourAction::NotifyHandler {
-                            handler: NotifyHandler::Any,
-                            peer_id: manager.read().unwrap().peer_id.clone(),
-                            event: HandlerIn::TasksPong {
-                                statuses,
-                                request_id,
-                            },
-                        })
-                    } else {
-                        Poll::Ready(NetworkBehaviourAction::GenerateEvent(EventOut::NoManager(
-                            EventIn::TasksPong {
-                                statuses,
-                                request_id,
-                            },
-                        )))
-                    }
-                }
-                Some(EventIn::TaskStatus(task_id, status)) => {
-                    if let NodeTypeData::Worker(WorkerData {
-                        manager: Some((manager, _, _)),
-                        ..
-                    }) = &self.node_type_data
-                    {
-                        let peer_id = manager.clone().read().unwrap().peer_id.clone();
-                        let event = HandlerIn::TaskStatus {
-                            task_id,
-                            status,
-                            user_data: self.next_query_unique_id(),
-                        };
-                        Poll::Ready(self.send_to_peer_or_dial(peer_id, event))
-                    } else {
-                        Poll::Ready(NetworkBehaviourAction::GenerateEvent(EventOut::NoManager(
-                            EventIn::TaskStatus(task_id, status),
-                        )))
-                    }
-                }
-                Some(EventIn::GetWorkers(oneshot)) => {
-                    let w = if let NodeTypeData::Manager(data) = &self.node_type_data {
-                        Some(data.workers.values().map(|(w, _, _)| w).cloned().collect())
-                    } else {
-                        None
-                    };
-                    // TODO: expect
-                    oneshot
-                        .send(w)
-                        .expect("problem with sending answer through the oneshot.");
-
-                    Poll::Pending
-                }
-                // TODO: close the swarm and prevent any other in-connections
-                // TODO: find a way to notify balthalib when we're done sending bye
-                // TODO: special message ?
-                // TODO: ExtendedSwarm::remove_listener ?
-                Some(EventIn::Bye) | None => {
-                    let mut peer_ids = match &mut self.node_type_data {
-                        NodeTypeData::Manager(ManagerData { workers, .. }) => {
-                            workers.keys().cloned().collect()
-                        }
-                        NodeTypeData::Worker(WorkerData { manager, .. }) => {
-                            if let Some((peer, _, _)) = manager.take() {
-                                vec![peer.read().unwrap().peer_id.clone()]
-                            } else {
-                                Vec::new()
-                            }
-                        }
-                    };
-                    for id in peer_ids.drain(..) {
-                        let user_data = self.next_query_unique_id();
-                        self.inject_send_to_peer_or_dial_event(
-                            id,
-                            HandlerIn::ManagerBye { user_data },
-                        );
-                    }
-                    self.is_shutting_down = true;
-                    Poll::Pending
-                }
-            };
-
-            // If we're shutting down and trying to send a message, won't send it:
-            let action =
-                if let Poll::Ready(NetworkBehaviourAction::NotifyHandler {
-                    peer_id, event, ..
-                }) = action
-                {
-                    Poll::Ready(self.send_to_peer(peer_id, event))
-                } else {
-                    action
-                };
-
-            if action.is_ready() {
-                return action;
             }
         }
 

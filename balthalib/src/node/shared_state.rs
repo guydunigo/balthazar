@@ -267,6 +267,9 @@ impl Balthazar {
     // TODO: Channel out to send notif to wake up other parts ?
     // TODO: check correctness of proof messages, or is it done earlier ?
     // TODO: check we received them...
+    /// Check proposal messages and apply them if they are correct.
+    ///
+    /// **Note**: Currently, barely no checks are done...
     pub async fn check_and_apply_proposal(&self, proposal: man::Proposal) {
         let mut shared_state = self.shared_state.write().await;
 
