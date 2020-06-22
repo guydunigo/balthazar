@@ -29,6 +29,7 @@ impl Default for RunMode {
     }
 }
 
+// TODO: doc
 /// General configuration for Balthazar.
 // #[derive(Clap, Clone, Default, Debug)]
 // #[clap(version = "v1.0-beta")]
@@ -40,6 +41,7 @@ pub struct BalthazarConfig {
     net: NetConfig,
     chain: ChainConfig,
     wasm: Option<(String, Vec<Vec<u8>>)>,
+    is_oracle: bool,
 }
 
 impl Default for BalthazarConfig {
@@ -51,6 +53,7 @@ impl Default for BalthazarConfig {
             net: NetConfig::default(),
             chain: ChainConfig::default(),
             wasm: None,
+            is_oracle: false,
         }
     }
 }
@@ -94,5 +97,12 @@ impl BalthazarConfig {
     }
     pub fn set_wasm(&mut self, new: Option<(String, Vec<Vec<u8>>)>) {
         self.wasm = new;
+    }
+
+    pub fn is_oracle(&self) -> bool {
+        self.is_oracle
+    }
+    pub fn set_is_oracle(&mut self, new: bool) {
+        self.is_oracle = new;
     }
 }

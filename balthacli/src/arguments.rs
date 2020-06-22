@@ -60,6 +60,11 @@ pub enum Subcommand {
         /// Arguments to pass to the program.
         #[clap(name = "arg", short, long, number_of_values(1))]
         args: Option<Vec<String>>,
+        /// I am the Oracle, Neo.
+        /// The Oracle can modify the state of the tasks on the smart-contract.
+        /// **Note**: There should be only one Oracle on the network and its ethereum address should be authorized to modify the smart-contract.
+        #[clap(name = "oracle", short, long)]
+        is_oracle: bool,
     },
     /// Interract with the blockchain.
     Chain(ChainSub),
@@ -486,8 +491,10 @@ impl std::convert::TryInto<(RunMode, BalthazarConfig)> for BalthazarArgs {
             Subcommand::Manager {
                 wasm_file_addr,
                 args,
+                is_oracle,
             } => {
                 config.set_node_type(NodeType::Manager);
+                config.set_is_oracle(is_oracle);
 
                 if let (Some(wasm), Some(args)) = (wasm_file_addr, args) {
                     config.set_wasm(Some((
