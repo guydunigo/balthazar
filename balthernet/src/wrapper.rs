@@ -21,7 +21,7 @@ use libp2p::{
     NetworkBehaviour,
 };
 use misc::WorkerSpecs;
-use proto::{manager, NodeTypeContainer, Message};
+use proto::{manager, manager::ManagerMsgWrapper, Message, NodeTypeContainer};
 use std::{
     collections::VecDeque,
     pin::Pin,
@@ -170,7 +170,7 @@ impl BalthBehavioursWrapper {
                         let mut buf = Vec::new();
                         msg.encode_length_delimited(&mut buf).expect("Could not encode manager message, buffer is a Vec and should have sufficient capacity.");
                         self.gossipsub.publish(&self.managers_topic, buf)
-                    },
+                    }
                     None => self.balthbehaviour.handle_event_in(balthazar::EventIn::Bye),
                 }
                 /*
@@ -274,9 +274,12 @@ impl NetworkBehaviourEventProcess<IdentifyEvent> for BalthBehavioursWrapper {
 impl NetworkBehaviourEventProcess<GossipsubEvent> for BalthBehavioursWrapper {
     fn inject_event(&mut self, event: GossipsubEvent) {
         if let GossipsubEvent::Message(peer_id, msg_id, msg) = event {
+            let decoded_msg = ManagerMsgWrapper::decode_length_delimited(&msg.data[..])
+                .expect("Failed to decode Gossipsub manager message");
+
             println!(
                 "Pubsub: message `{:?}` from `{:?}`: {:?}",
-                peer_id, msg_id, msg
+                msg_id, peer_id, decoded_msg
             );
         }
         /*

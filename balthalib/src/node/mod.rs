@@ -228,9 +228,12 @@ impl Balthazar {
     async fn handle_event(self, event: Event) -> Result<(), Error> {
         match event {
             Event::SharedStateProposal(p) => {
-                self.swarm_in.clone().send_to_managers(p.clone().into()).await;
+                self.swarm_in
+                    .clone()
+                    .send_to_managers(p.clone().into())
+                    .await;
                 self.check_and_apply_proposal(p).await
-            },
+            }
             Event::SharedStateChange(task_id, event) => {
                 self.handle_shared_state_change(task_id, event).await?
             }
