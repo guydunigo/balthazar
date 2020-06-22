@@ -56,12 +56,17 @@ async fn get_keypair(keyfile_path: &Path) -> Result<Keypair, Error> {
 /// Internal events for Balthazar.
 #[derive(Debug)]
 enum Event {
+    /// Proposal to change shared state.
     SharedStateProposal(man::Proposal),
-    SharedStateChange(TaskId, shared_state::Event),
+    /// Shared state has changed, with always increasing order number.
+    SharedStateChange(u64, TaskId, shared_state::Event),
     // ChainJobs(chain::JobsEvent),
     // Swarm(net::EventOut),
     Error(Error),
-    Log { kind: LogKind, msg: String },
+    Log {
+        kind: LogKind,
+        msg: String,
+    },
 }
 
 impl fmt::Display for Event {
@@ -232,9 +237,11 @@ impl Balthazar {
                     .clone()
                     .send_to_managers(p.clone().into())
                     .await;
-                self.check_and_apply_proposal(p).await
+                if self.config.is_oracle() {
+                    self.check_and_apply_proposal(p).await;
+                }
             }
-            Event::SharedStateChange(task_id, event) => {
+            Event::SharedStateChange(change_id, task_id, event) => {
                 self.handle_shared_state_change(task_id, event).await?
             }
             // Event::Swarm(e) => self.handle_swarm_event(e).await,
@@ -269,13 +276,15 @@ impl Balthazar {
     async fn handle_chain_event(&self, event: chain::JobsEvent, ethereum_address: &Address) {
         self.spawn_log(LogKind::Blockchain, format!("{}", event))
             .await;
-        if let chain::JobsEvent::TaskPending { task_id } = event {
-            let msg = man::Proposal {
-                task_id: task_id.into_bytes(),
-                payment_address: Vec::from(ethereum_address.as_bytes()),
-                proposal: Some(man::proposal::Proposal::NewTask(man::ProposeNewTask {})),
-            };
-            self.spawn_event(Event::SharedStateProposal(msg)).await;
+        if !self.config.is_oracle() {
+            if let chain::JobsEvent::TaskPending { task_id } = event {
+                let msg = man::Proposal {
+                    task_id: task_id.into_bytes(),
+                    payment_address: Vec::from(ethereum_address.as_bytes()),
+                    proposal: Some(man::proposal::Proposal::NewTask(man::ProposeNewTask {})),
+                };
+                self.spawn_event(Event::SharedStateProposal(msg)).await;
+            }
         }
     }
 
