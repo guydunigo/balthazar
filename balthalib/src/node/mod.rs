@@ -221,7 +221,8 @@ impl Balthazar {
     }
 
     async fn spawn_shared_state_change(&self, task_id: TaskId, event: SharedStateEvent) {
-        self.spawn_event(Event::SharedStateChange(task_id, event))
+        // TODO
+        self.spawn_event(Event::SharedStateChange(0, task_id, event))
             .await;
     }
 

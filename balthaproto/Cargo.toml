@@ -10,11 +10,10 @@ edition = "2018"
 bytes = "0.5.5"
 prost = "0.6.1"
 futures_codec = "0.4.1"
-# libp2p = "0.16.2"
 futures = "0.3.5"
 
 [dependencies.libp2p]
-version = "0.20.0"
+version = "0.22.0"
 default-features = false
 
 [build-dependencies]

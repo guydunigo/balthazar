@@ -419,7 +419,7 @@ pub struct BalthazarArgs {
     subcommand: Subcommand,
 
     /// Disable locally listening, only dialing towards others peers.
-    #[clap(short = "L", long)]
+    #[clap(short = 'L', long)]
     disable_listen: bool,
     /// Set a address to listen on, default : `/ip4/0.0.0.0/tcp/5003`.
     // TODO: extract value from const
