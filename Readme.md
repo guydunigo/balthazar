@@ -42,7 +42,7 @@ Contains different miscelaneous types and functions used by other libraries.
 
 ### Running
 
-> **Note:** This information is outdated and won't work anymore.
+> **Note:** This information is outdated and won't work anymore. Sorry.
 
 1. Set up an IPFS daemon locally on default port (See [the official website](https://ipfs.io))
 2. Run the manager in one terminal `cargo run --release`
