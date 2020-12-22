@@ -199,8 +199,7 @@ pub fn advance_substream<TUserData>(
     match state {
         OutPendingOpen(msg, user_data) => {
             let evt = ProtocolsHandlerEvent::OutboundSubstreamRequest {
-                protocol: SubstreamProtocol::new(upgrade),
-                info: (msg, user_data),
+                protocol: SubstreamProtocol::new(upgrade, (msg, user_data)),
             };
             // println!("OutPendingOpen");
             (None, Some(evt), false)

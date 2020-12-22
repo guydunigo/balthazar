@@ -58,7 +58,7 @@ pub mod worker {
 
     /// The version number of the worker protocol
     ///
-    /// TODO: Use the crate version ?
+    /// TODO: Use the crate version, which means same version number for each protocol ?
     pub const PROTOCOL_VERSION: &str = concat!("/balthazar/worker/", env!("CARGO_PKG_VERSION"));
 
     pub fn new_worker_protocol() -> ProtoBufProtocol<WorkerMsgWrapper> {

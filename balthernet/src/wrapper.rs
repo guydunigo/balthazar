@@ -5,9 +5,9 @@ use futures::{
     SinkExt, Stream,
 };
 use libp2p::{
-    gossipsub::{Gossipsub, GossipsubConfig, GossipsubEvent, Topic},
+    gossipsub::{Gossipsub, GossipsubConfig, GossipsubEvent, Topic, MessageAuthenticity},
     // identify::{Identify, IdentifyEvent},
-    identity::PublicKey,
+    identity::Keypair,
     kad::{
         record::{store::MemoryStore, Key},
         Kademlia, KademliaEvent, QueryResult,
@@ -101,23 +101,23 @@ pub struct BalthBehavioursWrapper {
 impl BalthBehavioursWrapper {
     /// Creates a new [`BalthBehavioursWrapper`] and returns a [`Sender`] channel
     /// to communicate with it from the exterior of the Swarm.
-    pub fn new(
+    pub async fn new(
         node_type_conf: NodeTypeContainer<ManagerConfig, (WorkerConfig, WorkerSpecs)>,
         manager_check_interval: Duration,
         manager_timeout: Duration,
-        pub_key: PublicKey,
+        keypair: &Keypair,
     ) -> (Self, InputHandle) {
         let (tx, inbound_rx) = channel(CHANNEL_SIZE);
         let managers_topic = get_topic();
 
-        let local_peer_id = pub_key.into_peer_id();
+        let local_peer_id = keypair.public().into_peer_id();
         let store = MemoryStore::new(local_peer_id.clone());
         // TODO: only for manager ? maybe use it also to find workers?
         let mut kademlia = Kademlia::new(local_peer_id.clone(), store);
 
         // TODO: only for manager ?
         // TODO: check message before propagating
-        let mut gossipsub = Gossipsub::new(local_peer_id, GossipsubConfig::default());
+        let mut gossipsub = Gossipsub::new(MessageAuthenticity::Signed(keypair.clone()), GossipsubConfig::default());
         if let NodeTypeContainer::Manager(_) = node_type_conf {
             let success = gossipsub.subscribe(managers_topic.clone());
             if !success {
@@ -134,7 +134,8 @@ impl BalthBehavioursWrapper {
         (
             BalthBehavioursWrapper {
                 balthbehaviour,
-                mdns: Mdns::new().expect("Couldn't create a mDNS NetworkBehaviour"),
+                // TODO: expect
+                mdns: Mdns::new().await.expect("Couldn't create a mDNS NetworkBehaviour"),
                 ping: Ping::default(),
                 kademlia,
                 // TODO: better versions
@@ -170,6 +171,8 @@ impl BalthBehavioursWrapper {
                         let mut buf = Vec::new();
                         msg.encode_length_delimited(&mut buf).expect("Could not encode manager message, buffer is a Vec and should have sufficient capacity.");
                         self.gossipsub.publish(&self.managers_topic, buf)
+                            .expect("Gossipsub publish error");
+                        // TODO: better handle result
                     }
                     None => self.balthbehaviour.handle_event_in(balthazar::EventIn::Bye),
                 }

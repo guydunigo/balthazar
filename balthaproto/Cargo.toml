@@ -1,19 +1,19 @@
 [package]
 name = "balthaproto"
-version = "0.3.0"
+version = "0.3.1"
 authors = ["GONI Guillaume <gdn3@live.fr>"]
 edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-bytes = "0.5.5"
+bytes = "0.5.6"
 prost = "0.6.1"
 futures_codec = "0.4.1"
-futures = "0.3.5"
+futures = "0.3.8"
 
 [dependencies.libp2p]
-version = "0.22.0"
+version = "0.33.0"
 default-features = false
 
 [build-dependencies]

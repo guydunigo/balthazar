@@ -1,6 +1,6 @@
 [package]
 name = "balthamisc"
-version = "0.3.0"
+version = "0.3.1"
 authors = ["GONI Guillaume <gdn3@live.fr>"]
 edition = "2018"
 
@@ -8,14 +8,14 @@ edition = "2018"
 
 [dependencies]
 balthaproto = { path = "../balthaproto" }
-tokio = { version = "0.2.21", features = ["sync"] }
-futures = "0.3.5"
-parity-multiaddr = "0.9.1"
-multihash = "0.11.2"
-multibase = "0.8.0"
-ethereum-types = "^0.8"
+tokio = { version = "0.3.6", features = ["sync"] }
+futures = "0.3.8"
+parity-multiaddr = "0.10.0"
+multibase = "0.9.1"
+multihash = { version = "0.13.2", default-features = false, features = ["sha3"] }
+ethereum-types = "0.9.2"
 num_cpus = "1.13.0"
 
 [dependencies.libp2p]
-version = "0.22.0"
+version = "0.33.0"
 default-features = false

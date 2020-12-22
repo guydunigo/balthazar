@@ -231,7 +231,7 @@ impl Balthazar {
                     unreachable!("Just set.");
                 };
 
-                let chain = self.chain();
+                let chain = self.chain().await;
                 chain
                     .jobs_set_managers(&task_id, task.managers_addresses())
                     .await
@@ -243,7 +243,7 @@ impl Balthazar {
             }
             StateChange::DefinetelyFailed { reason } => {
                 task.set_definitely_failed(reason);
-                let chain = self.chain();
+                let chain = self.chain().await;
                 chain
                     .jobs_set_managers(&task_id, task.managers_addresses())
                     .await
@@ -282,7 +282,7 @@ impl Balthazar {
             }
         };
 
-        let task_id = match TaskId::from_bytes(proposal.task_id) {
+        let task_id = match TaskId::from_bytes(&proposal.task_id[..]) {
             Ok(task_id) => task_id,
             Err(err) => {
                 return self
@@ -341,7 +341,7 @@ impl Balthazar {
         if shared_state.tasks.contains_key(task_id) {
             Err("Task already known.".to_string())
         } else {
-            let chain = self.chain();
+            let chain = self.chain().await;
             // TODO: make it one call only...
             let (job_id, arg_id) = chain.jobs_get_task(&task_id, true).await.map_err(|err| {
                 format!(
@@ -476,7 +476,7 @@ impl Balthazar {
                     })
                 });
         } else if let Some(worker) = worker_to_unassign {
-            let worker = PeerId::from_bytes(worker)
+            let worker = PeerId::from_bytes(&worker[..])
                 .map_err(|_| "Couln't parse worker PeerId.".to_string())?;
             if task.get_substate(&worker).is_some() {
                 actions.push(StateChange::Unassign { worker });
@@ -526,14 +526,14 @@ impl Balthazar {
                 .map_err(|_| "Can't parse payment_address in offer.".to_string())?;
             // TODO: check also prices values...
 
-            let worker = PeerId::from_bytes(o.worker)
+            let worker = PeerId::from_bytes(&o.worker[..])
                 .map_err(|_| "Couln't parse worker PeerId.".to_string())?;
 
             if task.get_substate(&worker).is_some() {
                 return Err("Worker already assigned to this task.".to_string());
             }
 
-            let workers_manager = PeerId::from_bytes(o.workers_manager)
+            let workers_manager = PeerId::from_bytes(&o.workers_manager[..])
                 .map_err(|_| "Couln't parse worker's manager PeerId.".to_string())?;
 
             offers_filtered.push(StateChange::Assign {
@@ -559,12 +559,12 @@ impl Balthazar {
         proposal: man::ProposeCheckedRunning,
     ) -> Result<Vec<StateChange>, String> {
         let task = check_task_is_known(shared_state, task_id)?;
-        let worker = PeerId::from_bytes(proposal.worker)
+        let worker = PeerId::from_bytes(&proposal.worker[..])
             .map_err(|_| "Couln't parse worker PeerId.".to_string())?;
 
         if let Some(substate) = task.get_substate(&worker) {
             let min_check_interval = {
-                let chain = self.chain();
+                let chain = self.chain().await;
                 let (min_check_interval, _) =
                     chain
                         .jobs_get_management_parameters(task.job_id(), true)
@@ -614,7 +614,7 @@ impl Balthazar {
             status: Some(status),
         }) = proposal.selected_result
         {
-            let worker = PeerId::from_bytes(worker)
+            let worker = PeerId::from_bytes(&worker[..])
                 .map_err(|_| "Couln't parse worker PeerId.".to_string())?;
             (task_id_2, worker, status)
         } else {

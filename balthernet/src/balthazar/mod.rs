@@ -30,7 +30,7 @@ use std::{
     task::{Context, Poll},
     time::{Duration, Instant},
 };
-use tokio::time::DelayQueue;
+use tokio_util::time::DelayQueue;
 
 mod events;
 use events::*;
@@ -482,7 +482,7 @@ impl NetworkBehaviour for BalthBehaviour {
         &mut self,
         cx: &mut Context,
         _params: &mut impl PollParameters
-) -> Poll<NetworkBehaviourAction<<<Self::ProtocolsHandler as IntoProtocolsHandler>::Handler as ProtocolsHandler>::InEvent, Self::OutEvent>>{
+    ) -> Poll<NetworkBehaviourAction<<<Self::ProtocolsHandler as IntoProtocolsHandler>::Handler as ProtocolsHandler>::InEvent, Self::OutEvent>>{
         // Delays waking us up.
         {
             if let Poll::Ready(Some(_)) = self.delays.poll_expired(cx) {

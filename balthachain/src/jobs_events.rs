@@ -1,5 +1,5 @@
 use super::{try_convert_task_error_kind, Error};
-use misc::job::{JobId, TaskId, HASH_SIZE};
+use misc::job::{DefaultHash, JobId, TaskId};
 use proto::manager::TaskDefiniteErrorKind;
 use std::{
     convert::{TryFrom, TryInto},
@@ -109,7 +109,7 @@ impl TryFrom<(&ethabi::Contract, Log)> for JobsEvent {
                     }
                     JobsEventKind::TaskPending => {
                         let len = log.data.0.len();
-                        let expected = HASH_SIZE;
+                        let expected = DefaultHash::SIZE;
                         if len == expected {
                             let task_id = (&log.data.0[..]).try_into()?;
                             return Ok(JobsEvent::TaskPending { task_id });
@@ -123,14 +123,14 @@ impl TryFrom<(&ethabi::Contract, Log)> for JobsEvent {
                     }
                     JobsEventKind::TaskCompleted => {
                         let len = log.data.0.len();
-                        let expected = HASH_SIZE;
+                        let expected = DefaultHash::SIZE;
                         if len > expected {
-                            let task_id = (&log.data.0[..HASH_SIZE]).try_into()?;
+                            let task_id = (&log.data.0[..DefaultHash::SIZE]).try_into()?;
                             return Ok(JobsEvent::TaskCompleted {
                                 task_id,
                                 // + 32 because there seems to be an extra 32 bytes
                                 // between the two fields.
-                                result: Vec::from(&log.data.0[HASH_SIZE + 32..]),
+                                result: Vec::from(&log.data.0[DefaultHash::SIZE + 32..]),
                             });
                         } else {
                             return Err(Error::JobsEventDataWrongSize {
@@ -142,11 +142,11 @@ impl TryFrom<(&ethabi::Contract, Log)> for JobsEvent {
                     }
                     JobsEventKind::TaskDefinetelyFailed => {
                         let len = log.data.0.len();
-                        let expected = HASH_SIZE + 32;
+                        let expected = DefaultHash::SIZE + 32;
                         if len == expected {
-                            let task_id = (&log.data.0[..HASH_SIZE]).try_into()?;
+                            let task_id = (&log.data.0[..DefaultHash::SIZE]).try_into()?;
                             let reason_nb = types::U64::from_big_endian(
-                                &log.data.0[HASH_SIZE + 24..HASH_SIZE + 32],
+                                &log.data.0[DefaultHash::SIZE + 24..DefaultHash::SIZE + 32],
                             )
                             .as_u64();
                             return Ok(JobsEvent::TaskDefinetelyFailed {
@@ -182,7 +182,7 @@ impl TryFrom<(&ethabi::Contract, Log)> for JobsEvent {
                     }
                     JobsEventKind::JobCompleted => {
                         let len = log.data.0.len();
-                        let expected = HASH_SIZE;
+                        let expected = DefaultHash::SIZE;
                         if len == expected {
                             let job_id = (&log.data.0[..]).try_into()?;
                             return Ok(JobsEvent::JobCompleted { job_id });

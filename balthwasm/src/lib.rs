@@ -1,6 +1,6 @@
 extern crate multihash;
 
-use multihash::Keccak256;
+use multihash::{Hasher, Keccak256};
 
 mod abi;
 use abi::LocalResult;
@@ -33,8 +33,12 @@ pub fn my_test(argument: Vec<u8>) -> LocalResult<i64> {
 
 fn hash_counter(counter: usize) -> String {
     let string = format!("{}", counter);
-    let hash_bytes = Keccak256::digest(string.as_bytes()).into_bytes();
-    hash_bytes.iter().map(|b| format!("{:02x}", b)).collect()
+    let hash_bytes = Keccak256::digest(string.as_bytes());
+    hash_bytes
+        .as_ref()
+        .iter()
+        .map(|b| format!("{:02x}", b))
+        .collect()
 }
 
 fn contains_pattern(pattern: &[u8], txt: &str) -> bool {

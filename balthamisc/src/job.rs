@@ -5,7 +5,7 @@ use super::multiformats::{
     encode_multibase_multihash_string, try_decode_multibase_multihash_string, Error,
 };
 pub use ethereum_types::Address;
-use multihash::{wrap, Keccak256, Multihash};
+use multihash::{Code, Multihash, MultihashDigest};
 pub use proto::{
     smartcontracts::{BestMethod, OtherData},
     worker::ProgramKind,
@@ -16,10 +16,23 @@ use std::{
     str::FromStr,
 };
 
-/// Hashing algorithm used in the blockchain.
-pub type DefaultHash = Keccak256;
-/// Hash size of the [`DefaultHash`] algorithm in bytes.
-pub const HASH_SIZE: usize = 32;
+/// Default hashing algorithm used for job and task ids.
+/// Currently using **Keccak256** as it is the default in the Ethereum blockchain.
+#[derive(Clone, Copy, Debug)]
+pub struct DefaultHash;
+
+impl DefaultHash {
+    /// Code object of the default hasher used to perform actions on multihash.
+    pub const CODE: Code = Code::Keccak256;
+    /// Default hash size in bytes.
+    // TODO: get size directly from Code
+    pub const SIZE: usize = 32;
+
+    /// Compute the multihash using the default hasher.
+    pub fn digest(input: &[u8]) -> Multihash {
+        Self::CODE.digest(input)
+    }
+}
 
 // TODO: those are temporary aliases.
 /// Identifies a unique job on the network.
@@ -27,36 +40,37 @@ pub type JobId = HashId;
 /// Identifies a unique task for a given job.
 pub type TaskId = HashId;
 
+/// An Identification based on a hash.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct HashId {
     inner: Multihash,
 }
 
 impl HashId {
-    /// Get inner hash.
+    /// Get the inner multihash.
     pub fn hash(&self) -> &Multihash {
         &self.inner
     }
 
     /// Get the bytes of the multihash including the self-describing part.
     pub fn as_bytes(&self) -> &[u8] {
-        self.hash().as_bytes()
+        self.hash().digest()
     }
 
     /// From bytes of a multihash.
-    pub fn from_bytes(bytes: Vec<u8>) -> Result<Self, Error> {
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, Error> {
         Multihash::from_bytes(bytes)?.try_into()
     }
 
     /// Get the bytes of the multihash including the self-describing part.
-    pub fn into_bytes(self) -> Vec<u8> {
-        self.inner.into_bytes()
+    pub fn to_bytes(&self) -> Vec<u8> {
+        self.inner.to_bytes()
     }
 
     /// Takes the digest and make it into a 32 bytes array.
     pub fn to_bytes32(&self) -> [u8; 32] {
-        let mut res = [0; HASH_SIZE];
-        res.copy_from_slice(&self.hash().digest()[..HASH_SIZE]);
+        let mut res = [0; DefaultHash::SIZE];
+        res.copy_from_slice(&self.hash().digest()[..DefaultHash::SIZE]);
         res
     }
 
@@ -72,7 +86,7 @@ impl HashId {
 
     /// Calculate TaskId.
     pub fn task_id(job_id: &JobId, i: u128 /*, argument: &[u8]*/) -> TaskId {
-        let mut buffer = Vec::with_capacity(HASH_SIZE + 16 /*+ argument.len()*/);
+        let mut buffer = Vec::with_capacity(DefaultHash::SIZE + 16 /*+ argument.len()*/);
         buffer.extend_from_slice(job_id.as_bytes());
         buffer.extend_from_slice(&i.to_be_bytes()[..]);
         // buffer.extend_from_slice(&argument[..]);
@@ -87,10 +101,11 @@ impl TryFrom<Multihash> for HashId {
 
     fn try_from(src: Multihash) -> Result<Self, Self::Error> {
         // TODO: proper error and TryFrom ?
-        if src.algorithm() != DefaultHash::CODE {
+        let src_code = src.code().try_into()?;
+        if src_code != DefaultHash::CODE {
             Err(Error::WrongHashAlgorithm {
                 expected: DefaultHash::CODE,
-                got: src.algorithm(),
+                got: src_code,
             })
         } else {
             Ok(TaskId { inner: src })
@@ -103,19 +118,19 @@ impl TryFrom<&[u8]> for HashId {
 
     /// Tries to parse a [`DefaultHash`] from a raw array (not multihash encoding).
     fn try_from(src: &[u8]) -> Result<Self, Self::Error> {
-        if src.len() != HASH_SIZE {
+        if src.len() != DefaultHash::SIZE {
             Err(Error::WrongSourceLength {
-                expected: HASH_SIZE,
+                expected: DefaultHash::SIZE,
                 got: src.len(),
             })
         } else {
-            Self::try_from(wrap(DefaultHash::CODE, src))
+            Self::try_from(Multihash::wrap(DefaultHash::CODE.into(), src)?)
         }
     }
 }
 
-impl From<[u8; HASH_SIZE]> for HashId {
-    fn from(src: [u8; HASH_SIZE]) -> Self {
+impl From<[u8; DefaultHash::SIZE]> for HashId {
+    fn from(src: [u8; DefaultHash::SIZE]) -> Self {
         Self::try_from(&src[..]).expect("We should already have the correct size.")
     }
 }
@@ -465,7 +480,7 @@ impl Job {
         OtherData {
             program_kind: self.program_kind().into(),
             program_addresses: Vec::from(self.program_addresses()),
-            program_hash: self.program_hash().to_vec(),
+            program_hash: self.program_hash().to_bytes(),
             best_method: self.best_method().into(),
             min_cpu_count: self.min_cpu_count(),
             min_memory: self.min_memory(),

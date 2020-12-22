@@ -1,6 +1,6 @@
 [package]
 name = "balthalib"
-version = "0.3.0"
+version = "0.3.1"
 authors = ["GONI Guillaume <gdn3@live.fr>"]
 edition = "2018"
 
@@ -14,6 +14,6 @@ balthachain = { path = "../balthachain" }
 balthaproto = { path = "../balthaproto" }
 balthamisc = { path = "../balthamisc" }
 balthwasm = { path = "../balthwasm" }
-tokio = { version = "0.2.21", features = ["sync"] }
-futures = "0.3.5"
+tokio = { version = "0.3.6", features = ["rt", "rt-multi-thread", "stream", "sync", "time"] }
+futures = "0.3.8"
 async-ctrlc = { version = "1.2.0", features = ["stream"] }

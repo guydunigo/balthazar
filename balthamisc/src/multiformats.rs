@@ -1,16 +1,15 @@
 //! Tools for manipulating multiformats: [`multibase`], [`multihash`], [`multiaddr`].
 use super::job::DefaultHash;
 use multibase::{decode, encode, Base};
-use multihash::Multihash;
-use std::fmt;
+use multihash::{Code, Multihash, MultihashDigest};
+use std::{convert::TryInto, fmt};
 
 pub const DEFAULT_BASE: Base = Base::Base64Pad;
 
 #[derive(Debug)]
 pub enum Error {
     Multibase(multibase::Error),
-    MultihashDecode(multihash::DecodeOwnedError),
-    MultihashEncode(multihash::EncodeError),
+    MultihashError(multihash::Error),
     WrongHashAlgorithm {
         expected: multihash::Code,
         got: multihash::Code,
@@ -34,27 +33,20 @@ impl From<multibase::Error> for Error {
     }
 }
 
-impl From<multihash::DecodeOwnedError> for Error {
-    fn from(e: multihash::DecodeOwnedError) -> Self {
-        Error::MultihashDecode(e)
-    }
-}
-
-impl From<multihash::EncodeError> for Error {
-    fn from(e: multihash::EncodeError) -> Self {
-        Error::MultihashEncode(e)
+impl From<multihash::Error> for Error {
+    fn from(e: multihash::Error) -> Self {
+        Error::MultihashError(e)
     }
 }
 
 /// Tries decoding the given multibase encoded multihash string.
 pub fn try_decode_multibase_multihash_string(src: &str) -> Result<Multihash, Error> {
     let (_, hash) = decode(src)?;
-    Ok(Multihash::from_bytes(hash)?)
+    Ok(Multihash::from_bytes(&hash[..])?)
 }
 
 pub fn encode_multibase_multihash_string(hash: &Multihash) -> String {
-    let hash = hash.as_bytes();
-    encode(DEFAULT_BASE, hash)
+    encode(DEFAULT_BASE, hash.to_bytes())
 }
 
 #[derive(Debug, Clone)]
@@ -81,7 +73,9 @@ pub fn run(mode: &RunMode) -> Result<(), Error> {
 
             let hashed_data = algo.digest(&data[..]);
             */
-            let hashed_data = hash.algorithm().digest(&data[..]);
+            // let hashed_data = hash.algorithm().digest(&data[..]);
+            let hasher: Code = hash.code().try_into()?;
+            let hashed_data = hasher.digest(&data[..]);
 
             if *hash == hashed_data {
                 println!("Match");

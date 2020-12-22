@@ -14,7 +14,7 @@ mod run;
 pub use run::{run, RunMode};
 
 use ethabi::Event;
-use futures::{compat::Compat01As03, future, Stream, StreamExt};
+use futures::{future, Stream, StreamExt};
 use misc::{
     job::{Address, Job, JobId, OtherData, TaskId},
     multihash::Multihash,
@@ -27,7 +27,7 @@ use std::{
 };
 use web3::{
     contract::{Contract, Error as ContractError, Options},
-    transports::{EventLoopHandle, WebSocket},
+    transports::WebSocket,
     types::{self, Block, BlockId, FilterBuilder},
     Web3,
 };
@@ -107,7 +107,6 @@ fn try_convert_tasks_state(
 /// > **Note:** Every function modifying a smart-contract will cost money to process.
 #[derive(Debug)]
 pub struct Chain<'a> {
-    eloop: EventLoopHandle,
     web3: Web3<WebSocket>,
     config: &'a ChainConfig,
 }
@@ -115,10 +114,10 @@ pub struct Chain<'a> {
 // TODO: explain [`check_non_null`].
 // TODO: transaction costs
 impl<'a> Chain<'a> {
-    pub fn new(config: &'a ChainConfig) -> Self {
-        let (eloop, transport) = WebSocket::new(config.web3_ws()).unwrap();
+    pub async fn new(config: &'a ChainConfig) -> Chain<'a> {
+        // TODO: handle websocket connection error.
+        let transport = WebSocket::new(config.web3_ws()).await.unwrap();
         Chain {
-            eloop,
             web3: web3::Web3::new(transport),
             config,
         }
@@ -136,14 +135,14 @@ impl<'a> Chain<'a> {
 
     /// Get information about given block.
     pub async fn block(&self, block_id: BlockId) -> Result<Option<Block<types::H256>>, Error> {
-        Compat01As03::new(self.web3.eth().block(block_id))
-            .await
-            .map_err(Error::Web3)
+        self.web3.eth().block(block_id).await.map_err(Error::Web3)
     }
 
     /// Get balance of given account.
     pub async fn balance(&self, addr: Address) -> Result<types::U256, Error> {
-        Compat01As03::new(self.web3.eth().balance(addr, None))
+        self.web3
+            .eth()
+            .balance(addr, None)
             .await
             .map_err(Error::Web3)
     }
@@ -187,7 +186,7 @@ impl<'a> Chain<'a> {
         let addr = self.local_address()?;
 
         let fut = jobs.query("counter", (), addr, Default::default(), None);
-        Ok(Compat01As03::new(fut).await?)
+        Ok(fut.await?)
     }
 
     pub async fn jobs_set_counter(&self, new: u128) -> Result<types::TransactionReceipt, Error> {
@@ -195,7 +194,7 @@ impl<'a> Chain<'a> {
         let addr = self.local_address()?;
 
         let fut = jobs.call_with_confirmations("set_counter", new, addr, Default::default(), 0);
-        Ok(Compat01As03::new(fut).await?)
+        Ok(fut.await?)
     }
 
     pub async fn jobs_inc_counter(&self) -> Result<types::TransactionReceipt, Error> {
@@ -203,7 +202,7 @@ impl<'a> Chain<'a> {
         let addr = self.local_address()?;
 
         let fut = jobs.call_with_confirmations("inc_counter", (), addr, Default::default(), 0);
-        Ok(Compat01As03::new(fut).await?)
+        Ok(fut.await?)
     }
     */
 
@@ -229,9 +228,9 @@ impl<'a> Chain<'a> {
             None,
         );
 
-        let stream_fut =
-            Compat01As03::new(self.web3.eth_subscribe().subscribe_logs(filter.build()));
-        let stream = Compat01As03::new(stream_fut.await?);
+        let eth_subscribe = self.web3.eth_subscribe();
+        let stream_fut = eth_subscribe.subscribe_logs(filter.build());
+        let stream = stream_fut.await?;
 
         let jobs_ethabi = self.jobs_ethabi()?;
         Ok(stream.map(move |e| match e {
@@ -293,7 +292,7 @@ impl<'a> Chain<'a> {
             Default::default(),
             None,
         );
-        Ok(Compat01As03::new(fut).await?)
+        Ok(fut.await?)
     }
 
     ///  Send money to local address's pending account.
@@ -316,7 +315,7 @@ impl<'a> Chain<'a> {
                 Options::with(|o| o.value = Some(amount)),
                 0,
             );
-            Ok(Compat01As03::new(fut).await?)
+            Ok(fut.await?)
         }
         // TODO: check new values
     }
@@ -343,7 +342,7 @@ impl<'a> Chain<'a> {
             Default::default(),
             0,
         );
-        Ok(Compat01As03::new(fut).await?)
+        Ok(fut.await?)
         // TODO: check new values
     }
 
@@ -354,7 +353,7 @@ impl<'a> Chain<'a> {
         let addr = self.local_address()?;
 
         let fut = jobs.query("get_next_nonce", (), *addr, Default::default(), None);
-        Ok(Compat01As03::new(fut).await?)
+        Ok(fut.await?)
     }
 
     /// Creates a new draft job based on given job, and return it's [`JobId`].
@@ -374,7 +373,7 @@ impl<'a> Chain<'a> {
             .await?;
 
         let fut = jobs.call_with_confirmations("create_draft", (), *addr, Default::default(), 0);
-        Compat01As03::new(fut).await?;
+        fut.await?;
 
         // TODO: concurrency issues ?
         // TODO: We have to suppose the user hasn't created another job at the same time.
@@ -404,7 +403,7 @@ impl<'a> Chain<'a> {
             Default::default(),
             0,
         );
-        Compat01As03::new(fut).await?;
+        fut.await?;
 
         let other_data = job.other_data();
         let mut encoded_data = Vec::with_capacity(other_data.encoded_len());
@@ -416,7 +415,7 @@ impl<'a> Chain<'a> {
             Default::default(),
             0,
         );
-        Compat01As03::new(fut).await?;
+        fut.await?;
 
         for arg in job.arguments().iter() {
             let fut = jobs.call_with_confirmations(
@@ -426,7 +425,7 @@ impl<'a> Chain<'a> {
                 Default::default(),
                 0,
             );
-            Compat01As03::new(fut).await?;
+            fut.await?;
         }
 
         let fut = jobs.call_with_confirmations(
@@ -441,7 +440,7 @@ impl<'a> Chain<'a> {
             Default::default(),
             0,
         );
-        Compat01As03::new(fut).await?;
+        fut.await?;
 
         let fut = jobs.call_with_confirmations(
             "set_management_parameters",
@@ -454,7 +453,7 @@ impl<'a> Chain<'a> {
             Default::default(),
             0,
         );
-        Compat01As03::new(fut).await?;
+        fut.await?;
 
         Ok(nonce)
     }
@@ -482,7 +481,7 @@ impl<'a> Chain<'a> {
             Default::default(),
             0,
         );
-        Ok(Compat01As03::new(fut).await?)
+        Ok(fut.await?)
     }
 
     /// Locks a job from draft to pending so it can be computed.
@@ -508,7 +507,7 @@ impl<'a> Chain<'a> {
 
         let fut =
             jobs.call_with_confirmations("lock", job_id.to_bytes32(), *addr, Default::default(), 0);
-        Ok(Compat01As03::new(fut).await?)
+        Ok(fut.await?)
     }
 
     /// Get [`Job::timeout`], [`Job::redundancy`] and [`Job::max_failures`] for given job.
@@ -528,7 +527,7 @@ impl<'a> Chain<'a> {
                 Default::default(),
                 None,
             );
-            Ok(Compat01As03::new(fut).await?)
+            Ok(fut.await?)
         } else {
             Err(Error::JobNotFound(job_id.clone()))
         }
@@ -551,7 +550,7 @@ impl<'a> Chain<'a> {
                 Default::default(),
                 None,
             );
-            let other_data_bytes: Vec<u8> = Compat01As03::new(fut).await?;
+            let other_data_bytes: Vec<u8> = fut.await?;
             let other_data = OtherData::decode(&other_data_bytes[..])?;
             Ok(other_data)
         } else {
@@ -576,7 +575,7 @@ impl<'a> Chain<'a> {
                 Default::default(),
                 None,
             );
-            Ok(Compat01As03::new(fut).await?)
+            Ok(fut.await?)
         } else {
             Err(Error::JobNotFound(job_id.clone()))
         }
@@ -600,7 +599,7 @@ impl<'a> Chain<'a> {
                 Default::default(),
                 None,
             );
-            Ok(Compat01As03::new(fut).await?)
+            Ok(fut.await?)
         } else {
             Err(Error::JobNotFound(job_id.clone()))
         }
@@ -623,7 +622,7 @@ impl<'a> Chain<'a> {
                 Default::default(),
                 None,
             );
-            Ok(Compat01As03::new(fut).await?)
+            Ok(fut.await?)
         } else {
             Err(Error::JobNotFound(job_id.clone()))
         }
@@ -646,7 +645,7 @@ impl<'a> Chain<'a> {
                 Default::default(),
                 None,
             );
-            Ok(Compat01As03::new(fut).await?)
+            Ok(fut.await?)
         } else {
             Err(Error::JobNotFound(job_id.clone()))
         }
@@ -664,7 +663,7 @@ impl<'a> Chain<'a> {
             Default::default(),
             None,
         );
-        Ok(Compat01As03::new(fut).await?)
+        Ok(fut.await?)
     }
 
     /// Check if the job is a draft and can still be modified by its sender.
@@ -680,7 +679,7 @@ impl<'a> Chain<'a> {
                 Default::default(),
                 None,
             );
-            Ok(Compat01As03::new(fut).await?)
+            Ok(fut.await?)
         } else {
             Err(Error::JobNotFound(job_id.clone()))
         }
@@ -703,7 +702,7 @@ impl<'a> Chain<'a> {
                 Default::default(),
                 None,
             );
-            Ok(Compat01As03::new(fut).await?)
+            Ok(fut.await?)
         } else {
             Err(Error::JobNotFound(job_id.clone()))
         }
@@ -727,7 +726,7 @@ impl<'a> Chain<'a> {
         let mut job = Job::new(
             other_data.program_kind(),
             other_data.program_addresses,
-            Multihash::from_bytes(other_data.program_hash)?,
+            Multihash::from_bytes(&other_data.program_hash[..])?,
             args,
             sender,
         );
@@ -782,7 +781,7 @@ impl<'a> Chain<'a> {
             Default::default(),
             None,
         );
-        Ok(Compat01As03::new(fut).await?)
+        Ok(fut.await?)
     }
 
     /// Get the argument of a given task.
@@ -802,7 +801,7 @@ impl<'a> Chain<'a> {
                 Default::default(),
                 None,
             );
-            Ok(Compat01As03::new(fut).await?)
+            Ok(fut.await?)
         } else {
             Err(Error::TaskNotFound(task_id.clone()))
         }
@@ -825,7 +824,7 @@ impl<'a> Chain<'a> {
                 Default::default(),
                 None,
             );
-            let (state, reason, result) = Compat01As03::new(fut).await?;
+            let (state, reason, result) = fut.await?;
             let reason =
                 try_convert_task_error_kind(reason).ok_or(Error::TaskErrorKindParse(reason))?;
             try_convert_tasks_state(state, result, reason).ok_or(Error::TaskStateParse(state))
@@ -853,7 +852,7 @@ impl<'a> Chain<'a> {
                 Default::default(),
                 None,
             );
-            let (job_id, argument_id): (Vec<u8>, u128) = Compat01As03::new(fut).await?;
+            let (job_id, argument_id): (Vec<u8>, u128) = fut.await?;
             Ok((JobId::try_from(&job_id[..])?, argument_id))
         } else {
             Err(Error::TaskNotFound(task_id.clone()))
@@ -882,7 +881,7 @@ impl<'a> Chain<'a> {
         let addr = self.local_address()?;
 
         let fut = jobs.query("oracle", (), *addr, Default::default(), None);
-        Ok(Compat01As03::new(fut).await?)
+        Ok(fut.await?)
     }
 
     /// Register managers who participated on the given task.
@@ -907,7 +906,7 @@ impl<'a> Chain<'a> {
                     Default::default(),
                     0,
                 );
-                res.push(Compat01As03::new(fut).await?);
+                res.push(fut.await?);
             }
             Ok(res)
         } else {
@@ -939,7 +938,7 @@ impl<'a> Chain<'a> {
                 Default::default(),
                 0,
             );
-            Ok(Compat01As03::new(fut).await?)
+            Ok(fut.await?)
         } else {
             Err(Error::LocalAddressNotOracle(*addr, oracle))
         }
@@ -985,7 +984,7 @@ impl<'a> Chain<'a> {
                 Default::default(),
                 0,
             );
-            Ok(Compat01As03::new(fut).await?)
+            Ok(fut.await?)
         } else {
             Err(Error::LocalAddressNotOracle(*addr, oracle))
         }

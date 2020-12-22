@@ -103,7 +103,7 @@ pub fn run(mode: &RunMode, config: &ChainConfig) -> Result<(), Error> {
 }
 
 async fn run_async(mode: &RunMode, config: &ChainConfig) -> Result<(), Error> {
-    let chain = Chain::new(config);
+    let chain = Chain::new(config).await;
 
     match mode {
         RunMode::Block => {

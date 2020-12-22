@@ -3,8 +3,9 @@
 use futures::executor::block_on;
 use futures::{io::AsyncRead, io::AsyncWrite, AsyncReadExt, AsyncWriteExt, TryStreamExt};
 use libp2p::{
-    core::transport::upgrade::Version, identity::Keypair, secio::SecioConfig, tcp::TcpConfig,
-    yamux, Multiaddr, Transport,
+    core::transport::upgrade::Version, identity::Keypair, noise::NoiseConfig, tcp::TcpConfig,
+    yamux::YamuxConfig, Multiaddr, Transport,
+    noise,
 };
 use std::marker::Unpin;
 
@@ -53,13 +54,14 @@ pub fn create_basic_tcp_client_or_listener(addr: Multiaddr, listening_port: Opti
     }
 }
 
-/// Creates a [`Transport`] using only tcp and secio for encryption and yamux for multiplexing,
+/// Creates a [`Transport`] using only tcp and noise for encryption and yamux for multiplexing,
 /// to be used in a [`Swarm`](`libp2p::swarm::Swarm`).
 pub fn get_tcp_transport<E, L, LU, D>(keypair: Keypair) -> impl Transport {
-    let secio = SecioConfig::new(keypair);
-    let yamux = yamux::Config::default();
+    let dh_keys = noise::Keypair::<noise::X25519Spec>::new().into_authentic(&keypair).unwrap();
+    let noise = NoiseConfig::xx(dh_keys).into_authenticated();
+    let yamux = YamuxConfig::default();
     TcpConfig::new()
         .upgrade(Version::V1Lazy)
-        .authenticate(secio)
+        .authenticate(noise)
         .multiplex(yamux)
 }

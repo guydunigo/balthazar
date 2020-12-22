@@ -18,7 +18,6 @@ use tokio::{runtime::Runtime, sync::RwLock, time::interval};
 use chain::Chain;
 use misc::{
     job::{Address, DefaultHash, ProgramKind, TaskId},
-    multihash::Keccak256,
     shared_state::{PeerId, SharedState},
     WorkerSpecs,
 };
@@ -138,8 +137,8 @@ impl Balthazar {
     }
 
     // TODO: don't re-create it, it opens a new connection each time...
-    fn chain(&self) -> Chain {
-        Chain::new(self.config.chain())
+    async fn chain(&self) -> Chain<'_> {
+        Chain::new(self.config.chain()).await
     }
 
     fn ethereum_address(&self) -> Result<&misc::job::Address, chain::Error> {
@@ -160,7 +159,7 @@ impl Balthazar {
         let peer_id = keypair.public().into_peer_id();
         println!("Peer Id: {}", peer_id);
 
-        let (swarm_in, swarm_out) = net::get_swarm(keypair.clone(), config.net(), Some(&specs));
+        let (swarm_in, swarm_out) = net::get_swarm(keypair.clone(), config.net(), Some(&specs)).await;
         let (inner_in, inner_out) = channel(CHANNEL_SIZE);
         let (runner_in, runner_out) = channel(CHANNEL_SIZE);
 
@@ -242,7 +241,8 @@ impl Balthazar {
                     self.check_and_apply_proposal(p).await;
                 }
             }
-            Event::SharedStateChange(change_id, task_id, event) => {
+            // TODO: use change id
+            Event::SharedStateChange(_change_id, task_id, event) => {
                 self.handle_shared_state_change(task_id, event).await?
             }
             // Event::Swarm(e) => self.handle_swarm_event(e).await,
@@ -255,7 +255,7 @@ impl Balthazar {
 
     /// Handle events coming out of smart-contracts.
     async fn handle_chain(&self) -> Result<(), Error> {
-        let chain = self.chain();
+        let chain = self.chain().await;
         let addr = self.ethereum_address()?;
         chain
             .jobs_subscribe()
@@ -280,7 +280,7 @@ impl Balthazar {
         if !self.config.is_oracle() {
             if let chain::JobsEvent::TaskPending { task_id } = event {
                 let msg = man::Proposal {
-                    task_id: task_id.into_bytes(),
+                    task_id: task_id.to_bytes(),
                     payment_address: Vec::from(ethereum_address.as_bytes()),
                     proposal: Some(man::proposal::Proposal::NewTask(man::ProposeNewTask {})),
                 };
@@ -343,10 +343,10 @@ impl Balthazar {
                 completion_signals_senders: Vec::new(),
                 completion_signals: Vec::new(),
                 selected_result: Some(man::ManTaskStatus {
-                    task_id: task_id.clone().into_bytes(),
-                    worker: peer_id.into_bytes(),
+                    task_id: task_id.to_bytes(),
+                    worker: peer_id.to_bytes(),
                     status: Some(worker::TaskStatus {
-                        task_id: task_id.clone().into_bytes(),
+                        task_id: task_id.to_bytes(),
                         status_data: status.into(),
                     }),
                 }),
@@ -370,10 +370,10 @@ impl Balthazar {
                         man::ProposeFailureWorker {
                             original_message_sender: Vec::new(),
                             original_message: Some(man::ManTaskStatus {
-                                task_id: task_id.clone().into_bytes(),
-                                worker: peer_id.into_bytes(),
+                                task_id: task_id.to_bytes(),
+                                worker: peer_id.to_bytes(),
                                 status: Some(worker::TaskStatus {
-                                    task_id: task_id.clone().into_bytes(),
+                                    task_id: task_id.to_bytes(),
                                     status_data: status.into(),
                                 }),
                             }),
@@ -385,7 +385,7 @@ impl Balthazar {
         };
 
         let msg = man::Proposal {
-            task_id: task_id.into_bytes(),
+            task_id: task_id.to_bytes(),
             payment_address: Vec::from(ethereum_address.as_bytes()),
             proposal: Some(proposal),
         };
@@ -485,7 +485,7 @@ impl Balthazar {
                         .send_to_behaviour(net::EventIn::TasksExecute(
                             worker,
                             vec![TaskExecute {
-                                task_id: task_id.into_bytes(),
+                                task_id: task_id.to_bytes(),
                                 program_addresses: job.program_addresses().to_vec(),
                                 program_hash: job.program_hash().clone().into(),
                                 program_kind: job.program_kind().clone().into(),
@@ -511,7 +511,7 @@ impl Balthazar {
 
     async fn handle_runner(&self, task: TaskExecute) {
         // TODO: expect
-        let task_id = TaskId::from_bytes(task.task_id).expect("not a correct multihash");
+        let task_id = TaskId::from_bytes(&task.task_id[..]).expect("not a correct multihash");
         self.swarm_in
             .clone()
             .send_to_behaviour(net::EventIn::TaskStatus(
@@ -637,13 +637,13 @@ impl Balthazar {
     async fn send_manual_task(&self, peer_id: PeerId, wasm: String, args: &[Vec<u8>]) {
         let storage = StoragesWrapper::default();
         let program_data = storage.fetch(&wasm[..], 1_000_000).await.unwrap();
-        let program_hash = DefaultHash::digest(&program_data[..]).into_bytes();
+        let program_hash = DefaultHash::digest(&program_data[..]).to_bytes();
         let tasks = args
             .iter()
             .cloned()
             .enumerate()
             .map(|(i, argument)| TaskExecute {
-                task_id: Keccak256::digest(&i.to_be_bytes()[..]).into_bytes(),
+                task_id: DefaultHash::digest(&i.to_be_bytes()[..]).to_bytes(),
                 program_addresses: vec![wasm.clone()],
                 program_hash: program_hash.clone(),
                 program_kind: ProgramKind::Wasm0m1n0.into(),
@@ -681,7 +681,7 @@ impl Balthazar {
         let task = shared_state.tasks.get(&task_id).expect("Unknown task.");
 
         let msg = man::Proposal {
-            task_id: task_id.clone().into_bytes(),
+            task_id: task_id.to_bytes(),
             payment_address: Vec::from(ethereum_address.as_bytes()),
             proposal: Some(man::proposal::Proposal::Failure(man::ProposeFailure {
                 new_nb_failures: task.nb_failures(),
@@ -689,10 +689,10 @@ impl Balthazar {
                     man::ProposeFailureWorker {
                         original_message_sender: Vec::new(),
                         original_message: Some(man::ManTaskStatus {
-                            task_id: task_id.clone().into_bytes(),
-                            worker: peer_id.clone().into_bytes(),
+                            task_id: task_id.to_bytes(),
+                            worker: peer_id.to_bytes(),
                             status: Some(worker::TaskStatus {
-                                task_id: task_id.clone().into_bytes(),
+                                task_id: task_id.to_bytes(),
                                 status_data: Some(worker::task_status::StatusData::Error(
                                     worker::TaskErrorKind::Aborted.into(),
                                 )),
@@ -736,10 +736,10 @@ impl Balthazar {
                         .take(nb_unassigned)
                         .map(|peer_id| {
                             let mut offer = man::Offer::default();
-                            offer.task_id = task_id.clone().into_bytes();
-                            offer.worker = (*peer_id).clone().into_bytes();
+                            offer.task_id = task_id.to_bytes();
+                            offer.worker = peer_id.to_bytes();
                             // TODO: our address
-                            offer.workers_manager = self.peer_id.clone().into_bytes();
+                            offer.workers_manager = self.peer_id.to_bytes();
                             offer.payment_address = Vec::from(ethereum_address.as_bytes());
                             offer.worker_price = 1;
                             offer.network_price = 1;
@@ -749,7 +749,7 @@ impl Balthazar {
 
                     // TODO: check workers specs, for now we expect them all to have the same...
                     let msg = man::Proposal {
-                        task_id: task_id.clone().into_bytes(),
+                        task_id: task_id.to_bytes(),
                         payment_address: Vec::from(ethereum_address.as_bytes()),
                         proposal: Some(man::proposal::Proposal::Scheduling(
                             man::ProposeScheduling {

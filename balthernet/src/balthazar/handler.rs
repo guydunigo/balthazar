@@ -88,19 +88,21 @@ where
     type OutEvent = EventOut<TUserData>;
     type Error = io::Error;
     type InboundProtocol = ProtoBufProtocol<WorkerMsgWrapper>;
+    type InboundOpenInfo = (); // TODO: What information would we need there ?
     type OutboundProtocol = ProtoBufProtocol<WorkerMsgWrapper>;
     type OutboundOpenInfo = (WorkerMsgWrapper, Option<TUserData>);
 
-    fn listen_protocol(&self) -> SubstreamProtocol<Self::InboundProtocol> {
-        // eprintln!("New listen protocol");
-        SubstreamProtocol::new(worker::new_worker_protocol())
+    fn listen_protocol(&self) -> SubstreamProtocol<Self::InboundProtocol, ()> {
+        eprintln!("New listen protocol");
+        SubstreamProtocol::new(worker::new_worker_protocol(), ())
     }
 
     fn inject_fully_negotiated_inbound(
         &mut self,
         sink: <Self::InboundProtocol as InboundUpgrade<NegotiatedSubstream>>::Output,
+        _info: Self::InboundOpenInfo,
     ) {
-        // eprintln!("New Inbound Frame received after successful upgrade.");
+        eprintln!("New Inbound Frame received after successful upgrade.");
         let next_connec_unique_id = self.next_connec_unique_id();
         self.substreams.push(SubstreamState::InWaitingMessage(
             next_connec_unique_id,
@@ -226,7 +228,7 @@ where
                 user_data,
             } => {
                 let msg = worker::TasksPing {
-                    task_ids: task_ids.drain(..).map(|i| i.into_bytes()).collect(),
+                    task_ids: task_ids.drain(..).map(|i| i.to_bytes()).collect(),
                 }
                 .into();
                 inject_new_request_event(&mut self.substreams, user_data, msg)
@@ -239,7 +241,7 @@ where
                     statuses: statuses
                         .drain(..)
                         .map(|(i, s)| worker::TaskStatus {
-                            task_id: i.into_bytes(),
+                            task_id: i.to_bytes(),
                             status_data: s.into(),
                         })
                         .collect(),
@@ -252,7 +254,7 @@ where
                 user_data,
             } => {
                 let msg = worker::TasksAbord {
-                    task_ids: task_ids.drain(..).map(|i| i.into_bytes()).collect(),
+                    task_ids: task_ids.drain(..).map(|i| i.to_bytes()).collect(),
                 }
                 .into();
                 inject_new_request_event(&mut self.substreams, user_data, msg)
@@ -263,7 +265,7 @@ where
                 user_data,
             } => {
                 let msg = worker::TaskStatus {
-                    task_id: task_id.into_bytes(),
+                    task_id: task_id.to_bytes(),
                     status_data: status.into(),
                 }
                 .into();
@@ -532,11 +534,11 @@ fn process_request<TUserData>(
                     request_id: RequestId::new(connec_unique_id),
                 }))
             }
-            WorkerMsg::TasksPing(worker::TasksPing { mut task_ids }) => {
+            WorkerMsg::TasksPing(worker::TasksPing { task_ids }) => {
                 // TODO: what should be done with the errors ?
                 let task_ids = task_ids
-                    .drain(..)
-                    .map(TaskId::from_bytes)
+                    .iter()
+                    .map(|i| TaskId::from_bytes(&i[..]))
                     .filter_map(Result::ok)
                     .collect();
                 Some(Ok(EventOut::TasksPing {
@@ -544,11 +546,11 @@ fn process_request<TUserData>(
                     request_id: RequestId::new(connec_unique_id),
                 }))
             }
-            WorkerMsg::TasksAbord(worker::TasksAbord { mut task_ids }) => {
+            WorkerMsg::TasksAbord(worker::TasksAbord { task_ids }) => {
                 // TODO: what should be done with the errors ?
                 let task_ids = task_ids
-                    .drain(..)
-                    .map(TaskId::from_bytes)
+                    .iter()
+                    .map(|i| TaskId::from_bytes(&i[..]))
                     .filter_map(Result::ok)
                     .collect();
                 Some(Ok(EventOut::TasksAbord {
@@ -561,7 +563,7 @@ fn process_request<TUserData>(
                 status_data,
             }) => {
                 // TODO: what should be done with the errors ?
-                if let Ok(task_id) = TaskId::from_bytes(task_id) {
+                if let Ok(task_id) = TaskId::from_bytes(&task_id[..]) {
                     Some(Ok(EventOut::TaskStatus {
                         task_id,
                         status: status_data.into(),
@@ -615,7 +617,7 @@ fn process_answer<TUserData>(
             WorkerMsg::ManagerPong(worker::ManagerPong {}) => Some(EventOut::ManagerPong { user_data }),
             WorkerMsg::TasksPong(worker::TasksPong { mut statuses }) => {
                 let statuses: Vec<_> = statuses.drain(..)
-                    .filter_map(|s| if let Ok(task_id) = TaskId::from_bytes(s.task_id) { Some((task_id,s.status_data.into())) } else { None }).collect();
+                    .filter_map(|s| if let Ok(task_id) = TaskId::from_bytes(&s.task_id[..]) { Some((task_id,s.status_data.into())) } else { None }).collect();
                 Some(EventOut::TasksPong {
                     statuses,
                     user_data,

@@ -30,7 +30,7 @@ pub enum Error {
     /// This error is sent when the event couldn't be found.
     CouldntFindJobNewEvent,
     MultiaddrParse(multiaddr::Error),
-    Multihash(multihash::DecodeOwnedError),
+    Multihash(multihash::Error),
     TaskStateParse(u64),
     TaskErrorKindParse(u64),
     NotEnoughMoneyInAccount(Address, U256),
@@ -85,8 +85,8 @@ impl From<misc::multiformats::Error> for Error {
     }
 }
 
-impl From<multihash::DecodeOwnedError> for Error {
-    fn from(e: multihash::DecodeOwnedError) -> Self {
+impl From<multihash::Error> for Error {
+    fn from(e: multihash::Error) -> Self {
         Error::Multihash(e)
     }
 }
@@ -108,3 +108,5 @@ impl fmt::Display for Error {
         write!(f, "{:?}", self)
     }
 }
+
+impl std::error::Error for Error {}
