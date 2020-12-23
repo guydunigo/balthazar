@@ -1,3 +1,6 @@
+const fs = require("fs");
+const PrivateKeyProvider = require("truffle-privatekey-provider");
+const privateKey = fs.readFileSync("../chain/parity_private", { encoding:"utf-8" }).trim();
 /**
  * Use this file to configure your truffle project. It's seeded with some
  * common settings for different networks and features like migrations,
@@ -47,6 +50,13 @@ module.exports = {
      port: 8546,            // Standard Ethereum port (default: none)
      network_id: "*",       // Any network (default: none)
      websockets: true,
+    },
+    dev_private: {
+     provider: () => new PrivateKeyProvider(privateKey, "http://127.0.0.1:8545"),
+     host: "127.0.0.1",     // Localhost (default: none)
+     // port: 8546,            // Standard Ethereum port (default: none)
+     network_id: "*",       // Any network (default: none)
+     // websockets: true,
     },
     ganache: {
      host: "127.0.0.1",     // Localhost (default: none)

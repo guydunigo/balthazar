@@ -1,0 +1,15 @@
+{
+  "name": "contracts",
+  "version": "1.0.0",
+  "description": "smart contracts for balthazar",
+  "scripts": {
+    "compile": "truffle compile",
+    "deploy": "sh deploy.sh",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "GONI Guillaume <gdn3@live.fr>",
+  "devDependencies": {
+    "truffle": "^5.1.58",
+    "truffle-privatekey-provider": "^1.5.0"
+  }
+}

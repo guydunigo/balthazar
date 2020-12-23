@@ -93,7 +93,7 @@ where
     type OutboundOpenInfo = (WorkerMsgWrapper, Option<TUserData>);
 
     fn listen_protocol(&self) -> SubstreamProtocol<Self::InboundProtocol, ()> {
-        eprintln!("New listen protocol");
+        // eprintln!("New listen protocol");
         SubstreamProtocol::new(worker::new_worker_protocol(), ())
     }
 
@@ -102,7 +102,7 @@ where
         sink: <Self::InboundProtocol as InboundUpgrade<NegotiatedSubstream>>::Output,
         _info: Self::InboundOpenInfo,
     ) {
-        eprintln!("New Inbound Frame received after successful upgrade.");
+        // eprintln!("New Inbound Frame received after successful upgrade.");
         let next_connec_unique_id = self.next_connec_unique_id();
         self.substreams.push(SubstreamState::InWaitingMessage(
             next_connec_unique_id,
