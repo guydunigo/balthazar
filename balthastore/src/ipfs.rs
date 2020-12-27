@@ -3,6 +3,8 @@ extern crate either;
 extern crate http;
 extern crate ipfs_api;
 extern crate tokio;
+// TODO: remove this when ipfs-api has updated its tokio version > 0.3
+extern crate tokio_compat_02;
 
 use bytes::Bytes;
 use either::Either;
@@ -11,6 +13,7 @@ use http::uri::InvalidUri;
 use ipfs_api::{response, IpfsClient, TryFromUri};
 use multiaddr::Multiaddr;
 use std::{error::Error, fmt};
+use tokio_compat_02::{FutureExt as FutureExtCompat, IoCompat};
 
 use super::{
     try_internet_multiaddr_to_usual_format, FetchStorage, GenericReader,
@@ -70,12 +73,12 @@ impl IpfsStorage {
 
 impl FetchStorage for IpfsStorage {
     fn fetch_stream(&self, addr: &str) -> BoxStream<Result<Bytes, Box<dyn Error + Send>>> {
-        self.ipfs_client
+        IoCompat::new(self.ipfs_client
             .cat(addr)
             .map_err(|e| {
                 let error: Box<dyn Error + Send> = Box::new(IpfsApiResponseError::from(e));
                 error
-            })
+            }))
             .boxed()
     }
 
@@ -107,6 +110,7 @@ impl FetchStorage for IpfsStorage {
                 .await
                 .map(|d| d.len() as u64)
         }
+        .compat()
         .boxed()
     }
 }
@@ -127,6 +131,7 @@ impl StoreStorage for IpfsStorage {
                 }
             }
         }
+        .compat()
         .boxed()
     }
 }
@@ -136,7 +141,6 @@ mod tests {
     use super::super::tests::TEST_DIR;
     use super::*;
     use std::fs;
-    use tokio::runtime::Runtime;
 
     const TEST_FILE: &str = "/ipfs/QmPZ9gcCEpqKTo6aq61g2nXGUhM4iCL3ewB6LDXZCtioEB";
     // const TEST_FILE_2: &str = b"/ipfs/QmXfbZ7H946MeecTWZqcdWKnPwudcqcokTFctJ5LeqMDK3";
@@ -145,65 +149,52 @@ mod tests {
         format!("{}{}", TEST_DIR, TEST_FILE)
     }
 
-    #[test]
-    fn it_connects_to_given_address() {
+    #[tokio::test]
+    async fn it_connects_to_given_address() {
         let storage = IpfsStorage::new(&"/dns4/ipfs.io".parse().unwrap()).unwrap();
-
-        Runtime::new()
-            .unwrap()
-            .block_on(storage.fetch(TEST_FILE, 1_000_000))
-            .unwrap();
+        storage.fetch(TEST_FILE, 1_000_000).await.unwrap();
     }
 
-    #[test]
-    fn it_stores_a_correct_file_stream() {
+    #[tokio::test]
+    async fn it_stores_a_correct_file_stream() {
         let storage = IpfsStorage::default();
         let file = fs::File::open(get_test_file_name()).unwrap();
 
-        let res = Runtime::new()
-            .unwrap()
-            .block_on(storage.store_stream(GenericReader::new(file)))
+        let res = storage
+            .store_stream(GenericReader::new(file))
+            .await
             .unwrap();
 
         assert_eq!(TEST_FILE, &res[..]);
     }
 
-    #[test]
-    fn it_stores_a_correct_file() {
+    #[tokio::test]
+    async fn it_stores_a_correct_file() {
         let storage = IpfsStorage::default();
         let content = fs::read(get_test_file_name()).unwrap();
 
-        let file_name = Runtime::new()
-            .unwrap()
-            .block_on(storage.store(&content[..]))
-            .unwrap();
+        let file_name = storage.store(&content[..]).await.unwrap();
 
         assert_eq!(TEST_FILE, &file_name[..]);
     }
 
-    #[test]
-    fn it_reads_a_correct_file() {
+    #[tokio::test]
+    async fn it_reads_a_correct_file() {
         let storage = IpfsStorage::default();
         let content = fs::read(get_test_file_name()).unwrap();
 
-        let data = Runtime::new()
-            .unwrap()
-            .block_on(storage.fetch(TEST_FILE, 1_000_000))
-            .unwrap();
+        let data = storage.fetch(TEST_FILE, 1_000_000).await.unwrap();
 
         assert_eq!(content, data);
     }
 
-    #[test]
-    fn it_reads_a_correct_file_size() {
+    #[tokio::test]
+    async fn it_reads_a_correct_file_size() {
         let storage = IpfsStorage::default();
         let expected_size: u64 = std::fs::metadata(get_test_file_name()).unwrap().len();
         // let expected_size: u64 = Runtime::new().unwrap().block_on(storage.fetch(TEST_FILE_2, 1_000_000)).unwrap().len() as u64;
 
-        let size = Runtime::new()
-            .unwrap()
-            .block_on(storage.get_size(TEST_FILE))
-            .unwrap();
+        let size = storage.get_size(TEST_FILE).await.unwrap();
 
         assert_eq!(expected_size, size);
     }

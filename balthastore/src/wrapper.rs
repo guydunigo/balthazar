@@ -66,9 +66,9 @@ impl StoragesWrapper {
     /// # use balthastore::{StoragesWrapper, StorageType};
     ///
     /// let wrapper = StoragesWrapper::default();
-    /// let addr = b"/ipfs/QmPZ9gcCEpqKTo6aq61g2nXGUhM4iCL3ewB6LDXZCtioEB";
+    /// let addr = "/ipfs/QmPZ9gcCEpqKTo6aq61g2nXGUhM4iCL3ewB6LDXZCtioEB";
     ///
-    /// let storage_type = wrapper.get_storage_type_based_on_address(&addr[..]);
+    /// let storage_type = wrapper.get_storage_type_based_on_address(addr);
     ///
     /// assert_eq!(storage_type, StorageType::Ipfs);
     ///
