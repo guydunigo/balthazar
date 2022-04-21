@@ -11,7 +11,7 @@ bytes = "1.1.0"
 prost = { version = "0.10.1", default-features = false, features = ["std"] } # Don't need prost-derive
 # futures_codec = "0.4.1" # Not updated anymore, uses older bytes
 asynchronous-codec = "0.6.0" # Used by known crates like libp2p
-futures = "0.3.21" # TODO: features
+futures = { version = "0.3.21", default-features = false, features = ["std"] }
 
 [dependencies.libp2p]
 version = "0.44.0"
