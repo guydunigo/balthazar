@@ -1,6 +1,6 @@
 //! Some generic codecs to use with **Protobuf** messages.
+use asynchronous_codec::{Decoder, Encoder /*, LengthCodec*/};
 use bytes::BytesMut;
-use futures_codec::{Decoder, Encoder /*, LengthCodec*/};
 use prost::Message;
 use std::io;
 

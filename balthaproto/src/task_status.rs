@@ -49,9 +49,9 @@ impl From<ProtoTaskStatus> for TaskStatus {
         match src {
             ProtoTaskStatus::Pending(_) => TaskStatus::Pending,
             ProtoTaskStatus::StartTime(timestamp) => TaskStatus::Started(timestamp),
-            ProtoTaskStatus::Error(err) => TaskStatus::Error(
-                TaskErrorKind::from_i32(err).unwrap_or_else(|| TaskErrorKind::Unknown),
-            ),
+            ProtoTaskStatus::Error(err) => {
+                TaskStatus::Error(TaskErrorKind::from_i32(err).unwrap_or(TaskErrorKind::Unknown))
+            }
             ProtoTaskStatus::Result(res) => TaskStatus::Completed(res),
             ProtoTaskStatus::Unknown(_) => TaskStatus::Unknown,
         }

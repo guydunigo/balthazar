@@ -2,9 +2,9 @@
 //! as well as basic structures and functions to handle them.
 //!
 //! When adding new messages, you can add a from implementation as seen under here.
+extern crate asynchronous_codec;
 extern crate bytes;
 extern crate futures;
-extern crate futures_codec;
 extern crate libp2p;
 extern crate prost;
 

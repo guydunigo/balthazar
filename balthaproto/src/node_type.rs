@@ -24,8 +24,8 @@ impl<M, W> NodeTypeContainer<M, W> {
         F: FnOnce(&M) -> MOut,
     {
         match self {
-            NodeTypeContainer::Manager(m) => NodeTypeContainer::Manager(f(&m)),
-            NodeTypeContainer::Worker(w) => NodeTypeContainer::Worker(&w),
+            NodeTypeContainer::Manager(m) => NodeTypeContainer::Manager(f(m)),
+            NodeTypeContainer::Worker(w) => NodeTypeContainer::Worker(w),
         }
     }
 
@@ -43,8 +43,8 @@ impl<M, W> NodeTypeContainer<M, W> {
         F: FnOnce(&W) -> WOut,
     {
         match self {
-            NodeTypeContainer::Manager(m) => NodeTypeContainer::Manager(&m),
-            NodeTypeContainer::Worker(w) => NodeTypeContainer::Worker(f(&w)),
+            NodeTypeContainer::Manager(m) => NodeTypeContainer::Manager(m),
+            NodeTypeContainer::Worker(w) => NodeTypeContainer::Worker(f(w)),
         }
     }
 

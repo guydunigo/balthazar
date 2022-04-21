@@ -1,9 +1,9 @@
 //! Generic **libp2p protocol** ([`ProtoBufProtocol`]) and
 //! codecs ([`ProtoBufCodec`] and [`ProtoBufLengthCodec`]) for protobuf.
+use asynchronous_codec::Framed;
 use futures::future;
 use futures::io::{AsyncRead, AsyncWrite};
 use futures::{sink::Sink, Stream};
-use futures_codec::Framed;
 use libp2p::core::{InboundUpgrade, OutboundUpgrade, UpgradeInfo};
 use prost::Message;
 use std::{io, iter};
