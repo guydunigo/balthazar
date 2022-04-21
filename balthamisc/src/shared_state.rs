@@ -42,8 +42,7 @@ impl SharedState {
     pub fn get_job_from_task_id(&self, task_id: &TaskId) -> Option<&Job> {
         self.tasks
             .get(task_id)
-            .map(|t| self.jobs.get(t.job_id()))
-            .flatten()
+            .and_then(|t| self.jobs.get(t.job_id()))
     }
 }
 
@@ -197,11 +196,7 @@ impl TaskCompleteness {
     }
 
     pub fn is_incomplete(&self) -> bool {
-        if let TaskCompleteness::Incomplete { .. } = self {
-            true
-        } else {
-            false
-        }
+        matches!(self, TaskCompleteness::Incomplete { .. })
     }
 
     pub fn get_substates(&self) -> Option<&[SubTasksState]> {
@@ -224,8 +219,7 @@ impl TaskCompleteness {
             substates
                 .iter()
                 .find(|s| s.as_ref().filter(|a| *a.worker() == *worker).is_some())
-                .map(|a| a.as_ref())
-                .flatten()
+                .and_then(|a| a.as_ref())
         } else {
             None
         }
@@ -235,8 +229,7 @@ impl TaskCompleteness {
             substates
                 .iter_mut()
                 .find(|s| s.as_ref().filter(|a| *a.worker() == *worker).is_some())
-                .map(|a| a.as_mut())
-                .flatten()
+                .and_then(|a| a.as_mut())
         } else {
             None
         }
@@ -255,8 +248,7 @@ impl TaskCompleteness {
             substates
                 .iter_mut()
                 .find(|s| s.as_ref().filter(|a| *a.worker() == *worker).is_some())
-                .map(|a| a.take())
-                .flatten()
+                .and_then(|a| a.take())
         } else {
             None
         }

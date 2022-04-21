@@ -135,9 +135,9 @@ impl From<[u8; DefaultHash::SIZE]> for HashId {
     }
 }
 
-impl Into<Multihash> for HashId {
-    fn into(self) -> Multihash {
-        self.inner
+impl From<HashId> for Multihash {
+    fn from(hash_id: HashId) -> Self {
+        hash_id.inner
     }
 }
 
@@ -449,11 +449,7 @@ impl Job {
 
     /// Calculate job id of current job if nonce is set.
     pub fn job_id(&self) -> Option<JobId> {
-        if let Some(nonce) = self.nonce {
-            Some(JobId::job_id(&self.sender, nonce))
-        } else {
-            None
-        }
+        self.nonce.map(|nonce| JobId::job_id(&self.sender, nonce))
     }
 
     /// Calculates the maximum amount of money that can be used by the whole job.

@@ -1,7 +1,7 @@
 extern crate balthaproto as proto;
+pub extern crate multiaddr;
 extern crate multibase;
 pub extern crate multihash;
-pub extern crate parity_multiaddr as multiaddr;
 extern crate tokio;
 
 use futures::future::poll_fn;
