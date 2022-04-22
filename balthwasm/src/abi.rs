@@ -28,7 +28,7 @@ fn result_to_wasm(res: LocalResult<WasmResult>) -> WasmResult {
 fn get_argument_len() -> u32 {
     extern "C" {
         fn host_get_argument_len() -> u32;
-    };
+    }
 
     unsafe { host_get_argument_len() }
 }
@@ -36,13 +36,13 @@ fn get_argument_len() -> u32 {
 fn get_argument() -> LocalResult<Vec<u8>> {
     extern "C" {
         fn host_get_argument(ptr: *const u8, len: u32) -> WasmResult;
-    };
+    }
 
     let mut buffer = Vec::with_capacity(get_argument_len() as usize);
     let written_res = unsafe { host_get_argument(buffer.as_ptr(), buffer.capacity() as u32) };
 
     wasm_to_result(written_res).map(|o| {
-        unsafe { buffer.set_len(o as usize) };
+        unsafe { buffer.set_len(o as usize) }
         buffer
     })
 }
@@ -50,7 +50,7 @@ fn get_argument() -> LocalResult<Vec<u8>> {
 pub fn get_results_len() -> LocalResult<i64> {
     extern "C" {
         fn host_get_results_len() -> WasmResult;
-    };
+    }
 
     wasm_to_result(unsafe { host_get_results_len() })
 }
@@ -58,7 +58,7 @@ pub fn get_results_len() -> LocalResult<i64> {
 pub fn get_result_len(index: u32) -> LocalResult<i64> {
     extern "C" {
         fn host_get_result_len(index: u32) -> WasmResult;
-    };
+    }
 
     wasm_to_result(unsafe { host_get_result_len(index) })
 }
@@ -66,13 +66,13 @@ pub fn get_result_len(index: u32) -> LocalResult<i64> {
 pub fn get_result(index: u32) -> LocalResult<Vec<u8>> {
     extern "C" {
         fn host_get_result(index: u32, ptr: *const u8, len: u32) -> WasmResult;
-    };
+    }
 
     let mut buffer = Vec::with_capacity(get_result_len(index)? as usize);
     let written_res = unsafe { host_get_result(index, buffer.as_ptr(), buffer.capacity() as u32) };
 
     wasm_to_result(written_res).map(|o| {
-        unsafe { buffer.set_len(o as usize) };
+        unsafe { buffer.set_len(o as usize) }
         buffer
     })
 }
@@ -93,7 +93,7 @@ pub fn get_results() -> LocalResult<Vec<Vec<u8>>> {
 fn send_result(res: &[u8]) -> LocalResult<()> {
     extern "C" {
         fn host_send_result(ptr: *const u8, len: usize) -> WasmResult;
-    };
+    }
 
     wasm_to_result(unsafe { host_send_result(res.as_ptr(), res.len()) }).map(|_| ())
 }

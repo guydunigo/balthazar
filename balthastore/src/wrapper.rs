@@ -24,7 +24,7 @@ pub struct StoragesWrapper {
 impl StoragesWrapper {
     pub fn new_with_config(config: &StorageConfig) -> Result<Self, StoragesWrapperCreationError> {
         let ipfs = if let Some(addr) = config.ipfs_api() {
-            ipfs::IpfsStorage::new(&addr)?
+            ipfs::IpfsStorage::new(addr)?
         } else {
             Default::default()
         };
@@ -118,7 +118,7 @@ mod tests {
 
     fn check_correct_type_based_on_address(addr: &str, expected_type: StorageType) {
         let wrapper = StoragesWrapper::default();
-        let storage_type = wrapper.get_storage_type_based_on_address(&addr[..]);
+        let storage_type = wrapper.get_storage_type_based_on_address(addr);
         assert_eq!(storage_type, expected_type);
     }
 

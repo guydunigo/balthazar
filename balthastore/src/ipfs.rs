@@ -1,41 +1,22 @@
 //! Provides [`IpfsStorage`] to use the [InterPlanetary File-System (IPFS)](https://ipfs.io)
-extern crate either;
-extern crate http;
-extern crate ipfs_api;
-extern crate tokio;
-// TODO: remove this when ipfs-api has updated its tokio version > 0.3
-extern crate tokio_compat_02;
+extern crate ipfs_api_backend_hyper as ipfs_api;
 
 use bytes::Bytes;
-use either::Either;
 use futures::{future::BoxFuture, stream::BoxStream, FutureExt, StreamExt, TryStreamExt};
-use http::uri::InvalidUri;
-use ipfs_api::{response, IpfsClient, TryFromUri};
+use ipfs_api::{IpfsClient, TryFromUri, IpfsApi};
 use multiaddr::Multiaddr;
-use std::{error::Error, fmt};
-use tokio_compat_02::{FutureExt as FutureExtCompat, IoCompat};
+use std::error::Error;
+
+/// Error that can happen when the storage is created.
+/// For instance, there will be an error if the IPFS server address provided is incorrect.
+///
+/// For now, this is just an alias for future-proofing in case I want to do more things
+/// during creation like testing connectivity.
+pub type IpfsStorageCreationError=multiaddr::Error;
 
 use super::{
-    try_internet_multiaddr_to_usual_format, FetchStorage, GenericReader,
-    MultiaddrToStringConversionError, StoreStorage,
+    FetchStorage, GenericReader, StoreStorage,
 };
-
-/// Wrapper arround [`ipfs_api::response::Error`] to implement trait [`std::error::Error`].
-#[derive(Debug)]
-pub struct IpfsApiResponseError {
-    inner: response::Error,
-}
-impl fmt::Display for IpfsApiResponseError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.inner)
-    }
-}
-impl Error for IpfsApiResponseError {}
-impl From<response::Error> for IpfsApiResponseError {
-    fn from(src: response::Error) -> Self {
-        IpfsApiResponseError { inner: src }
-    }
-}
 
 /// Storage to use the [InterPlanetary File-System (IPFS)](https://ipfs.io)
 ///
@@ -47,16 +28,11 @@ pub struct IpfsStorage {
     ipfs_client: IpfsClient,
 }
 
-pub type IpfsStorageCreationError = Either<InvalidUri, MultiaddrToStringConversionError>;
-
 impl IpfsStorage {
     /// Creates a new client connecting to the listening multiaddr.
     pub fn new(listen_addr: &Multiaddr) -> Result<Self, IpfsStorageCreationError> {
-        let usual_addr =
-            try_internet_multiaddr_to_usual_format(listen_addr).map_err(Either::Right)?;
-        let http_addr = format!("http://{}", usual_addr);
         Ok(IpfsStorage {
-            ipfs_client: TryFromUri::from_str(&http_addr[..]).map_err(Either::Left)?,
+            ipfs_client: IpfsClient::from_multiaddr(listen_addr.clone())?,
         })
     }
 
@@ -73,12 +49,12 @@ impl IpfsStorage {
 
 impl FetchStorage for IpfsStorage {
     fn fetch_stream(&self, addr: &str) -> BoxStream<Result<Bytes, Box<dyn Error + Send>>> {
-        IoCompat::new(self.ipfs_client
+        self.ipfs_client
             .cat(addr)
             .map_err(|e| {
-                let error: Box<dyn Error + Send> = Box::new(IpfsApiResponseError::from(e));
+                let error: Box<dyn Error + Send> = Box::new(e);
                 error
-            }))
+            })
             .boxed()
     }
 
@@ -110,7 +86,6 @@ impl FetchStorage for IpfsStorage {
                 .await
                 .map(|d| d.len() as u64)
         }
-        .compat()
         .boxed()
     }
 }
@@ -126,18 +101,19 @@ impl StoreStorage for IpfsStorage {
             match res {
                 Ok(res) => Ok(format!("/ipfs/{}", res.name)),
                 Err(error) => {
-                    let error: Box<dyn Error + Send> = Box::new(IpfsApiResponseError::from(error));
+                    let error: Box<dyn Error + Send> = Box::new(error);
                     Err(error)
                 }
             }
         }
-        .compat()
         .boxed()
     }
 }
 
 #[cfg(test)]
 mod tests {
+    extern crate tokio;
+
     use super::super::tests::TEST_DIR;
     use super::*;
     use std::fs;
@@ -151,7 +127,7 @@ mod tests {
 
     #[tokio::test]
     async fn it_connects_to_given_address() {
-        let storage = IpfsStorage::new(&"/dns4/ipfs.io".parse().unwrap()).unwrap();
+        let storage = IpfsStorage::new(&"/dns4/ipfs.io/tcp/80".parse().unwrap()).unwrap();
         storage.fetch(TEST_FILE, 1_000_000).await.unwrap();
     }
 

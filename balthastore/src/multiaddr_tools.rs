@@ -32,6 +32,7 @@ use std::{error::Error, fmt};
 /// let result_1 = try_internet_multiaddr_to_usual_format(&multiaddr_1);
 /// assert_eq!(result_1, Ok("rust-lang.org".to_string()));
 /// ```
+/// TODO: useful anymore ?
 pub fn try_internet_multiaddr_to_usual_format(
     multiaddr: &Multiaddr,
 ) -> Result<String, MultiaddrToStringConversionError> {

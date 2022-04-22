@@ -33,9 +33,10 @@ pub fn my_test(argument: Vec<u8>) -> LocalResult<i64> {
 
 fn hash_counter(counter: usize) -> String {
     let string = format!("{}", counter);
-    let hash_bytes = Keccak256::digest(string.as_bytes());
+    let mut hash_bytes = Keccak256::default();
+    hash_bytes.update(string.as_bytes());
     hash_bytes
-        .as_ref()
+        .finalize()
         .iter()
         .map(|b| format!("{:02x}", b))
         .collect()
