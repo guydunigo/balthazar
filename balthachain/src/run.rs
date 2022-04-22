@@ -1,5 +1,5 @@
 use super::{config::ChainConfig, Chain, Error, JobsEvent, JobsEventKind};
-use futures::{executor::block_on, StreamExt};
+use futures::StreamExt;
 use misc::{
     job::{Job, JobId, ProgramKind, TaskId},
     multihash::Multihash,
@@ -98,17 +98,13 @@ pub enum RunMode {
     },
 }
 
-pub fn run(mode: &RunMode, config: &ChainConfig) -> Result<(), Error> {
-    block_on(run_async(mode, config))
-}
-
-async fn run_async(mode: &RunMode, config: &ChainConfig) -> Result<(), Error> {
+pub async fn run(mode: &RunMode, config: &ChainConfig) -> Result<(), Error> {
     let chain = Chain::new(config).await;
 
     match mode {
         RunMode::Block => {
             let block_id: BlockId = BlockNumber::Latest.into();
-            let val = chain.block(block_id.clone()).await?;
+            let val = chain.block(block_id).await?;
 
             if let Some(val) = val {
                 println!("Latest block information for `{:?}`:\n{:#?}", block_id, val);
@@ -201,7 +197,7 @@ async fn run_async(mode: &RunMode, config: &ChainConfig) -> Result<(), Error> {
             let mut job = Job::new(
                 *program_kind,
                 addresses.clone(),
-                program_hash.clone(),
+                *program_hash,
                 arguments.clone(),
                 *chain.local_address()?,
             );

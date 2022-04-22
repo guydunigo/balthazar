@@ -5,7 +5,10 @@ use std::{
     convert::{TryFrom, TryInto},
     fmt,
 };
-use web3::types::{self, Address, Log};
+use web3::{
+    ethabi,
+    types::{self, Address, Log},
+};
 
 /// Parsed events received from the Jobs smart-contract.
 #[derive(Debug, Clone)]

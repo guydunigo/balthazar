@@ -1,6 +1,5 @@
 extern crate balthamisc as misc;
 extern crate balthaproto as proto;
-extern crate ethabi;
 extern crate futures;
 extern crate web3;
 
@@ -13,7 +12,7 @@ pub use config::ChainConfig;
 mod run;
 pub use run::{run, RunMode};
 
-use ethabi::Event;
+use web3::ethabi;
 use futures::{future, Stream, StreamExt};
 use misc::{
     job::{Address, Job, JobId, OtherData, TaskId},
@@ -216,7 +215,7 @@ impl<'a> Chain<'a> {
     /// Subscribe to given Events objects.
     async fn jobs_subscribe_to_events(
         &self,
-        events: &[Event],
+        events: &[ethabi::Event],
     ) -> Result<impl Stream<Item = Result<JobsEvent, Error>>, Error> {
         let jobs = self.jobs()?;
         let filter = FilterBuilder::default().address(vec![jobs.address()]);
@@ -269,7 +268,7 @@ impl<'a> Chain<'a> {
     }
 
     /// Get event from the smart-contract's ABI corresponding to given [`JobsEventKind`].
-    fn jobs_event(&self, event: JobsEventKind) -> Result<Event, Error> {
+    fn jobs_event(&self, event: JobsEventKind) -> Result<ethabi::Event, Error> {
         Ok(self
             .jobs_ethabi()?
             .event(&format!("{}", event)[..])?

@@ -1,6 +1,6 @@
 [package]
 name = "balthachain"
-version = "0.3.2"
+version = "0.3.3"
 authors = ["GONI Guillaume <gdn3@live.fr>"]
 edition = "2018"
 
@@ -9,6 +9,11 @@ edition = "2018"
 [dependencies]
 balthamisc = { path = "../balthamisc" }
 balthaproto = { path = "../balthaproto" }
-web3 = { version = "0.14.0", default-features = false, features = ["ws-tokio"] }
-futures = "0.3.8"
-ethabi = "12.0.0"
+web3 = { version = "0.18.0", default-features = false, features = ["ws-tokio"] }
+futures = { version = "0.3.21", default-features = false, features = ["std"] }
+# ethabi is already exported by web3, so we avoid version conflict by disabling it here.
+# ethabi = { version = "17.0.0", default-features = false, features = ["std"] }
+
+[dev-dependencies]
+tokio = { version = "1.17.0", features = ["macros", "rt"] }
+futures = { version = "0.3.21", default-features = false, features = ["std", "executor"] }

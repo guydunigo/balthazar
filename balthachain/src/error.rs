@@ -6,6 +6,7 @@ use proto::{manager::TaskDefiniteErrorKind, DecodeError, EncodeError};
 use std::fmt;
 use web3::{
     contract::Error as ContractError,
+    ethabi,
     types::{Address, Log, U256},
 };
 

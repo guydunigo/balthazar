@@ -13,7 +13,9 @@ futures = { version = "0.3.21", features = ["std"] }
 multiaddr = "0.14.0"
 multibase = "0.9.1"
 multihash = { version = "0.16.2", default-features = false, features = ["std", "sha3"] }
-ethereum-types = { version = "0.13.1", default-features = false, features = ["std"] }
+# ethereum-types must use the same version as the one used in web3 to avoid conflicts
+# ethereum-types = { version = "0.13.1", default-features = false, features = ["std"] }
+ethereum-types = { version = "0.12.1", default-features = false, features = ["std"] }
 num_cpus = "1.13.1"
 
 [dependencies.libp2p]
